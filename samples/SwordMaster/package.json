@@ -1,0 +1,43 @@
+{
+  "name": "@swordmaster/config-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "config",
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "format": "oxfmt --write README.md package.json src tests tsconfig.json tsconfig.test.json vitest.config.ts vitest.acceptance.config.ts",
+    "format:check": "oxfmt --check README.md package.json src tests tsconfig.json tsconfig.test.json vitest.config.ts vitest.acceptance.config.ts",
+    "lint": "oxlint --deny-warnings src tests vitest.config.ts vitest.acceptance.config.ts",
+    "test": "vitest run",
+    "test:real-api": "vitest run --config vitest.acceptance.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@novagame/cocos-creator-game-config": "link:../../clients/cocos/adapters/cocos-creator",
+    "@novagame/game-config-client": "link:../../clients/cocos/packages/game-config-client"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.3",
+    "oxfmt": "0.51.0",
+    "oxlint": "1.66.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.7"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.0.0",
+    "pnpm": "10.33.4"
+  },
+  "packageManager": "pnpm@10.33.4"
+}

@@ -1,0 +1,93 @@
+# NovaGame
+
+NovaGame is a modular game-development framework built on top of NovaCore. It is not a game. It provides reusable server, client, configuration, and live-operations infrastructure for specific games.
+
+The first validation consumer is SwordMaster:
+
+```text
+NovaCore
+  -> NovaGame
+    -> SwordMaster
+```
+
+NovaGame must never depend on SwordMaster or contain SwordMaster-specific concepts.
+
+## Targets
+
+- Server: .NET 8 and NovaCore
+- Database: MySQL 8.4
+- Client: Cocos Creator and TypeScript
+- Admin: Vben Admin 5 `web-ele`, Vue 3, and Element Plus
+
+## Current Status
+
+M0.5 is complete. Repository bootstrap, the pinned NovaCore 0.2.0 server baseline, the MySQL 8.4 runtime, administrator access, versioned GameConfig, the real-API Vben Admin 5 `web-ele` operations workspace, the reusable Cocos TypeScript configuration client, and the minimal SwordMaster configuration-loading smoke consumer have passed repository-wide acceptance. No later milestone is active, and M1 is not authorized. See the completed [M0.5 Framework Bootstrap](docs/goals/m0.5.md) record.
+
+## Prerequisites
+
+- .NET 8 SDK selected by `global.json`;
+- Docker Desktop with Docker Compose;
+- Node.js 24.14.0 and pnpm 10.33.4, resolved by the repository scripts;
+- NovaCore source from `NOVACORE_ROOT`, defaulting to `D:\Programs\nova-core`;
+- the fixed Vben Admin 5 template from `VBEN_TEMPLATE_ROOT`, or the ignored local template cache prepared for this workspace;
+- Microsoft Edge, or a Playwright browser channel selected through `NOVAGAME_E2E_BROWSER_CHANNEL`.
+
+Bootstrap reads NovaCore through a Git snapshot and does not modify its source worktree. Existing ignored credentials in `server/.env.local` and `deploy/.env` are preserved.
+
+## Bootstrap And Verification
+
+Run the complete repository bootstrap and cumulative acceptance suite from the repository root:
+
+```powershell
+pwsh -NoProfile -File scripts/bootstrap.ps1
+pwsh -NoProfile -File scripts/verify.ps1
+```
+
+Both commands default to the cumulative `All` scope. Narrow iteration scopes remain available, including `Repository`, `Server`, `Database`, `Admin`, `Client`, and `SwordMaster` where supported.
+
+## Database And Migrations
+
+Start MySQL 8.4 without the application:
+
+```powershell
+pwsh -NoProfile -File scripts/run-dev.ps1 -Scope Database
+```
+
+Start MySQL, apply all EF Core migrations, run seed contributors, and return:
+
+```powershell
+pwsh -NoProfile -File scripts/run-dev.ps1 -Scope Migrations
+```
+
+The migration path uses `NovaGame.DbMigrator`; the API never mutates the schema during startup.
+
+## Local Development
+
+Start MySQL, apply migrations, run the API, and launch the Vben `web-ele` admin:
+
+```powershell
+pwsh -NoProfile -File scripts/run-dev.ps1 -Scope All
+```
+
+The default endpoints are `http://127.0.0.1:5000` for the API and `https://localhost:5777` for the admin. The ignored `server/.env.local` file contains the local administrator bootstrap values. Use `Ctrl+C` to stop the foreground development processes.
+
+Focused startup paths are also available:
+
+```powershell
+pwsh -NoProfile -File scripts/run-dev.ps1 -Scope Server
+pwsh -NoProfile -File scripts/run-dev.ps1 -Scope Admin
+```
+
+The verified SwordMaster smoke consumer is documented in [samples/SwordMaster](samples/SwordMaster/README.md).
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Architecture](docs/architecture.md)
+- [Roadmap](docs/roadmap.md)
+- [Development workflow](docs/workflows/development.md)
+- [Extraction workflow](docs/workflows/extraction.md)
+- [Configuration release workflow](docs/workflows/configuration-release.md)
+- [M0.5 goal record](docs/goals/m0.5.md)
+
+Codex and other coding agents must read [AGENTS.md](AGENTS.md) before changing this repository and the nearest scoped `AGENTS.md` before changing a subtree.

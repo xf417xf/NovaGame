@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <PackageReference Include="NovaCore.AspNetCore" Version="0.2.0" />
+    <PackageReference Include="NovaCore.Authentication.JwtBearer" Version="0.2.0" />
+    <PackageReference Include="NovaCore.BuildingBlocks" Version="0.2.0" />
+    <PackageReference Include="NovaCore.HttpClient.Resilience" Version="0.2.0" />
+    <PackageReference Include="NovaCore.ObjectMapping.Mapster" Version="0.2.0" />
+    <PackageReference Include="NovaCore.Observability.OpenTelemetry" Version="0.2.0" />
+    <PackageReference Include="NovaCore.Validation.FluentValidation" Version="0.2.0" />
+    <PackageReference Include="NovaCore.Shared" Version="0.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NovaGame.Application\NovaGame.Application.csproj" />
+    <ProjectReference Include="..\NovaGame.Deployment\NovaGame.Deployment.csproj" />
+    <ProjectReference Include="..\NovaGame.Host.EntityFrameworkCore\NovaGame.Host.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+</Project>

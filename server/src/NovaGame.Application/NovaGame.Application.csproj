@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="8.0.13" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+    <PackageReference Include="NovaCore.BuildingBlocks" Version="0.2.0" />
+    <ProjectReference Include="..\NovaGame.Application.Contracts\NovaGame.Application.Contracts.csproj" />
+    <ProjectReference Include="..\NovaGame.Domain\NovaGame.Domain.csproj" />
+  </ItemGroup>
+</Project>

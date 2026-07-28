@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@vben/tsconfig/node.json",
+  "compilerOptions": {
+    "composite": false,
+    "types": ["node", "@playwright/test"],
+    "noEmit": true
+  },
+  "include": ["playwright.config.ts", "apps/web-ele/e2e/**/*.ts"]
+}

@@ -1,0 +1,34 @@
+name: novagame-dev
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${NOVAGAME_MYSQL_DATABASE:-novagame}
+      MYSQL_USER: ${NOVAGAME_MYSQL_USER:-novagame}
+      MYSQL_PASSWORD: ${NOVAGAME_MYSQL_PASSWORD:?Set NOVAGAME_MYSQL_PASSWORD in deploy/.env}
+      MYSQL_ROOT_PASSWORD: ${NOVAGAME_MYSQL_ROOT_PASSWORD:?Set NOVAGAME_MYSQL_ROOT_PASSWORD in deploy/.env}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    ports:
+      - "${NOVAGAME_MYSQL_BIND_ADDRESS:-127.0.0.1}:${NOVAGAME_MYSQL_PORT:-3306}:3306"
+    volumes:
+      - novagame-mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD="$${MYSQL_PASSWORD}" mysql --protocol=TCP --host=127.0.0.1
+          --user="$${MYSQL_USER}" --database="$${MYSQL_DATABASE}"
+          --execute="SELECT 1" >/dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+    stop_grace_period: 30s
+
+volumes:
+  novagame-mysql-data:

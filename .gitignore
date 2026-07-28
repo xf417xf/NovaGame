@@ -1,0 +1,56 @@
+# Codex and local agent state
+.agents/
+
+# Repository-local tool state and generated dependencies
+.local/
+.novacore/
+artifacts/
+
+# Local secrets and environment overrides
+.env
+**/.env
+**/.env.local
+**/.env.*.local
+**/appsettings.Local.json
+**/appsettings.*.Local.json
+
+# .NET
+**/bin/
+**/obj/
+**/TestResults/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+
+# Vben workspace CLI entry points are source files, not .NET build output
+!admin/scripts/vsh/bin/
+!admin/scripts/vsh/bin/vsh.mjs
+!admin/scripts/turbo-run/bin/
+!admin/scripts/turbo-run/bin/turbo-run.mjs
+
+# Node and frontend
+**/node_modules/
+**/.pnpm-store/
+**/dist/
+**/coverage/
+**/.vite/
+*.tsbuildinfo
+
+# Cocos Creator generated state
+**/library/
+**/temp/
+**/local/
+**/build/
+
+# Logs and local runtime data
+*.log
+logs/
+*.pid
+
+# IDE and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

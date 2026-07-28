@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "commit": "222f5c59188d06098b677a7ff004c546871391ea",
+  "ref": "origin/feature/next-development",
+  "requiredPackages": [
+    "NovaCore.Shared",
+    "NovaCore.BuildingBlocks",
+    "NovaCore.AspNetCore",
+    "NovaCore.Authentication.JwtBearer",
+    "NovaCore.EntityFrameworkCore",
+    "NovaCore.HttpClient.Resilience",
+    "NovaCore.Localization",
+    "NovaCore.ObjectMapping.Mapster",
+    "NovaCore.Observability.OpenTelemetry",
+    "NovaCore.Validation.FluentValidation"
+  ]
+}

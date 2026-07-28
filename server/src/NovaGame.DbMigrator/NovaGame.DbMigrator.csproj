@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.13">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="NovaCore.BuildingBlocks" Version="0.2.0" />
+    <ProjectReference Include="..\NovaGame.Application\NovaGame.Application.csproj" />
+    <ProjectReference Include="..\NovaGame.Deployment\NovaGame.Deployment.csproj" />
+    <ProjectReference Include="..\NovaGame.Host.EntityFrameworkCore\NovaGame.Host.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\NovaGame.Api\appsettings.json" Link="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\NovaGame.Api\appsettings.Production.json" Link="appsettings.Production.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

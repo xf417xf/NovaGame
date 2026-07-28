@@ -1,0 +1,25 @@
+{
+  "name": "@novagame/cocos-creator-game-config",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@novagame/game-config-client": "workspace:*"
+  }
+}

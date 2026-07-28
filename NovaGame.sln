@@ -1,0 +1,89 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "server", "server", "{6230345F-63AE-4181-A60D-A715A3B5E68D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{028C4BAE-69EA-478B-A610-E398334E2953}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.Domain.Shared", "server\src\NovaGame.Domain.Shared\NovaGame.Domain.Shared.csproj", "{5B0A02CA-2BA2-4927-9AA6-DEBDFA13CD53}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.Domain", "server\src\NovaGame.Domain\NovaGame.Domain.csproj", "{0ACDED49-9FCC-4C36-B41D-BF95E12ABC13}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.Application.Contracts", "server\src\NovaGame.Application.Contracts\NovaGame.Application.Contracts.csproj", "{B988CA08-DF77-4B3D-AA0D-7CDAA99EB256}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.Application", "server\src\NovaGame.Application\NovaGame.Application.csproj", "{A7AC8582-2EB4-4975-B920-32DE6FB5597B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.Host.EntityFrameworkCore", "server\src\NovaGame.Host.EntityFrameworkCore\NovaGame.Host.EntityFrameworkCore.csproj", "{02C83F5E-ADD2-4232-924A-E76B1B582195}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.Deployment", "server\src\NovaGame.Deployment\NovaGame.Deployment.csproj", "{E1A21D17-4AB3-4F26-8F57-B8DF2D2104E1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.DbMigrator", "server\src\NovaGame.DbMigrator\NovaGame.DbMigrator.csproj", "{F55D87A6-94F2-46C3-A615-50E0D2AE490A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.Api", "server\src\NovaGame.Api\NovaGame.Api.csproj", "{4B4F45C2-9DBD-405D-8862-FA4DD8CCA91E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{E1AC21A8-F7F2-4F70-BEDE-0FD71DC589ED}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaGame.EntityFrameworkCore.Tests", "server\tests\NovaGame.EntityFrameworkCore.Tests\NovaGame.EntityFrameworkCore.Tests.csproj", "{FF658383-9FED-47D1-80C5-FF61547A0067}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5B0A02CA-2BA2-4927-9AA6-DEBDFA13CD53}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B0A02CA-2BA2-4927-9AA6-DEBDFA13CD53}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B0A02CA-2BA2-4927-9AA6-DEBDFA13CD53}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B0A02CA-2BA2-4927-9AA6-DEBDFA13CD53}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0ACDED49-9FCC-4C36-B41D-BF95E12ABC13}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0ACDED49-9FCC-4C36-B41D-BF95E12ABC13}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0ACDED49-9FCC-4C36-B41D-BF95E12ABC13}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0ACDED49-9FCC-4C36-B41D-BF95E12ABC13}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B988CA08-DF77-4B3D-AA0D-7CDAA99EB256}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B988CA08-DF77-4B3D-AA0D-7CDAA99EB256}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B988CA08-DF77-4B3D-AA0D-7CDAA99EB256}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B988CA08-DF77-4B3D-AA0D-7CDAA99EB256}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7AC8582-2EB4-4975-B920-32DE6FB5597B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7AC8582-2EB4-4975-B920-32DE6FB5597B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7AC8582-2EB4-4975-B920-32DE6FB5597B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7AC8582-2EB4-4975-B920-32DE6FB5597B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{02C83F5E-ADD2-4232-924A-E76B1B582195}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{02C83F5E-ADD2-4232-924A-E76B1B582195}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{02C83F5E-ADD2-4232-924A-E76B1B582195}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{02C83F5E-ADD2-4232-924A-E76B1B582195}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E1A21D17-4AB3-4F26-8F57-B8DF2D2104E1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E1A21D17-4AB3-4F26-8F57-B8DF2D2104E1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E1A21D17-4AB3-4F26-8F57-B8DF2D2104E1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E1A21D17-4AB3-4F26-8F57-B8DF2D2104E1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F55D87A6-94F2-46C3-A615-50E0D2AE490A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F55D87A6-94F2-46C3-A615-50E0D2AE490A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F55D87A6-94F2-46C3-A615-50E0D2AE490A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F55D87A6-94F2-46C3-A615-50E0D2AE490A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4B4F45C2-9DBD-405D-8862-FA4DD8CCA91E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4B4F45C2-9DBD-405D-8862-FA4DD8CCA91E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4B4F45C2-9DBD-405D-8862-FA4DD8CCA91E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4B4F45C2-9DBD-405D-8862-FA4DD8CCA91E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FF658383-9FED-47D1-80C5-FF61547A0067}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FF658383-9FED-47D1-80C5-FF61547A0067}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FF658383-9FED-47D1-80C5-FF61547A0067}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FF658383-9FED-47D1-80C5-FF61547A0067}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{028C4BAE-69EA-478B-A610-E398334E2953} = {6230345F-63AE-4181-A60D-A715A3B5E68D}
+		{5B0A02CA-2BA2-4927-9AA6-DEBDFA13CD53} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{0ACDED49-9FCC-4C36-B41D-BF95E12ABC13} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{B988CA08-DF77-4B3D-AA0D-7CDAA99EB256} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{A7AC8582-2EB4-4975-B920-32DE6FB5597B} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{02C83F5E-ADD2-4232-924A-E76B1B582195} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{E1A21D17-4AB3-4F26-8F57-B8DF2D2104E1} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{F55D87A6-94F2-46C3-A615-50E0D2AE490A} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{4B4F45C2-9DBD-405D-8862-FA4DD8CCA91E} = {028C4BAE-69EA-478B-A610-E398334E2953}
+		{E1AC21A8-F7F2-4F70-BEDE-0FD71DC589ED} = {6230345F-63AE-4181-A60D-A715A3B5E68D}
+		{FF658383-9FED-47D1-80C5-FF61547A0067} = {E1AC21A8-F7F2-4F70-BEDE-0FD71DC589ED}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,26 @@
+{
+  "name": "@novagame/cocos-client-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm --recursive --workspace-concurrency=1 run build",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint --deny-warnings packages adapters vitest.config.ts",
+    "test": "vitest run",
+    "typecheck": "pnpm --filter @novagame/game-config-client run build && pnpm --recursive --workspace-concurrency=1 run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "25.0.3",
+    "oxfmt": "0.51.0",
+    "oxlint": "1.66.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.7"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.33.4"
+}
