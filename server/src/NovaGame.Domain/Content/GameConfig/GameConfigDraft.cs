@@ -215,16 +215,15 @@ public sealed class GameConfigDraft : AggregateRoot<Guid>
 
     private static string NormalizeSchemaVersion(string value)
     {
-        var normalized = value?.Trim();
-        if (string.IsNullOrWhiteSpace(normalized) ||
-            normalized.Length > GameConfigConstants.SchemaVersionMaximumLength)
+        if (!GameConfigSchemaVersionRules.IsValid(value))
         {
             throw new ArgumentException(
-                $"Schema versions must contain 1 to {GameConfigConstants.SchemaVersionMaximumLength} characters.",
+                "Schema versions must be safe identifiers containing 1 to " +
+                $"{GameConfigConstants.SchemaVersionMaximumLength} characters.",
                 nameof(value));
         }
 
-        return normalized;
+        return value;
     }
 
     private static string RequireRawContent(string value)

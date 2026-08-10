@@ -1,6 +1,6 @@
 # NovaGame Server
 
-The server is a six-layer .NET 8 application with dedicated Deployment and DbMigrator composition projects, built on locally packaged NovaCore framework packages. MySQL 8.4 through Pomelo is the only supported database provider.
+The `server/` tree is the NovaGame framework server baseline: a six-layer .NET 8 application with dedicated Deployment and DbMigrator composition projects, built on locally packaged NovaCore framework packages. It is not the business backend for every game. Each specific game owns a separate backend composition that depends on NovaGame packages and contracts. MySQL 8.4 through Pomelo is the only supported database provider for this baseline.
 
 ## Prepare Dependencies
 
@@ -40,6 +40,18 @@ Changing credentials in `deploy/.env` does not change an existing MySQL data vol
 ## Transaction Retry Policy
 
 Pomelo execution-strategy retries are intentionally disabled. NovaCore currently opens explicit transactions outside an EF replay delegate, so provider retries cannot safely replay the complete application operation. Transient failures are returned to the caller, and retryable commands must be idempotent. Do not enable `EnableRetryOnFailure` unless the transaction boundary is redesigned and verified without changing this policy silently.
+
+## GameConfig Snapshot Validation
+
+`GameConfigSnapshotValidator` is a synchronous, stateless Domain service for consumers of exact
+NovaGame GameConfig snapshot bytes. It verifies the trusted complete-byte hash, neutral envelope,
+canonical content, schema expectations, and embedded integrity metadata, then returns immutable
+verified metadata and canonical content. Transport, ETags, caching, persistence, logging, error
+mapping, and game-specific content policy remain caller-owned.
+
+The validator's behavior is verified by NovaGame and SwordMaster, but its C# API remains
+experimental after M2. Its class name, constructor, method signature, result shape, DI lifetime,
+and failure-diagnostic model do not yet promise source or binary compatibility.
 
 ## Verification
 

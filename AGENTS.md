@@ -12,6 +12,8 @@ NovaCore -> NovaGame -> Specific Game
 
 NovaGame may depend on NovaCore. Specific games may depend on NovaGame. NovaGame must never reference SwordMaster or any other specific game. Samples validate NovaGame but never become NovaGame dependencies.
 
+Each specific game owns its own backend composition, persistence extensions and migrations, APIs, administration extensions, and game client behavior. NovaGame is a reusable dependency of those backends; it is not a shared host for every game's business systems.
+
 ## Instruction Scope
 
 This file applies to the entire repository. Read the nearest scoped instruction file before editing a subtree:
@@ -20,7 +22,7 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 - `admin/AGENTS.md` for the operations admin.
 - `clients/cocos/AGENTS.md` for the Cocos client framework.
 
-Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`, and the completed M0.5 runbook is `docs/goals/m0.5.md`. No repository milestone is currently active, and M1 is not authorized.
+Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, and M2 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, and `docs/goals/m2.md`. M2 is complete and no repository milestone is active. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
 
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
@@ -37,9 +39,9 @@ M0.5 is complete and defines the verified reusable baseline for bootstrapping Sw
 - an engine-independent TypeScript configuration client;
 - a SwordMaster configuration-loading smoke test without gameplay.
 
-Preserve this baseline unless a user explicitly requests a maintenance change. M1 remains roadmap context only; do not implement it until a new executable goal is explicitly authorized.
+Preserve this baseline unless a user explicitly requests a maintenance change. The user approved the game-owned SwordMaster `equipment-attribute-effect` capability on 2026-08-01 and reconfirmed it on 2026-08-02. M1 and every M1 stage and task are complete. M2 completed extraction of only the narrower `game-config-snapshot-consumer-validation` mechanism after the user separately authorized that exact candidate on 2026-08-10. That one-time authorization was consumed by the completed M2 runbook and grants no continuing authorization for another extraction or capability. The complete `equipment-attribute-effect` capability remains SwordMaster-owned, and the extracted C# `GameConfigSnapshotValidator` contract remains experimental.
 
-Mail, Ranking, Shop, Activity, battle systems, and other future domain capabilities are not M0.5 deliverables.
+Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 
 ## Core Design Rules
 
@@ -53,7 +55,7 @@ Published configuration versions are immutable. Changes follow the release workf
 
 Organize code by business domain inside each architectural layer. Do not organize the repository around one module, service, or top-level folder per entity.
 
-The domain catalog in `docs/architecture.md` is a vocabulary and ownership map, not an implementation backlog. Do not create empty folders, projects, entities, services, or modules for future domains.
+The ownership catalog in `docs/architecture.md` is not an implementation backlog. The verified framework-owned business capabilities are `Operations/AdminAccess` and `Content/GameConfig`. Every other system starts in the specific game unless an independently useful mechanism completes the extraction workflow. Do not create empty folders, projects, entities, services, or modules for unvalidated NovaGame mechanisms or game-owned systems.
 
 ### Rich Domain, Thin API
 
@@ -77,17 +79,19 @@ M0.5 has a narrow bootstrap exception for infrastructure required to create and 
 
 When reuse is uncertain, leave the capability in the specific game and record it as an extraction candidate.
 
+Do not extract a complete game system merely because several games use a similarly named concept. Combat, skills, enhancement, set bonuses, drops, shops, progression, economy, and live-operations policy remain game-owned; only independently useful mechanisms with concrete evidence are eligible.
+
 ## Physical Module Rule
 
-A business domain is an organizational boundary, not automatically a physical NovaCore module. During M0.5, built-in NovaGame domains remain inside the standard server layers.
+A business domain is an organizational boundary, not automatically a physical NovaCore module. The M0.5 framework-owned `Operations/AdminAccess` and `Content/GameConfig` capabilities remain inside the standard server layers.
 
 Create a separate physical module only when a validated capability requires an independent package, dependency, persistence, feature, installation, or removal lifecycle. Never create one merely because an entity was added.
 
 ## API Stability
 
-Unvalidated abstractions are experimental during M0.5. Do not promise backward compatibility before a concrete consumer validates an API.
+Unvalidated abstractions remain experimental. Completing extraction and passing one consumer do not automatically promote an API to stable; promotion requires a separate evidence-based maturity decision. Do not promise backward compatibility before concrete consumers validate both behavior and the public contract shape.
 
-After promotion to a public NovaGame contract:
+After explicit promotion to a stable public NovaGame contract:
 
 - prefer additive changes;
 - version breaking changes;
@@ -111,7 +115,7 @@ Never expose persistence entities through public APIs. Use explicit request and 
 
 ## Security And Operations
 
-The server is authoritative. Never trust client-provided rewards, prices, ownership, progression, permissions, or time.
+The owning concrete game server is authoritative. Never trust client-provided rewards, prices, ownership, progression, permissions, or time.
 
 Use UTC for persisted timestamps and an injectable clock for business decisions. Economy-affecting and administrative mutations must be transactional, idempotent where retries are possible, authorized, and auditable. Do not use floating-point values for authoritative currency calculations.
 

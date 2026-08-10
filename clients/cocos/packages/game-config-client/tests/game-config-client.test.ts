@@ -11,6 +11,7 @@ import {
   type GameConfigTransportResponse,
   LosslessNumber,
   MemoryGameConfigSnapshotCache,
+  validateGameConfigSnapshot,
   WebCryptoSha256,
 } from "../src/index.js";
 
@@ -20,6 +21,7 @@ const cacheKey = "default/development";
 const configurationSet = "default";
 const versionA = "11111111-1111-4111-8111-111111111111";
 const versionB = "22222222-2222-4222-8222-222222222222";
+const snapshotMaximumByteLength = 25_166_848;
 const defaultContent = '{"collections":{"items":[{"id":"entry-a","value":1}]}}';
 
 interface SnapshotFixture {
@@ -99,6 +101,16 @@ function assertError(
   expect(result.error.code).toBe(code);
 }
 
+function createNestedContent(additionalArrayDepth: number): string {
+  return (
+    '{"collections":{"items":[{"id":"entry-a","payload":' +
+    "[".repeat(additionalArrayDepth) +
+    "null" +
+    "]".repeat(additionalArrayDepth) +
+    "}]}}"
+  );
+}
+
 function deferred<T>(): {
   promise: Promise<T>;
   reject(error: unknown): void;
@@ -138,7 +150,7 @@ describe("GameConfigClient", () => {
   it("validates and activates a snapshot with exact non-ASCII content hashing and lossless numbers", async () => {
     const fixture = await createSnapshot({
       content:
-        '{"collections":{"items":[{"id":"entry-a","label":"\u5251","value":9007199254740993},{"id":"entry-b","value":2}]}}',
+        '{"collections":{"items":[{"id":"entry-a","label":"\\u5251","scaled":1.2300,"scientific":1e+09,"value":9007199254740993},{"id":"entry-b","value":2}]}}',
     });
     const client = createClient(fixedTransport(ok(fixture)));
 
@@ -153,6 +165,8 @@ describe("GameConfigClient", () => {
     const value = client.current?.getRecord("items", "entry-a")?.value;
     expect(value).toBeInstanceOf(LosslessNumber);
     expect(String(value)).toBe("9007199254740993");
+    expect(String(client.current?.getRecord("items", "entry-a")?.scaled)).toBe("1.2300");
+    expect(String(client.current?.getRecord("items", "entry-a")?.scientific)).toBe("1e+09");
     expect(client.current?.getRecord("missing", "entry-a")).toBeUndefined();
   });
 
@@ -195,6 +209,52 @@ describe("GameConfigClient", () => {
     const result = await createClient(fixedTransport(ok(fixture))).refresh();
 
     assertError(result, "rejected", "canonicalization_mismatch");
+  });
+
+  it("rejects JSON string representations that differ from the producer encoding", async () => {
+    const contents = [
+      '{"collections":{"items":[{"id":"entry-a","label":"\u5251"}]}}',
+      '{"collections":{"items":[{"id":"entry-a","label":"\\u00e9"}]}}',
+      '{"collections":{"items":[{"id":"entry-a","label":"\\u0061"}]}}',
+      '{"collections":{"items":[{"id":"entry-a","label":"+"}]}}',
+    ];
+
+    for (const content of contents) {
+      const fixture = await createSnapshot({ content });
+      const result = await createClient(fixedTransport(ok(fixture))).refresh();
+      assertError(result, "rejected", "canonicalization_mismatch");
+    }
+  });
+
+  it("rejects snapshots larger than the producer-consumer byte bound", async () => {
+    const body = new Uint8Array(snapshotMaximumByteLength + 1);
+    const result = await createClient(
+      fixedTransport({ body, etag: `"${"0".repeat(64)}"`, status: 200 }),
+    ).refresh();
+
+    assertError(result, "rejected", "invalid_contract");
+  });
+
+  it("accepts 65 snapshot levels and rejects deeper content", async () => {
+    const atLimit = await createSnapshot({ content: createNestedContent(60) });
+    expect((await createClient(fixedTransport(ok(atLimit))).refresh()).status).toBe("activated");
+
+    const tooDeep = await createSnapshot({ content: createNestedContent(61) });
+    const result = await createClient(fixedTransport(ok(tooDeep))).refresh();
+    assertError(result, "rejected", "invalid_contract");
+  });
+
+  it("rejects extreme container depth before recursive JSON parsing", async () => {
+    const fixture = await createSnapshot({ content: createNestedContent(10_000) });
+
+    await expect(
+      validateGameConfigSnapshot({
+        body: fixture.body,
+        etag: fixture.etag,
+        expectedConfigurationSet: configurationSet,
+        sha256,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_contract" });
   });
 
   it.each([
@@ -243,6 +303,31 @@ describe("GameConfigClient", () => {
       versionB,
     ).refresh();
     assertError(versionResult, "rejected", "configuration_version_mismatch");
+
+    const emptyVersion = await createSnapshot({
+      version: "00000000-0000-0000-0000-000000000000",
+    });
+    const emptyVersionResult = await createClient(fixedTransport(ok(emptyVersion))).refresh();
+    assertError(emptyVersionResult, "rejected", "invalid_contract");
+  });
+
+  it("validates exact references and requires their targets to exist", async () => {
+    const valid = await createSnapshot({
+      content:
+        '{"collections":{"groups":[{"id":"base"}],"items":[{"group":{"$ref":"groups/base"},"id":"entry-a"}]}}',
+    });
+    expect((await createClient(fixedTransport(ok(valid))).refresh()).status).toBe("activated");
+
+    const invalidContents = [
+      '{"collections":{"items":[{"id":"entry-a","target":{"$ref":"items/missing"}}]}}',
+      '{"collections":{"items":[{"id":"entry-a","target":{"$ref":"items/entry-a","extra":true}}]}}',
+      '{"collections":{"items":[{"id":"entry-a","target":{"$ref":"invalid"}}]}}',
+    ];
+    for (const content of invalidContents) {
+      const fixture = await createSnapshot({ content });
+      const result = await createClient(fixedTransport(ok(fixture))).refresh();
+      assertError(result, "rejected", "invalid_contract");
+    }
   });
 
   it("rejects duplicate record identifiers while preserving deterministic lookups", async () => {

@@ -87,6 +87,12 @@ public sealed class GameConfigSnapshotBuilder
         writer.WriteEndObject();
         writer.Flush();
 
+        if (buffer.WrittenCount > GameConfigConstants.SnapshotMaximumByteLength)
+        {
+            throw new InvalidOperationException(
+                $"The snapshot exceeds {GameConfigConstants.SnapshotMaximumByteLength} bytes.");
+        }
+
         var snapshotJson = Encoding.UTF8.GetString(buffer.WrittenSpan);
         var snapshotHash = ComputeHash(snapshotJson);
         return new GameConfigSnapshot(
@@ -97,45 +103,6 @@ public sealed class GameConfigSnapshotBuilder
             contentHash,
             snapshotHash,
             snapshotJson);
-    }
-
-    public bool Verify(string snapshotJson)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(snapshotJson);
-            var root = document.RootElement;
-            if (root.GetProperty("formatVersion").GetString() != GameConfigConstants.SnapshotFormatVersion)
-            {
-                return false;
-            }
-
-            var integrity = root.GetProperty("integrity");
-            if (integrity.GetProperty("algorithm").GetString() != GameConfigConstants.ContentHashAlgorithm ||
-                integrity.GetProperty("canonicalization").GetString() != GameConfigConstants.CanonicalizationProfile)
-            {
-                return false;
-            }
-
-            var expectedHash = integrity.GetProperty("contentHash").GetString();
-            var actualHash = Convert.ToHexString(
-                    SHA256.HashData(Encoding.UTF8.GetBytes(root.GetProperty("content").GetRawText())))
-                .ToLowerInvariant();
-            return string.Equals(expectedHash, actualHash, StringComparison.Ordinal);
-        }
-        catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
-        {
-            return false;
-        }
-    }
-
-    public bool Verify(string snapshotJson, string expectedSnapshotHash)
-    {
-        return string.Equals(
-                ComputeHash(snapshotJson),
-                expectedSnapshotHash,
-                StringComparison.Ordinal) &&
-            Verify(snapshotJson);
     }
 
     private static string ComputeHash(string value)

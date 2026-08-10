@@ -367,6 +367,35 @@ function Publish-CleanDirectory {
     }
 }
 
+function Clear-NovaCorePackageCache {
+    param(
+        [Parameter(Mandatory)][string]$CacheRoot,
+        [Parameter(Mandatory)][object[]]$PackageRecords
+    )
+
+    $resolvedCacheRoot = [System.IO.Path]::GetFullPath($CacheRoot)
+    $resolvedRepositoryRoot = `
+        [System.IO.Path]::GetFullPath($repositoryRoot).TrimEnd('\') + '\'
+    if (-not $resolvedCacheRoot.StartsWith(
+            $resolvedRepositoryRoot,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning `
+            "NovaCore package cache '$resolvedCacheRoot' is outside the repository; stale entries must be cleared by the caller."
+        return
+    }
+
+    foreach ($packageRecord in $PackageRecords) {
+        $packageCachePath = Join-Path `
+            $resolvedCacheRoot `
+            (([string]$packageRecord.name).ToLowerInvariant() +
+                "\$([string]$packageRecord.version)")
+        Assert-PathWithin -Path $packageCachePath -ParentPath $resolvedCacheRoot
+        if (Test-Path -LiteralPath $packageCachePath -PathType Container) {
+            Remove-Item -LiteralPath $packageCachePath -Recurse -Force
+        }
+    }
+}
+
 function Get-ProjectVersion {
     param([Parameter(Mandatory)][string]$ProjectPath)
 
@@ -567,7 +596,7 @@ if ($Scope -in @("Server", "Database", "All")) {
         [System.IO.Path]::GetFullPath($env:NOVAGAME_NUGET_PACKAGES)
     }
     else {
-        Join-Path $novaCoreLocalRoot "nuget"
+        Join-Path $localRoot "nuget"
     }
     $env:NUGET_PACKAGES = Join-Path $nugetPackagesBase $novaCoreCommit
     New-Item -ItemType Directory -Path $env:DOTNET_CLI_HOME, $env:NUGET_PACKAGES -Force | Out-Null
@@ -685,6 +714,9 @@ if ($Scope -in @("Server", "Database", "All")) {
             -StagingPath $compatibilityStagingSource `
             -DestinationPath $compatibilityPackageSource `
             -ParentPath $novaCoreLocalRoot
+        Clear-NovaCorePackageCache `
+            -CacheRoot $env:NUGET_PACKAGES `
+            -PackageRecords @($packageRecords)
     }
     finally {
         foreach ($temporaryPath in @($stagingPackageSource, $compatibilityStagingSource)) {
@@ -1149,7 +1181,8 @@ if ($Scope -in @("SwordMaster", "All")) {
         throw "The SwordMaster .node-version must remain pinned to 24.14.0."
     }
     foreach ($requiredScript in @(
-        "format:check", "lint", "typecheck", "test", "test:real-api", "build"
+        "contract:generate", "format:check", "lint", "typecheck", "test",
+        "test:real-api", "build"
     )) {
         if ($null -eq $swordMasterPackage.scripts.PSObject.Properties[$requiredScript]) {
             throw "The SwordMaster package.json is missing required script '$requiredScript'."

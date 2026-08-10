@@ -21,6 +21,7 @@ public sealed class GameConfigAppService : IGameConfigAppService
     private readonly IGameConfigAuditRepository _auditRepository;
     private readonly GameConfigContentProcessor _contentProcessor;
     private readonly GameConfigSnapshotBuilder _snapshotBuilder;
+    private readonly GameConfigSnapshotValidator _snapshotValidator;
     private readonly IPermissionChecker _permissionChecker;
     private readonly IRequestAuditContextAccessor _requestAuditContextAccessor;
     private readonly ICurrentUser _currentUser;
@@ -35,6 +36,7 @@ public sealed class GameConfigAppService : IGameConfigAppService
         IGameConfigAuditRepository auditRepository,
         GameConfigContentProcessor contentProcessor,
         GameConfigSnapshotBuilder snapshotBuilder,
+        GameConfigSnapshotValidator snapshotValidator,
         IPermissionChecker permissionChecker,
         IRequestAuditContextAccessor requestAuditContextAccessor,
         ICurrentUser currentUser,
@@ -48,6 +50,7 @@ public sealed class GameConfigAppService : IGameConfigAppService
         _auditRepository = auditRepository;
         _contentProcessor = contentProcessor;
         _snapshotBuilder = snapshotBuilder;
+        _snapshotValidator = snapshotValidator;
         _permissionChecker = permissionChecker;
         _requestAuditContextAccessor = requestAuditContextAccessor;
         _currentUser = currentUser;
@@ -550,7 +553,33 @@ public sealed class GameConfigAppService : IGameConfigAppService
 
     private GameConfigSnapshotDownload CreateSnapshotDownload(PublishedGameConfigVersion version)
     {
-        if (!_snapshotBuilder.Verify(version.SnapshotJson, version.SnapshotHash))
+        var snapshotBytes = Encoding.UTF8.GetBytes(version.SnapshotJson);
+        if (version.Id == Guid.Empty ||
+            !GameConfigSetKey.TryCreate(
+                version.ConfigurationSetKey,
+                out var configurationSet) ||
+            !string.Equals(
+                configurationSet.Value,
+                version.ConfigurationSetKey,
+                StringComparison.Ordinal) ||
+            !GameConfigSchemaVersionRules.IsValid(version.SchemaVersion) ||
+            !_snapshotValidator.TryValidate(
+                snapshotBytes,
+                version.SnapshotHash,
+                configurationSet,
+                version.SchemaVersion,
+                version.Id,
+                out var validated) ||
+            validated.CreatedAtUtc != version.PublishedAtUtc ||
+            version.PublishedAtUtc.Kind != DateTimeKind.Utc ||
+            !string.Equals(
+                validated.ContentHash,
+                version.ContentHash,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                validated.CanonicalContentJson,
+                version.CanonicalContentJson,
+                StringComparison.Ordinal))
         {
             throw new GameConfigException(
                 GameConfigFailureKind.InternalError,
@@ -559,7 +588,7 @@ public sealed class GameConfigAppService : IGameConfigAppService
         }
 
         return new GameConfigSnapshotDownload(
-            Encoding.UTF8.GetBytes(version.SnapshotJson),
+            snapshotBytes,
             version.SnapshotHash,
             $"{version.ConfigurationSetKey}-{version.Id:D}.json");
     }

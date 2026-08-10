@@ -12,6 +12,8 @@ Roadmap entries alone do not authorize work.
 
 ## 2. Identify Ownership And Layer
 
+First decide whether the capability belongs to NovaGame or to a specific game. NovaGame ownership is valid only for the verified framework baseline or for a mechanism that completed the extraction workflow. Complete gameplay, progression, economy, shop, drop, combat, skill, enhancement, set, and game-specific operations systems default to the specific game backend.
+
 Assign every changed concept to one owning business domain. Select the layer by responsibility:
 
 - Domain.Shared for stable shared domain metadata and definitions.
@@ -21,6 +23,8 @@ Assign every changed concept to one owning business domain. Select the layer by 
 - Host.EntityFrameworkCore for MySQL mappings, repositories, DbContexts, and migrations.
 - Api for HTTP translation and composition.
 - Admin or client packages for presentation, interaction, transport, and engine integration only.
+
+A specific game backend may mirror these responsibilities in its own solution, projects, migrations, APIs, admin extension, and client packages. Do not place game-owned code under NovaGame framework projects merely to reuse the existing host.
 
 Do not create a new physical module, generic abstraction, provider, factory, or shared folder without a concrete ownership or variation requirement.
 
@@ -32,9 +36,9 @@ When using NovaCore generation, inspect the planned output first. Do not run a g
 
 ## 4. Implement A Complete Vertical Slice
 
-Implement the smallest slice that proves the behavior end to end. A server slice normally includes the domain rule, application contract, application orchestration, persistence when required, HTTP exposure when required, and focused tests.
+Implement the smallest slice in the owning specific game that proves the behavior end to end. A server slice normally includes the game-owned domain rule, application contract, application orchestration, persistence when required, HTTP exposure when required, and focused tests. NovaGame changes during this step are limited to separately authorized maintenance of its existing baseline.
 
-Do not create empty placeholders for future domains. Do not broaden the slice to adjacent roadmap work.
+Do not create empty placeholders for game-owned systems or unvalidated framework mechanisms. Do not broaden the slice to adjacent roadmap work.
 
 Keep controllers thin, domain models authoritative, application services orchestration-focused, repositories persistence-only, and clients free of server business policy.
 

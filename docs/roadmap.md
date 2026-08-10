@@ -1,20 +1,24 @@
 # NovaGame Roadmap
 
-The roadmap describes intended validation outcomes. It is not authorization to implement future work. A future milestone requires an explicit user request and a new active executable goal.
+The roadmap describes intended validation outcomes. It is not authorization to implement future work. A future milestone requires an explicit user request and activation of its repository goal.
 
 No dates are promised here. A milestone advances only when its exit criteria are verified.
+
+At most one milestone may be active. An executable goal is active only while its status is `in_progress` or `blocked` and `execution_authorized` is `true`. A `ready` or `drafting` goal remains planned and inactive.
 
 ## Status Legend
 
 - **Active**: the only milestone currently executable through a repository goal.
 - **Complete**: verified baseline retained as historical context and maintenance scope.
-- **Planned**: direction for later validation; implementation is not authorized.
+- **Planned**: direction or an inactive goal definition for later validation; implementation is not authorized.
 - **Unscheduled**: retained as context without committed scope.
 
 ## M0.5 - Framework Bootstrap
 
-**Status:** Complete  
-**Completed goal record:** [M0.5 Framework Bootstrap](goals/m0.5.md)  
+**Status:** Complete
+
+**Completed goal record:** [M0.5 Framework Bootstrap](goals/m0.5.md)
+
 **Concrete consumer:** SwordMaster configuration-loading smoke project
 
 ### Goal
@@ -44,40 +48,56 @@ Create the minimum reusable NovaGame kernel required to bootstrap a specific gam
 ### Non-Goals
 
 - SwordMaster gameplay;
-- reusable gameplay systems;
-- Mail, Ranking, Shop, or Activity implementation;
+- complete game-owned gameplay, economy, or operations systems;
+- speculative NovaGame mechanisms without consumer evidence;
 - empty domain or module scaffolding;
 - Unity or Godot client adapters;
 - distributed deployment, brokers, or microservice decomposition.
 
-## M1 - First SwordMaster Vertical Slice
+## M1 - First SwordMaster Domain Slice
 
-**Status:** Planned
+**Status:** Complete
+
+**Completed goal record:** [M1 First SwordMaster Domain Slice](goals/m1.md)
+
+**Execution state:** Complete. The user approved the separate-game-backend ownership boundary and the SwordMaster-owned `equipment-attribute-effect` behavior. Every M1 stage and task passed, including the live wrapper-to-model-to-transport-to-SwordMaster-API-to-MySQL path, exact capability commands, cumulative verification, deterministic cleanup, reuse-evidence review, and final boundary audit. At M1 completion the evidence validated the narrower `game-config-snapshot-consumer-validation` candidate without authorizing extraction, while the complete capability remained SwordMaster-owned. The later 2026-08-10 authorization and extraction belong to the completed M2 record and do not alter this completed M1 record.
 
 ### Goal
 
-Implement one concrete, playable SwordMaster capability inside SwordMaster using NovaGame M0.5 infrastructure. Select the capability from an actual game requirement at that time.
+Implement one concrete domain capability in a separate SwordMaster backend using NovaGame M0.5 infrastructure. The first proposal validates an owned equipment item changing effective character attributes without placing SwordMaster business code in NovaGame.
+
+M1-01 is the capability-selection gate. It may begin only after an explicit user activation request, and no implementation may begin until the selected behavior is recorded and approved.
 
 ### Exit Criteria
 
-- The capability works in SwordMaster.
+- The approved domain capability works in SwordMaster.
 - Its game-specific rules and content are explicit.
 - Tests describe its concrete behavior.
 - Reuse pressure, variations, and extraction candidates are recorded without extracting them prematurely.
 
 ### Non-Goals
 
-- choosing the capability before SwordMaster requirements exist;
+- advancing beyond the approved capability without completing the ordered M1 stage gates;
+- implementing game-specific gameplay in NovaGame;
+- moving Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, economy, progression, or live-operations systems into NovaGame as complete framework-owned systems;
 - extracting a framework API during the initial implementation;
-- implementing unrelated domain catalog entries.
+- implementing unrelated game-owned systems or unvalidated NovaGame mechanisms.
 
 ## M2 - First Validated Extraction
 
-**Status:** Planned
+**Status:** Complete
+
+**Completed goal record:** [M2 First Validated Extraction](goals/m2.md)
+
+**Execution state:** Complete. The user explicitly authorized extraction of only `game-config-snapshot-consumer-validation` on 2026-08-10. M2 extracted the generalized `Content/GameConfig` validator, migrated SwordMaster without changing its equipment or PlayerAssets policy, verified behavior and boundaries, kept the C# API experimental because only one external .NET game consumer and no versioned package boundary are proven, and completed repository acceptance. The one-time authorization was consumed by this extraction and grants no continuing authorization. M2 is complete and no repository milestone is active.
 
 ### Goal
 
 Use the extraction workflow to promote the reusable mechanism from a proven SwordMaster capability into NovaGame while retaining game policy in SwordMaster.
+
+M2 never starts automatically after M1. It may extract only the explicitly authorized candidate recorded by the completed M1 runbook.
+
+The complete SwordMaster domain, backend schema, APIs, admin workflows, and client policy remain game-owned after extraction.
 
 ### Exit Criteria
 
@@ -86,19 +106,19 @@ Use the extraction workflow to promote the reusable mechanism from a proven Swor
 - NovaGame and SwordMaster tests pass without duplicate authoritative implementations.
 - Compatibility expectations and extension points are documented.
 
-## M3 - Operations Validation
+## M3 - Game Operations Validation
 
 **Status:** Unscheduled
 
 ### Goal
 
-Add an operations capability only in response to a concrete SwordMaster live-operations need. Mail, Ranking, Shop, and Activity are candidates, not promised deliverables.
+Implement an operations capability in the SwordMaster backend and its game-admin extension only in response to a concrete live-operations need. Shop, Mail, Ranking, Activity, and similar domains remain game-owned by default; this milestone does not make them NovaGame modules.
 
 ### Exit Criteria
 
 - The selected capability solves a real operational workflow.
 - Authorization, audit, idempotency, and rollback behavior are verified.
-- Any extraction follows the same consumer-first rule.
+- Any later extraction promotes only an independently useful infrastructure mechanism and follows the same consumer-first rule.
 
 ## M4 - Portability And Reuse Proof
 
@@ -116,4 +136,4 @@ Validate that server contracts and reusable concepts can support another client 
 
 ## Extraction Candidates
 
-There are currently no approved extraction candidates. Add a candidate only after a concrete consumer implementation produces evidence under the extraction workflow.
+Completed M2 extraction: `game-config-snapshot-consumer-validation`, supported by the completed M1 evidence and the explicit 2026-08-10 extraction approval. That one-time authorization was consumed by M2 and grants no continuing authorization. The extracted C# contract remains experimental, and the complete `equipment-attribute-effect` capability remains SwordMaster-owned rather than becoming a NovaGame extraction candidate.

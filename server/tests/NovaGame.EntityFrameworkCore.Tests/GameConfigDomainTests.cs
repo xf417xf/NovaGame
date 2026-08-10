@@ -11,6 +11,18 @@ public sealed class GameConfigDomainTests
 {
     private static readonly Guid AdministratorId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly DateTime NowUtc = new(2026, 7, 25, 12, 0, 0, DateTimeKind.Utc);
+    private const string CustomSchemaVersion = "catalog.content.v2";
+
+    public static TheoryData<string?> UnsafeSchemaVersions => new()
+    {
+        null,
+        string.Empty,
+        $" {CustomSchemaVersion}",
+        $"{CustomSchemaVersion} ",
+        "catalog/content",
+        "catalog content",
+        new string('a', GameConfigConstants.SchemaVersionMaximumLength + 1)
+    };
 
     [Fact]
     public void SlugsRequireALowercaseLetterAndTheRestrictedAlphabet()
@@ -134,6 +146,38 @@ public sealed class GameConfigDomainTests
     }
 
     [Fact]
+    public void DraftAndProcessorAcceptAndPreserveSafeSchemaIdentifiers()
+    {
+        var draft = CreateDraft(ValidContent, CustomSchemaVersion);
+        var result = new GameConfigContentProcessor().Process(
+            CustomSchemaVersion,
+            ValidContent);
+
+        Assert.True(GameConfigSchemaVersionRules.IsValid(CustomSchemaVersion));
+        Assert.Equal(CustomSchemaVersion, draft.SchemaVersion);
+        Assert.True(result.Validation.IsValid);
+        Assert.Equal(CustomSchemaVersion, result.Validation.SchemaVersion);
+        Assert.Equal(CustomSchemaVersion, result.Content?.SchemaVersion);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnsafeSchemaVersions))]
+    public void DraftAndProcessorRejectUnsafeSchemaIdentifiers(string? schemaVersion)
+    {
+        Assert.False(GameConfigSchemaVersionRules.IsValid(schemaVersion));
+        Assert.Throws<ArgumentException>(() => CreateDraft(ValidContent, schemaVersion!));
+
+        var result = new GameConfigContentProcessor().Process(schemaVersion, ValidContent);
+
+        Assert.False(result.Validation.IsValid);
+        Assert.Equal(schemaVersion ?? string.Empty, result.Validation.SchemaVersion);
+        Assert.Null(result.Content);
+        Assert.Contains(
+            result.Validation.Issues,
+            issue => issue.Code == GameConfigValidationCodes.UnsupportedSchemaVersion);
+    }
+
+    [Fact]
     public void ProcessorRejectsDuplicateRecordIdentifiersWithinACollection()
     {
         var result = new GameConfigContentProcessor().Process(
@@ -208,8 +252,24 @@ public sealed class GameConfigDomainTests
         Assert.Equal(first.Json, second.Json);
         Assert.Equal(64, first.ContentHash.Length);
         Assert.Equal(expectedSnapshotHash, first.SnapshotHash);
-        Assert.True(builder.Verify(first.Json, first.SnapshotHash));
-        Assert.False(builder.Verify(first.Json + " ", first.SnapshotHash));
+        var validator = new GameConfigSnapshotValidator(processor);
+        Assert.True(validator.TryValidate(
+            Encoding.UTF8.GetBytes(first.Json),
+            first.SnapshotHash,
+            setKey,
+            first.SchemaVersion,
+            versionId,
+            out var validated));
+        Assert.NotNull(validated);
+        Assert.Equal(first.ContentHash, validated.ContentHash);
+        Assert.Equal(processed.CanonicalJson, validated.CanonicalContentJson);
+        Assert.False(validator.TryValidate(
+            Encoding.UTF8.GetBytes(first.Json + " "),
+            first.SnapshotHash,
+            setKey,
+            first.SchemaVersion,
+            versionId,
+            out _));
 
         var published = new PublishedGameConfigVersion(
             versionId,
@@ -333,14 +393,16 @@ public sealed class GameConfigDomainTests
             group.Permissions.Select(permission => permission.Name));
     }
 
-    private static GameConfigDraft CreateDraft(string content)
+    private static GameConfigDraft CreateDraft(
+        string content,
+        string schemaVersion = GameConfigConstants.SupportedSchemaVersion)
     {
         return new GameConfigDraft(
             Guid.NewGuid(),
             GameConfigSetKey.Create("default"),
             "Default configuration",
             baseVersionId: null,
-            GameConfigConstants.SupportedSchemaVersion,
+            schemaVersion,
             content,
             AdministratorId,
             NowUtc);

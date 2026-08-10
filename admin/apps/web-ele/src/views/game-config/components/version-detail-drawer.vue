@@ -39,6 +39,7 @@ const isMobile = useMediaQuery('(max-width: 760px)');
 const downloading = ref(false);
 const errorMessage = ref('');
 const version = ref<GameConfigVersion | null>(null);
+let loadSequence = 0;
 
 function displayContent(content: string) {
   try {
@@ -49,17 +50,33 @@ function displayContent(content: string) {
 }
 
 async function loadVersion() {
-  if (!props.versionId) {
+  const sequence = ++loadSequence;
+  const versionId = props.versionId;
+
+  version.value = null;
+  errorMessage.value = '';
+  if (!props.modelValue || !versionId) {
+    loading.value = false;
     return;
   }
   loading.value = true;
-  errorMessage.value = '';
   try {
-    version.value = await getGameConfigVersion(props.versionId);
+    const loadedVersion = await getGameConfigVersion(versionId);
+    if (
+      sequence === loadSequence &&
+      props.modelValue &&
+      props.versionId === versionId
+    ) {
+      version.value = loadedVersion;
+    }
   } catch (error) {
-    errorMessage.value = toNovaGameApiError(error).message;
+    if (sequence === loadSequence) {
+      errorMessage.value = toNovaGameApiError(error).message;
+    }
   } finally {
-    loading.value = false;
+    if (sequence === loadSequence) {
+      loading.value = false;
+    }
   }
 }
 
@@ -75,18 +92,19 @@ function readFileName(contentDisposition: string | undefined) {
 }
 
 async function handleDownload() {
-  if (!version.value) {
+  const requestedVersion = version.value;
+  if (!requestedVersion || downloading.value) {
     return;
   }
   downloading.value = true;
   try {
-    const response = await downloadGameConfigSnapshot(version.value.id);
+    const response = await downloadGameConfigSnapshot(requestedVersion.id);
     const url = URL.createObjectURL(response.data);
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download =
       readFileName(response.headers['content-disposition']) ??
-      `game-config-${version.value.id}.json`;
+      `game-config-${requestedVersion.id}.json`;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
@@ -105,10 +123,8 @@ function close() {
 
 watch(
   () => [props.modelValue, props.versionId] as const,
-  ([open]) => {
-    if (open) {
-      void loadVersion();
-    }
+  () => {
+    void loadVersion();
   },
   { immediate: true },
 );
@@ -145,7 +161,7 @@ watch(
       <template v-if="version">
         <ElDescriptions :column="isMobile ? 1 : 2" border size="small">
           <ElDescriptionsItem label="Version ID">
-            <code>{{ version.id }}</code>
+            <code data-testid="version-id">{{ version.id }}</code>
           </ElDescriptionsItem>
           <ElDescriptionsItem label="Schema">
             {{ version.schemaVersion }}
@@ -193,7 +209,7 @@ watch(
           Download snapshot
         </ElButton>
         <ElButton
-          v-if="version && canActivate"
+          v-if="version && version.id === versionId && canActivate && !loading"
           data-testid="activate-from-detail"
           type="primary"
           @click="emit('activate', version)"

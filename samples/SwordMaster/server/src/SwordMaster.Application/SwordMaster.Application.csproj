@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+    <PackageReference Include="NovaCore.BuildingBlocks" Version="0.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SwordMaster.Application.Contracts\SwordMaster.Application.Contracts.csproj" />
+    <ProjectReference Include="..\SwordMaster.Domain\SwordMaster.Domain.csproj" />
+    <ProjectReference Include="$(NovaGameRepositoryRoot)\server\src\NovaGame.Application.Contracts\NovaGame.Application.Contracts.csproj" />
+    <ProjectReference Include="$(NovaGameRepositoryRoot)\server\src\NovaGame.Domain\NovaGame.Domain.csproj" />
+  </ItemGroup>
+</Project>

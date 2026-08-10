@@ -12,6 +12,8 @@ NovaCore
 
 NovaGame must never depend on SwordMaster or contain SwordMaster-specific concepts.
 
+Each specific game owns and deploys its own backend, schema and migrations, APIs, admin extensions, and client behavior. NovaGame is a shared dependency that supplies framework infrastructure and evidence-backed reusable mechanisms; it is not one business backend shared by every game.
+
 ## Targets
 
 - Server: .NET 8 and NovaCore
@@ -21,7 +23,7 @@ NovaGame must never depend on SwordMaster or contain SwordMaster-specific concep
 
 ## Current Status
 
-M0.5 is complete. Repository bootstrap, the pinned NovaCore 0.2.0 server baseline, the MySQL 8.4 runtime, administrator access, versioned GameConfig, the real-API Vben Admin 5 `web-ele` operations workspace, the reusable Cocos TypeScript configuration client, and the minimal SwordMaster configuration-loading smoke consumer have passed repository-wide acceptance. No later milestone is active, and M1 is not authorized. See the completed [M0.5 Framework Bootstrap](docs/goals/m0.5.md) record.
+M0.5, [M1](docs/goals/m1.md), and [M2](docs/goals/m2.md) are complete. Repository bootstrap, the pinned NovaCore 0.2.0 server baseline, MySQL 8.4, administrator access, versioned GameConfig, the real-API Vben Admin 5 `web-ele` workspace, the reusable Cocos TypeScript configuration client, the SwordMaster configuration-loading consumer, and the approved SwordMaster-owned `equipment-attribute-effect` vertical slice have passed their acceptance paths. M2 extracted only the narrower `game-config-snapshot-consumer-validation` mechanism, and SwordMaster consumes the generalized validator while retaining all equipment and PlayerAssets policy. The extracted C# `GameConfigSnapshotValidator` remains experimental. Its one-time extraction authorization was consumed and grants no continuing authorization. M2 is complete and no repository milestone is active.
 
 ## Prerequisites
 
@@ -88,6 +90,8 @@ The verified SwordMaster smoke consumer is documented in [samples/SwordMaster](s
 - [Development workflow](docs/workflows/development.md)
 - [Extraction workflow](docs/workflows/extraction.md)
 - [Configuration release workflow](docs/workflows/configuration-release.md)
-- [M0.5 goal record](docs/goals/m0.5.md)
+- [M0.5 completed goal record](docs/goals/m0.5.md)
+- [M1 completed goal record](docs/goals/m1.md)
+- [M2 completed goal record](docs/goals/m2.md)
 
 Codex and other coding agents must read [AGENTS.md](AGENTS.md) before changing this repository and the nearest scoped `AGENTS.md` before changing a subtree.

@@ -15,6 +15,7 @@ public static class GameConfigConstants
     public const int RecordIdMaximumLength = 128;
     public const int SchemaVersionMaximumLength = 32;
     public const int RawContentMaximumLength = 4 * 1024 * 1024;
+    public const int SnapshotMaximumByteLength = (RawContentMaximumLength * 6) + 1024;
     public const int ReleaseNotesMaximumLength = 2_000;
     public const int RollbackReasonMaximumLength = 512;
 }

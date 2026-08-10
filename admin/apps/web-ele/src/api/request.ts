@@ -20,6 +20,7 @@ import {
 export { NovaGameApiError, toNovaGameApiError } from './api-result';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
+const apiRequestTimeoutMs = 60_000;
 
 interface RawResponse<T> {
   config: { responseReturn?: string };
@@ -41,6 +42,7 @@ export function unwrapApiVoidResult(
 const publicRequestClient = new RequestClient({
   baseURL: apiURL,
   responseReturn: 'raw',
+  timeout: apiRequestTimeoutMs,
   withCredentials: true,
 });
 
@@ -150,4 +152,5 @@ export function createCorrelationId(): string {
 
 export const requestClient = createRequestClient(apiURL, {
   responseReturn: 'data',
+  timeout: apiRequestTimeoutMs,
 });

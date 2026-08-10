@@ -17,11 +17,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "format": "oxfmt --write README.md package.json src tests tsconfig.json tsconfig.test.json vitest.config.ts vitest.acceptance.config.ts",
-    "format:check": "oxfmt --check README.md package.json src tests tsconfig.json tsconfig.test.json vitest.config.ts vitest.acceptance.config.ts",
-    "lint": "oxlint --deny-warnings src tests vitest.config.ts vitest.acceptance.config.ts",
+    "contract:generate": "openapi-ts --file openapi-ts.config.mjs",
+    "format": "oxfmt --write README.md openapi-ts.config.mjs package.json src tests tsconfig.json tsconfig.test.json vitest.config.ts vitest.acceptance.config.ts",
+    "format:check": "oxfmt --check README.md openapi-ts.config.mjs package.json src tests tsconfig.json tsconfig.test.json vitest.config.ts vitest.acceptance.config.ts",
+    "lint": "oxlint --deny-warnings openapi-ts.config.mjs src tests vitest.config.ts vitest.acceptance.config.ts",
     "test": "vitest run",
-    "test:real-api": "vitest run --config vitest.acceptance.config.ts",
+    "test:player-assets-cocos": "vitest run tests/player-assets-cocos-component.test.ts",
+    "test:player-assets-interaction": "vitest run tests/player-assets-interaction-model.test.ts",
+    "test:player-assets-real-api": "vitest run --config vitest.acceptance.config.ts tests/player-assets-real-api.acceptance.ts",
+    "test:player-assets-transport": "vitest run tests/player-assets-http-transport.test.ts",
+    "test:real-api": "vitest run --config vitest.acceptance.config.ts tests/real-api-game-config.acceptance.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
@@ -29,6 +34,7 @@
     "@novagame/game-config-client": "link:../../clients/cocos/packages/game-config-client"
   },
   "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
     "@types/node": "25.0.3",
     "oxfmt": "0.51.0",
     "oxlint": "1.66.0",

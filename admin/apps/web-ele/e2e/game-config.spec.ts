@@ -1,4 +1,10 @@
-import type { APIResponse, Locator, Page, Response } from '@playwright/test';
+import type {
+  APIResponse,
+  Locator,
+  Page,
+  Request,
+  Response,
+} from '@playwright/test';
 
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
@@ -67,6 +73,7 @@ interface PermissionFixture extends MySqlFixture {
 
 const configurationSet = 'default';
 const environmentName = 'development';
+const loginPageReadyTimeoutMs = 120_000;
 const schemaVersion = '1';
 const permissionNames = [
   'Content.GameConfig.ManageDrafts',
@@ -148,19 +155,70 @@ function authorizationHeaders(accessToken: string) {
   };
 }
 
+function waitForApiResponseOrFailure(
+  page: Page,
+  method: string,
+  path: RegExp | string,
+  expectedStatus?: number,
+): Promise<Response> {
+  const pathDescription = typeof path === 'string' ? path : path.toString();
+  const matchesRequest = (request: Request) => {
+    const pathname = new URL(request.url()).pathname;
+    return (
+      request.method() === method &&
+      (typeof path === 'string' ? pathname === path : path.test(pathname))
+    );
+  };
+  let failedRequestHandler: (request: Request) => void = () => {};
+  const failedRequestPromise = new Promise<never>((_, reject) => {
+    failedRequestHandler = (request) => {
+      if (!matchesRequest(request)) {
+        return;
+      }
+
+      reject(
+        new Error(
+          `${method} ${pathDescription} failed before a response: ` +
+            `${request.failure()?.errorText ?? 'unknown transport failure'}.`,
+        ),
+      );
+    };
+  });
+  page.on('requestfailed', failedRequestHandler);
+
+  return Promise.race([
+    page.waitForResponse(
+      (response) =>
+        matchesRequest(response.request()) &&
+        (expectedStatus === undefined || response.status() === expectedStatus),
+      { timeout: 60_000 },
+    ),
+    failedRequestPromise,
+  ]).finally(() => {
+    page.off('requestfailed', failedRequestHandler);
+  });
+}
+
 async function login(
   page: Page,
   username: string,
   password: string,
 ): Promise<string> {
-  await page.goto('/auth/login');
-  await formField(page, 'login-username').fill(username);
-  await formField(page, 'login-password').fill(password);
+  await page.goto('/auth/login', {
+    timeout: loginPageReadyTimeoutMs,
+    waitUntil: 'commit',
+  });
+  const usernameField = formField(page, 'login-username');
+  const passwordField = formField(page, 'login-password');
+  await expect(usernameField).toBeVisible({ timeout: loginPageReadyTimeoutMs });
+  await expect(passwordField).toBeVisible({ timeout: loginPageReadyTimeoutMs });
+  await usernameField.fill(username);
+  await passwordField.fill(password);
 
-  const loginResponsePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === '/api/auth/login',
+  const loginResponsePromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    '/api/auth/login',
   );
   await page.getByRole('button', { name: 'login' }).click();
   const session = await readApiData<AccessTokenResponse>(
@@ -226,17 +284,15 @@ async function createAndValidateDraft(
   await formField(page, 'schema-version').fill(schemaVersion);
   await formField(page, 'draft-content').fill(content);
 
-  const createResponsePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === '/api/game-config/drafts',
+  const createResponsePromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    '/api/game-config/drafts',
   );
-  const validationResponsePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      /\/api\/game-config\/drafts\/[^/]+\/validate$/.test(
-        new URL(response.url()).pathname,
-      ),
+  const validationResponsePromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    /\/api\/game-config\/drafts\/[^/]+\/validate$/,
   );
   await page.getByTestId('validate-draft').click();
 
@@ -516,17 +572,15 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   );
 
   await formField(page, 'draft-content').fill(validContent);
-  const validUpdatePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'PUT' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/drafts/${invalid.draft.id}`,
+  const validUpdatePromise = waitForApiResponseOrFailure(
+    page,
+    'PUT',
+    `/api/game-config/drafts/${invalid.draft.id}`,
   );
-  const validValidationPromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/drafts/${invalid.draft.id}/validate`,
+  const validValidationPromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    `/api/game-config/drafts/${invalid.draft.id}/validate`,
   );
   await page.getByTestId('validate-draft').click();
   await readApiData<Draft>(await validUpdatePromise);
@@ -552,12 +606,11 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   const externalDraft = await readApiData<Draft>(externalResponse);
 
   await formField(page, 'draft-name').fill(`${firstDraftName} stale`);
-  const conflictResponsePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'PUT' &&
-      response.status() === 409 &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/drafts/${invalid.draft.id}`,
+  const conflictResponsePromise = waitForApiResponseOrFailure(
+    page,
+    'PUT',
+    `/api/game-config/drafts/${invalid.draft.id}`,
+    409,
   );
   await page.getByTestId('save-draft').click();
   await conflictResponsePromise;
@@ -566,17 +619,15 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   await expect(formField(page, 'draft-name')).toHaveValue(externalName);
 
   await formField(page, 'draft-name').fill(firstDraftName);
-  const finalUpdatePromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'PUT' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/drafts/${externalDraft.id}`,
+  const finalUpdatePromise = waitForApiResponseOrFailure(
+    page,
+    'PUT',
+    `/api/game-config/drafts/${externalDraft.id}`,
   );
-  const finalValidationPromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/drafts/${externalDraft.id}/validate`,
+  const finalValidationPromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    `/api/game-config/drafts/${externalDraft.id}/validate`,
   );
   await page.getByTestId('validate-draft').click();
   const finalDraft = await readApiData<Draft>(await finalUpdatePromise);
@@ -593,15 +644,15 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   await expect(firstDraftRow).toContainText('Validated');
   await firstDraftRow.getByTestId('review-from-table').click();
   await formField(page, 'release-notes').fill('Initial E2E publication.');
-  const firstPublishPromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/drafts/${finalDraft.id}/publish`,
+  const firstPublishPromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    `/api/game-config/drafts/${finalDraft.id}/publish`,
   );
   await page.getByTestId('publish-draft').click();
   const firstVersion = await readApiData<Version>(await firstPublishPromise);
   await expect(page.getByTestId('version-detail')).toBeVisible();
+  await expect(page.getByTestId('version-id')).toHaveText(firstVersion.id);
 
   const downloadPromise = page.waitForEvent('download');
   await page.getByTestId('download-snapshot').click();
@@ -620,11 +671,10 @@ test('operator completes the GameConfig lifecycle against the real API', async (
 
   await page.getByTestId('activate-from-detail').click();
   await formField(page, 'activation-reason').fill('Initial E2E activation.');
-  const firstActivationPromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/environments/${environmentName}/activate`,
+  const firstActivationPromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    `/api/game-config/environments/${environmentName}/activate`,
   );
   await page.getByTestId('confirm-activation').click();
   const firstEnvironment = await readApiData<Environment>(
@@ -647,22 +697,21 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   await expect(secondDraftRow).toContainText('Validated');
   await secondDraftRow.getByTestId('review-from-table').click();
   await formField(page, 'release-notes').fill('Second E2E publication.');
-  const secondPublishPromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/drafts/${second.draft.id}/publish`,
+  const secondPublishPromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    `/api/game-config/drafts/${second.draft.id}/publish`,
   );
   await page.getByTestId('publish-draft').click();
   const secondVersion = await readApiData<Version>(await secondPublishPromise);
   await expect(page.getByTestId('version-detail')).toBeVisible();
+  await expect(page.getByTestId('version-id')).toHaveText(secondVersion.id);
   await page.getByTestId('activate-from-detail').click();
   await formField(page, 'activation-reason').fill('Second E2E activation.');
-  const secondActivationPromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/environments/${environmentName}/activate`,
+  const secondActivationPromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    `/api/game-config/environments/${environmentName}/activate`,
   );
   await page.getByTestId('confirm-activation').click();
   const secondEnvironment = await readApiData<Environment>(
@@ -677,11 +726,10 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   await page.getByRole('tab', { name: 'Environment' }).click();
   await page.getByTestId('open-rollback').click();
   await formField(page, 'rollback-reason').fill('E2E rollback verification.');
-  const rollbackPromise = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname ===
-        `/api/game-config/environments/${environmentName}/rollback`,
+  const rollbackPromise = waitForApiResponseOrFailure(
+    page,
+    'POST',
+    `/api/game-config/environments/${environmentName}/rollback`,
   );
   await page.getByTestId('confirm-rollback').click();
   const rolledBackEnvironment = await readApiData<Environment>(

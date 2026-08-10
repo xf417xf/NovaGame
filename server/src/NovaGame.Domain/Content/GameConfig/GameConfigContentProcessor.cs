@@ -9,13 +9,25 @@ public sealed class GameConfigContentProcessor
 {
     public GameConfigContentProcessingResult Process(string? schemaVersion, string? rawContentJson)
     {
-        var normalizedSchemaVersion = schemaVersion?.Trim() ?? string.Empty;
+        return Process(schemaVersion, rawContentJson, enforceRawContentLength: true);
+    }
+
+    internal GameConfigContentProcessingResult ProcessCanonicalSnapshotContent(
+        string? schemaVersion,
+        string? canonicalContentJson)
+    {
+        return Process(schemaVersion, canonicalContentJson, enforceRawContentLength: false);
+    }
+
+    private static GameConfigContentProcessingResult Process(
+        string? schemaVersion,
+        string? rawContentJson,
+        bool enforceRawContentLength)
+    {
+        var normalizedSchemaVersion = schemaVersion ?? string.Empty;
         var issues = new List<GameConfigValidationIssue>();
 
-        if (!string.Equals(
-                normalizedSchemaVersion,
-                GameConfigConstants.SupportedSchemaVersion,
-                StringComparison.Ordinal))
+        if (!GameConfigSchemaVersionRules.IsValid(schemaVersion))
         {
             issues.Add(new GameConfigValidationIssue(
                 GameConfigValidationCodes.UnsupportedSchemaVersion,
@@ -24,7 +36,8 @@ public sealed class GameConfigContentProcessor
         }
 
         var content = rawContentJson ?? string.Empty;
-        if (content.Length > GameConfigConstants.RawContentMaximumLength)
+        if (enforceRawContentLength &&
+            content.Length > GameConfigConstants.RawContentMaximumLength)
         {
             issues.Add(new GameConfigValidationIssue(
                 GameConfigValidationCodes.ContentTooLarge,

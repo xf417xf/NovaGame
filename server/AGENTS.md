@@ -8,7 +8,7 @@ Before server work, read:
 
 - `docs/architecture.md`;
 - `docs/workflows/development.md`;
-- `docs/goals/m0.5.md` when working on the active milestone.
+- the current executable goal identified by `docs/roadmap.md` when working on milestone scope.
 
 ## Technology Baseline
 
@@ -38,7 +38,13 @@ src/
 
 `NovaGame.Deployment` centralizes deployment-time configuration validation. `NovaGame.DbMigrator` is the migration and data-seeding composition root. Neither project is a business-domain module.
 
-Organize every layer by the owning business domain. Do not create one physical project or top-level entity module per Player, Inventory, Equipment, Mail, Ranking, or other catalog entry.
+## Specific Game Backend Boundary
+
+The projects under `server/` are the NovaGame framework server, not the backend for every game. Do not place SwordMaster or another game's combat, skills, enhancement, set bonuses, drops, shops, progression, economy, or operator workflows in these projects.
+
+Each game owns a separate backend solution or composition that depends on NovaGame packages and contracts. That game backend owns its domain code, persistence extensions and migrations, APIs, deployment composition, and game-specific tests. It may mirror the six-layer DDD responsibilities when useful, but NovaGame must never reference it. The completed M1 record documents SwordMaster's selected physical layout. Each future game backend must establish its own concrete layout without changing NovaGame ownership boundaries.
+
+Organize every NovaGame layer by its owning framework domain. Do not create one physical project or top-level entity module per entity or candidate mechanism.
 
 Allowed dependency direction:
 
@@ -70,7 +76,7 @@ Domain and Application code must not depend on EF Core, controllers, HTTP contex
 - Keep migrations owned by the DbContext that owns the tables.
 - Detect optimistic concurrency conflicts instead of silently overwriting data.
 - Use transactions for operations that change multiple authoritative records.
-- Design retryable commands, reward grants, purchases, mail claims, and similar mutations to be idempotent.
+- Design retryable NovaGame infrastructure commands to be idempotent. Game-owned reward grants, purchases, and mail claims must enforce idempotency in the owning game backend rather than adding those systems here.
 
 ## Time And Numeric Rules
 
@@ -86,7 +92,7 @@ Domain and Application code must not depend on EF Core, controllers, HTTP contex
 - Store passwords only through a reviewed password hasher.
 - Store refresh tokens as non-reversible hashes and rotate them on use.
 - Keep JWT keys and seed credentials outside the repository.
-- Audit administrator and economy-affecting mutations.
+- Audit administrator mutations here. Each game backend must audit its own economy-affecting mutations.
 
 ## HTTP APIs
 

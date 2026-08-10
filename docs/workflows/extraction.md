@@ -16,6 +16,8 @@ A second use case, meaningful variation, repeated implementation pressure, or a 
 
 The M0.5 infrastructure bootstrap exception does not make gameplay capabilities eligible for extraction.
 
+Complete game systems remain game-owned by default even when multiple games use similar names. Extraction evaluates a reusable mechanism, not whether NovaGame should absorb a game's Battle, Skills, Enhancement, Set Bonus, Drop, Shop, Progression, Economy, or live-operations domain.
+
 ## 1. Describe The Concrete Capability
 
 Document the current consumer, behavior, inputs, outputs, invariants, failure modes, dependencies, and tests. Identify every game-specific name, rule, data shape, balance assumption, and lifecycle decision.
@@ -26,15 +28,17 @@ If the current behavior is not understood or tested, improve it in the game befo
 
 Keep game-specific policy, content, balancing, terminology, presentation, and orchestration in the game.
 
+For example, a deterministic modifier accumulator may be reusable while a game's stat formula remains game-owned; an idempotent purchase transaction mechanism may be reusable while its Shop catalog, prices, limits, currencies, and eligibility rules remain game-owned.
+
 Candidate reusable mechanisms must be independently useful and must not contain SwordMaster concepts such as Forge, SwordSoul, Sect, or Jianghu. Prefer composition and explicit extension points over flags for known games.
 
 Do not generalize names while retaining hidden game assumptions.
 
 ## 3. Define The NovaGame Ownership Boundary
 
-Choose the owning NovaGame business domain and required layers. Keep the capability in the six standard business-layer projects unless validation proves that it needs an independent physical-module lifecycle. Deployment and DbMigrator remain operational composition projects, not extraction targets.
+Choose the owning NovaGame mechanism boundary and required layers. Do not migrate the complete source-game domain into NovaGame. Keep an extracted mechanism in the six standard business-layer projects unless validation proves that it needs an independent physical-module lifecycle. Deployment and DbMigrator remain operational composition projects, not extraction targets.
 
-Define the smallest public contract required by the game. Mark the contract experimental until the extraction is complete and the consumer passes.
+Define the smallest public contract required by the game. Keep the contract experimental until an explicit maturity decision is supported by consumer and compatibility evidence. Completing extraction and passing one consumer do not automatically promote it.
 
 ## 4. Move Behavior And Generalize Tests
 
@@ -64,7 +68,7 @@ Promote the API only when:
 - public names contain no game-specific concepts;
 - compatibility expectations are explicit.
 
-After promotion, prefer additive evolution and version breaking changes. If the evidence remains weak, keep the capability game-owned and record it as an extraction candidate.
+After promotion, prefer additive evolution and version breaking changes. If extraction evidence is insufficient before migration, keep the capability game-owned and record it as a candidate. If extraction succeeds but public-contract evidence remains insufficient, keep the extracted contract experimental and record the additional consumers, package boundaries, variations, or operational evidence required for promotion.
 
 ## Do Not Extract When
 
@@ -73,4 +77,5 @@ After promotion, prefer additive evolution and version breaking changes. If the 
 - configuration flags are replacing game policy;
 - no consumer can exercise the proposed contract;
 - the extraction creates circular domain dependencies;
+- the proposal moves a complete game-owned system instead of an independently useful mechanism;
 - the active milestone does not include extraction.

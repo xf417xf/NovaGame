@@ -12,6 +12,7 @@ public sealed class NovaGameDomainModule : NovaCoreModule
     public override void ConfigureServices(IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton<GameConfigContentProcessor>();
+        services.AddSingleton<GameConfigSnapshotValidator>();
         services.AddSingleton<GameConfigSnapshotBuilder>();
     }
 }

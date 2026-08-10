@@ -9,7 +9,7 @@ Before client work, read:
 - `docs/architecture.md`;
 - `docs/workflows/development.md`;
 - `docs/workflows/configuration-release.md` for configuration consumption;
-- `docs/goals/m0.5.md` when working on the active milestone.
+- the current executable goal identified by `docs/roadmap.md` when working on milestone scope.
 
 ## Boundary
 
@@ -20,6 +20,8 @@ Keep engine-independent TypeScript concepts separate from Cocos Creator adapters
 - framework packages own transport-neutral contracts, snapshot validation, lookup APIs, cache policy, and deterministic data handling;
 - adapters own Cocos Creator lifecycle, asset integration, platform APIs, and engine-specific bootstrapping;
 - samples consume framework and adapter packages but are never imported by them.
+
+Game-specific packages own combat presentation, skills, progression, equipment policy, economy flows, content, and other game behavior. Similar concepts in multiple games do not justify moving those packages into `clients/cocos/`; only a validated engine or transport mechanism may be extracted.
 
 Future Unity or Godot support must not require server-side business-logic changes. It does not require sharing the same client implementation language or engine adapter.
 

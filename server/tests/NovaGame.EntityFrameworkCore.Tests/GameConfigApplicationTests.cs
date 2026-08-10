@@ -1,4 +1,6 @@
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +20,7 @@ public sealed class GameConfigApplicationTests
     private const string SeedPassword = "Test-Administrator-Password-123!";
     private const string AuditFailureConstraintName = "ck_game_config_audit_fail_app";
     private const string TransactionConfigurationSet = "app-transaction-rollback";
+    private const string CustomSchemaVersion = "catalog.content.v2";
 
     private readonly MySqlDatabaseFixture _fixture;
 
@@ -103,6 +106,116 @@ public sealed class GameConfigApplicationTests
                     })));
         Assert.Equal(GameConfigFailureKind.Conflict, conflict.FailureKind);
         Assert.Equal(GameConfigErrorCodes.DraftRevisionConflict, conflict.Code);
+    }
+
+    [Fact]
+    public async Task CustomSchemaIdentifierPublishesAndExportsUnchanged()
+    {
+        await using var factory = CreateFactory();
+        var administrator = await SeedAndGetAdministratorAsync(factory);
+        var created = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            service => service.CreateDraftAsync(CreateDraftRequest(
+                CreateConfigurationSet("custom-schema"),
+                CustomSchemaVersion)));
+        var validation = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            service => service.ValidateDraftAsync(
+                created.Id,
+                new ValidateGameConfigDraftRequest { ExpectedRevision = created.Revision }));
+        var published = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            service => service.PublishDraftAsync(
+                created.Id,
+                new PublishGameConfigDraftRequest
+                {
+                    ExpectedRevision = created.Revision,
+                    ReleaseNotes = "Custom schema publication verification"
+                }));
+        var snapshot = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            service => service.DownloadVersionSnapshotAsync(published.Id));
+        using var snapshotDocument = JsonDocument.Parse(snapshot.Content);
+
+        Assert.Equal(CustomSchemaVersion, created.SchemaVersion);
+        Assert.True(validation.IsValid);
+        Assert.Equal(CustomSchemaVersion, published.SchemaVersion);
+        Assert.Equal(
+            CustomSchemaVersion,
+            snapshotDocument.RootElement.GetProperty("schemaVersion").GetString());
+    }
+
+    [Fact]
+    public void PublicContractStillRejectsUnsafeSchemaIdentifiers()
+    {
+        var request = CreateDraftRequest(
+            CreateConfigurationSet("invalid-schema"),
+            "catalog/content");
+        var results = new List<ValidationResult>();
+
+        var isValid = Validator.TryValidateObject(
+            request,
+            new ValidationContext(request),
+            results,
+            validateAllProperties: true);
+
+        Assert.False(isValid);
+        Assert.Contains(
+            results,
+            result => result.MemberNames.Any(
+                member => member == nameof(CreateGameConfigDraftRequest.SchemaVersion)));
+    }
+
+    [Fact]
+    public async Task SnapshotDownloadRejectsDriftedPersistedMetadata()
+    {
+        await using var factory = CreateFactory();
+        var administrator = await SeedAndGetAdministratorAsync(factory);
+        var created = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            service => service.CreateDraftAsync(
+                CreateDraftRequest(CreateConfigurationSet("snapshot-drift"))));
+        var validation = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            service => service.ValidateDraftAsync(
+                created.Id,
+                new ValidateGameConfigDraftRequest { ExpectedRevision = created.Revision }));
+        Assert.True(validation.IsValid);
+        var published = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            service => service.PublishDraftAsync(
+                created.Id,
+                new PublishGameConfigDraftRequest
+                {
+                    ExpectedRevision = created.Revision,
+                    ReleaseNotes = "Persisted metadata drift verification"
+                }));
+
+        const string driftedCanonicalContent = "{\"collections\":{\"records\":[]}}";
+        await using (var dbContext = _fixture.CreateDbContext())
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE `game_config_published_versions`
+                SET `CanonicalContentJson` = {driftedCanonicalContent}
+                WHERE `Id` = {published.Id}
+                """);
+        }
+
+        var exception = await Assert.ThrowsAsync<GameConfigException>(() =>
+            ExecuteAsAdministratorAsync(
+                factory,
+                administrator,
+                service => service.DownloadVersionSnapshotAsync(published.Id)));
+
+        Assert.Equal(GameConfigFailureKind.InternalError, exception.FailureKind);
+        Assert.Equal(GameConfigErrorCodes.SnapshotIntegrityInvalid, exception.Code);
     }
 
     [Fact]
@@ -245,13 +358,15 @@ public sealed class GameConfigApplicationTests
         };
     }
 
-    private static CreateGameConfigDraftRequest CreateDraftRequest(string configurationSet)
+    private static CreateGameConfigDraftRequest CreateDraftRequest(
+        string configurationSet,
+        string schemaVersion = GameConfigConstants.SupportedSchemaVersion)
     {
         return new CreateGameConfigDraftRequest
         {
             ConfigurationSet = configurationSet,
             Name = "Application test configuration",
-            SchemaVersion = GameConfigConstants.SupportedSchemaVersion,
+            SchemaVersion = schemaVersion,
             Content = ValidContent
         };
     }

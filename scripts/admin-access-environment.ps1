@@ -1,5 +1,7 @@
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot "process-environment.ps1")
+
 $script:NovaGameAdminAccessEnvironmentKeys = @(
     "NovaGame__AdminAccess__Jwt__SigningKey",
     "NovaGame__AdminAccess__Seed__UserName",
@@ -210,9 +212,9 @@ function Initialize-NovaGameAdminAccessEnvironmentFile {
 function Set-NovaGameAdminAccessProcessEnvironment {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Values)
 
-    $previousValues = [ordered]@{}
+    $previousValues = Get-NovaGameProcessEnvironmentSnapshot `
+        -Names $script:NovaGameAdminAccessEnvironmentKeys
     foreach ($key in $script:NovaGameAdminAccessEnvironmentKeys) {
-        $previousValues[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
         [Environment]::SetEnvironmentVariable($key, [string]$Values[$key], "Process")
     }
 
@@ -222,7 +224,5 @@ function Set-NovaGameAdminAccessProcessEnvironment {
 function Restore-NovaGameAdminAccessProcessEnvironment {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$PreviousValues)
 
-    foreach ($key in $script:NovaGameAdminAccessEnvironmentKeys) {
-        [Environment]::SetEnvironmentVariable($key, $PreviousValues[$key], "Process")
-    }
+    Restore-NovaGameProcessEnvironmentSnapshot -Snapshot $PreviousValues
 }

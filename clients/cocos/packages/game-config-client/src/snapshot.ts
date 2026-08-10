@@ -18,6 +18,8 @@ import { GameConfigClientError, asGameConfigClientError } from "./errors.js";
 import { NobleSha256, assertSha256Hex } from "./hash.js";
 
 const STRONG_SHA256_ETAG = /^"([0-9a-f]{64})"$/;
+const SNAPSHOT_MAXIMUM_BYTE_LENGTH = 25_166_848;
+const SNAPSHOT_MAXIMUM_DEPTH = 65;
 const SAFE_SLUG = /^[a-z][a-z0-9-]{0,63}$/;
 const RECORD_ID = /^[a-z][a-z0-9-]{0,127}$/;
 const GUID_D = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -40,6 +42,11 @@ const JSONC_BLOCK_COMMENT_TRIVIA = 13;
 const JSONC_LINE_BREAK_TRIVIA = 14;
 const JSONC_TRIVIA = 15;
 const JSONC_EOF = 17;
+const JSONC_OPEN_BRACE = 1;
+const JSONC_CLOSE_BRACE = 2;
+const JSONC_OPEN_BRACKET = 3;
+const JSONC_CLOSE_BRACKET = 4;
+const DOTNET_JSON_ESCAPED_ASCII = new Set([0x22, 0x26, 0x27, 0x2b, 0x3c, 0x3e, 0x60]);
 
 class ValidatedGameConfigSnapshot implements GameConfigSnapshot {
   readonly configurationSet: string;
@@ -91,6 +98,9 @@ export async function validateGameConfigSnapshot(
 ): Promise<GameConfigSnapshot> {
   const sha256 = options.sha256 ?? new NobleSha256();
   const snapshotHash = readStrongEtag(options.etag);
+  if (options.body.byteLength > SNAPSHOT_MAXIMUM_BYTE_LENGTH) {
+    throw invalidContract(`The snapshot cannot exceed ${SNAPSHOT_MAXIMUM_BYTE_LENGTH} bytes.`);
+  }
   const actualSnapshotHash = await digestHex(sha256, options.body);
   if (actualSnapshotHash !== snapshotHash) {
     throw new GameConfigClientError(
@@ -100,7 +110,9 @@ export async function validateGameConfigSnapshot(
   }
 
   const source = decodeStrictUtf8(options.body);
+  assertMaximumSourceContainerDepth(source, SNAPSHOT_MAXIMUM_DEPTH);
   const { contentNode, rootNode } = parseSnapshotTree(source);
+  assertMaximumContainerDepth(rootNode, SNAPSHOT_MAXIMUM_DEPTH);
   assertNoDuplicateProperties(rootNode);
   const topLevelNodes = readExactObjectFields(rootNode, TOP_LEVEL_FIELDS);
   const integrityNode = topLevelNodes.get("integrity");
@@ -148,7 +160,10 @@ export async function validateGameConfigSnapshot(
   }
 
   const configurationVersion = requireString(root, "configurationVersion");
-  if (!GUID_D.test(configurationVersion)) {
+  if (
+    !GUID_D.test(configurationVersion) ||
+    configurationVersion === "00000000-0000-0000-0000-000000000000"
+  ) {
     throw invalidContract("The snapshot configuration version is invalid.");
   }
   if (
@@ -229,17 +244,24 @@ function assertCanonicalContent(contentNode: JsonNode, rawContent: string): void
       );
     }
   }
-  assertCanonicalNode(contentNode, []);
+  assertCanonicalNode(contentNode, [], rawContent, contentNode.offset);
 }
 
-function assertCanonicalNode(node: JsonNode, path: readonly string[]): void {
+function assertCanonicalNode(
+  node: JsonNode,
+  path: readonly string[],
+  source: string,
+  sourceOffset: number,
+): void {
   if (node.type === "object") {
     const properties = node.children ?? [];
     const names = properties.map((property) => {
-      const name = property.children?.[0]?.value;
-      if (typeof name !== "string") {
+      const nameNode = property.children?.[0];
+      const name = nameNode?.value;
+      if (!nameNode || nameNode.type !== "string" || typeof name !== "string") {
         throw invalidContract("Snapshot object properties are malformed.");
       }
+      assertCanonicalStringNode(nameNode, source, sourceOffset);
       return name;
     });
     const sortedNames = [...names].sort(compareOrdinal);
@@ -255,8 +277,13 @@ function assertCanonicalNode(node: JsonNode, path: readonly string[]): void {
       if (typeof name !== "string" || !value) {
         throw invalidContract("Snapshot object properties are malformed.");
       }
-      assertCanonicalNode(value, [...path, name]);
+      assertCanonicalNode(value, [...path, name], source, sourceOffset);
     }
+    return;
+  }
+
+  if (node.type === "string") {
+    assertCanonicalStringNode(node, source, sourceOffset);
     return;
   }
 
@@ -281,8 +308,69 @@ function assertCanonicalNode(node: JsonNode, path: readonly string[]): void {
     }
   }
   for (const child of children) {
-    assertCanonicalNode(child, path);
+    assertCanonicalNode(child, path, source, sourceOffset);
   }
+}
+
+function assertCanonicalStringNode(node: JsonNode, source: string, sourceOffset: number): void {
+  if (typeof node.value !== "string") {
+    throw invalidContract("Snapshot string value is malformed.");
+  }
+  const actual = source.slice(node.offset - sourceOffset, node.offset - sourceOffset + node.length);
+  if (actual !== encodeDotNetJsonString(node.value)) {
+    throw new GameConfigClientError(
+      "canonicalization_mismatch",
+      "Canonical snapshot strings must use the producer JSON encoding.",
+    );
+  }
+}
+
+function encodeDotNetJsonString(value: string): string {
+  let encoded = '"';
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    switch (code) {
+      case 0x08:
+        encoded += "\\b";
+        break;
+      case 0x09:
+        encoded += "\\t";
+        break;
+      case 0x0a:
+        encoded += "\\n";
+        break;
+      case 0x0c:
+        encoded += "\\f";
+        break;
+      case 0x0d:
+        encoded += "\\r";
+        break;
+      case 0x5c:
+        encoded += "\\\\";
+        break;
+      default:
+        if (code >= 0xd800 && code <= 0xdbff) {
+          const next = value.charCodeAt(index + 1);
+          if (next >= 0xdc00 && next <= 0xdfff) {
+            encoded += unicodeEscape(code) + unicodeEscape(next);
+            index++;
+          } else {
+            encoded += "\\uFFFD";
+          }
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          encoded += "\\uFFFD";
+        } else if (code >= 0x20 && code <= 0x7e && !DOTNET_JSON_ESCAPED_ASCII.has(code)) {
+          encoded += String.fromCharCode(code);
+        } else {
+          encoded += unicodeEscape(code);
+        }
+    }
+  }
+  return `${encoded}"`;
+}
+
+function unicodeEscape(code: number): string {
+  return `\\u${code.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
 function readStrongEtag(etag: string): string {
@@ -364,6 +452,46 @@ function parseSnapshotTree(source: string): {
   return { contentNode, rootNode };
 }
 
+function assertMaximumSourceContainerDepth(source: string, maximumDepth: number): void {
+  const scanner = createScanner(source, false);
+  let depth = 0;
+  for (let token = scanner.scan(); token !== JSONC_EOF; token = scanner.scan()) {
+    if (token === JSONC_OPEN_BRACE || token === JSONC_OPEN_BRACKET) {
+      depth++;
+      if (depth > maximumDepth) {
+        throw invalidContract(`The snapshot cannot exceed ${maximumDepth} JSON container levels.`);
+      }
+    } else if ((token === JSONC_CLOSE_BRACE || token === JSONC_CLOSE_BRACKET) && depth > 0) {
+      depth--;
+    }
+  }
+}
+
+function assertMaximumContainerDepth(root: JsonNode, maximumDepth: number): void {
+  const pending: { readonly depth: number; readonly node: JsonNode }[] = [{ depth: 1, node: root }];
+  while (pending.length !== 0) {
+    const current = pending.pop()!;
+    if (current.depth > maximumDepth) {
+      throw invalidContract(`The snapshot cannot exceed ${maximumDepth} JSON container levels.`);
+    }
+
+    const children =
+      current.node.type === "object"
+        ? (current.node.children ?? []).map((property) => property.children?.[1])
+        : current.node.type === "array"
+          ? (current.node.children ?? [])
+          : [];
+    for (const child of children) {
+      if (!child) {
+        throw invalidContract("Snapshot JSON containers are malformed.");
+      }
+      if (child.type === "object" || child.type === "array") {
+        pending.push({ depth: current.depth + 1, node: child });
+      }
+    }
+  }
+}
+
 function assertNoDuplicateProperties(node: JsonNode): void {
   if (node.type === "object") {
     const names = new Set<string>();
@@ -425,6 +553,7 @@ function buildContent(value: unknown): {
     readonly GameConfigRecord[]
   >;
   const indexes = new Map<string, ReadonlyMap<string, GameConfigRecord>>();
+  const references: GameConfigReference[] = [];
 
   for (const collectionName of Object.keys(collectionsObject).sort(compareOrdinal)) {
     if (!SAFE_SLUG.test(collectionName)) {
@@ -455,6 +584,7 @@ function buildContent(value: unknown): {
         );
       }
 
+      collectReferences(recordObject, references);
       const frozen = freezeJsonObject(recordObject) as GameConfigRecord;
       records.push(frozen);
       byId.set(id, frozen);
@@ -464,12 +594,62 @@ function buildContent(value: unknown): {
     indexes.set(collectionName, byId);
   }
 
+  for (const reference of references) {
+    if (!indexes.get(reference.collection)?.has(reference.id)) {
+      throw invalidContract(
+        `Reference '${reference.collection}/${reference.id}' does not resolve.`,
+      );
+    }
+  }
+
   return {
     content: Object.freeze({
       collections: Object.freeze(collections),
     }),
     recordsByCollection: indexes,
   };
+}
+
+interface GameConfigReference {
+  readonly collection: string;
+  readonly id: string;
+}
+
+function collectReferences(value: unknown, references: GameConfigReference[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectReferences(item, references);
+    }
+    return;
+  }
+  if (!isObject(value)) {
+    return;
+  }
+
+  if (Object.hasOwn(value, "$ref")) {
+    const fields = Object.keys(value);
+    const reference = value.$ref;
+    if (fields.length !== 1 || typeof reference !== "string") {
+      throw invalidContract("A reference must contain exactly one string '$ref' property.");
+    }
+    const separator = reference.indexOf("/");
+    const collection = reference.slice(0, separator);
+    const id = reference.slice(separator + 1);
+    if (
+      separator <= 0 ||
+      separator !== reference.lastIndexOf("/") ||
+      !SAFE_SLUG.test(collection) ||
+      !RECORD_ID.test(id)
+    ) {
+      throw invalidContract("A reference must use the exact 'collection/id' form.");
+    }
+    references.push({ collection, id });
+    return;
+  }
+
+  for (const child of Object.values(value)) {
+    collectReferences(child, references);
+  }
 }
 
 function freezeJsonObject(

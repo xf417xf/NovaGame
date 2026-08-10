@@ -9,7 +9,7 @@ Before admin work, read:
 - `docs/architecture.md`;
 - `docs/workflows/development.md`;
 - `docs/workflows/configuration-release.md` for configuration operations;
-- `docs/goals/m0.5.md` when working on the active milestone.
+- the current executable goal identified by `docs/roadmap.md` when working on milestone scope.
 
 ## Technology Baseline
 
@@ -27,6 +27,8 @@ The admin is an operational client of NovaGame APIs. It must not contain domain 
 
 Client-side validation improves operator feedback but never replaces server validation. Use typed API modules and generated contracts where practical.
 
+The `admin/` application owns framework operations such as administrator access and GameConfig. Game-specific Battle, Skills, Enhancement, Drops, Shop, economy, progression, and live-operations pages belong to that game's admin extension and consume that game's backend. They may reuse the Vben shell, authentication flow, permission conventions, and shared UI components without moving game policy into NovaGame.
+
 ## Interface Rules
 
 - Build the working operations surface as the first authenticated screen.
@@ -36,7 +38,7 @@ Client-side validation improves operator feedback but never replaces server vali
 - Keep one clear accent color and restrained surface hierarchy.
 - Provide loading, empty, error, unauthorized, forbidden, conflict, and retry states.
 - Keep controls stable and ensure tables and forms remain usable at supported desktop and mobile widths.
-- Do not expose unfinished Mail, Ranking, Shop, Activity, or gameplay navigation entries.
+- Do not expose game-owned Battle, Skills, Enhancement, Drops, Shop, economy, progression, or live-operations navigation entries in the generic NovaGame admin.
 
 ## Authentication And Permissions
 

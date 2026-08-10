@@ -12,6 +12,11 @@ The server remains authoritative. A client snapshot is activated only after its
 complete response hash, embedded content hash, contract metadata, and lookup
 indexes have all been validated.
 
+The TypeScript client aligns with the producer and .NET validator for canonical
+UTF-8 encoding, byte and depth limits, nonzero version identifiers, exact and
+resolved references, and both integrity boundaries within its supported schema.
+This wire-format parity does not promote the separate C# API to stable status.
+
 `LocalStorageSnapshotCache` uses two slots and switches the active pointer only
 after a candidate is written, read back, and hash-verified. Browser and native
 storage quotas are platform-specific. Large snapshots should use a custom

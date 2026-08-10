@@ -1,5 +1,7 @@
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot "process-environment.ps1")
+
 $script:NovaGameDatabaseEnvironmentKeys = @(
     "NOVAGAME_MYSQL_DATABASE",
     "NOVAGAME_MYSQL_USER",
@@ -195,9 +197,9 @@ function Initialize-NovaGameDatabaseEnvironmentFile {
 function Set-NovaGameDatabaseProcessEnvironment {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$Values)
 
-    $previousValues = [ordered]@{}
+    $previousValues = Get-NovaGameProcessEnvironmentSnapshot `
+        -Names $script:NovaGameDatabaseEnvironmentKeys
     foreach ($key in $script:NovaGameDatabaseEnvironmentKeys) {
-        $previousValues[$key] = [Environment]::GetEnvironmentVariable($key, "Process")
         [Environment]::SetEnvironmentVariable($key, [string]$Values[$key], "Process")
     }
 
@@ -207,9 +209,7 @@ function Set-NovaGameDatabaseProcessEnvironment {
 function Restore-NovaGameDatabaseProcessEnvironment {
     param([Parameter(Mandatory)][System.Collections.IDictionary]$PreviousValues)
 
-    foreach ($key in $script:NovaGameDatabaseEnvironmentKeys) {
-        [Environment]::SetEnvironmentVariable($key, $PreviousValues[$key], "Process")
-    }
+    Restore-NovaGameProcessEnvironmentSnapshot -Snapshot $PreviousValues
 }
 
 function Get-NovaGameComposeArguments {

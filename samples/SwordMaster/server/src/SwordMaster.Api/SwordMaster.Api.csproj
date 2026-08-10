@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <PackageReference Include="NovaCore.BuildingBlocks" Version="0.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SwordMaster.Application\SwordMaster.Application.csproj" />
+    <ProjectReference Include="..\SwordMaster.Host.EntityFrameworkCore\SwordMaster.Host.EntityFrameworkCore.csproj" />
+    <ProjectReference Include="$(NovaGameRepositoryRoot)\server\src\NovaGame.Api\NovaGame.Api.csproj" />
+    <ProjectReference Include="$(NovaGameRepositoryRoot)\server\src\NovaGame.Deployment\NovaGame.Deployment.csproj" />
+  </ItemGroup>
+</Project>

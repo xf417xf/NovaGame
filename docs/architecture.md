@@ -21,6 +21,19 @@ NovaCore
 - Samples and validation projects may exercise public NovaGame contracts but are never framework dependencies.
 - Admin and client projects consume versioned public contracts; they do not reference server implementation projects.
 
+## Specific Game Backend Composition
+
+NovaGame is a framework dependency, not one shared business backend for every game. Each specific game owns and deploys its own backend composition, database schema and migrations, HTTP APIs, game administration extensions, and game client behavior.
+
+```text
+NovaCore
+  -> NovaGame packages and contracts
+    -> SwordMaster backend, admin extensions, and client
+    -> AnotherGame backend, admin extensions, and client
+```
+
+A game backend may follow the same DDD layers when useful, but it remains a separate solution and dependency consumer. NovaGame must never reference, host, or conditionally branch on a specific game's business system. The completed M1 record documents SwordMaster's concrete backend layout; another game must establish its own layout from an approved use case rather than copying empty projects.
+
 ## Server Structure
 
 The M0.5 server uses six standard business-layer projects plus two operational composition projects:
@@ -58,39 +71,52 @@ Every project is organized internally by business domain. Layers represent techn
 
 Controllers remain thin. Application coordinates use cases. Domain owns business rules. Repositories persist aggregates.
 
-## Business Domain Catalog
+## Ownership Catalog
 
-The catalog describes vocabulary and likely ownership boundaries. It is not a backlog and does not authorize empty scaffolding.
+Ownership starts in the specific game. A capability moves into NovaGame only when a concrete consumer proves a reusable mechanism and the extraction workflow is separately authorized.
+
+### NovaGame-Owned Baseline
+
+The verified NovaGame-owned business capabilities are currently limited to:
 
 ```text
-PlayerAssets/
-  Players
-  Inventory
-  Equipment
-  Currency
-  Rewards
-
-Gameplay/
-  Stats
-  Skills
-  Battle
-  Drops
-  Quests
+Operations/
+  AdminAccess
 
 Content/
   GameConfig
-  Maps
-  Monsters
-  Items
-
-Operations/
-  Mail
-  Shop
-  Ranking
-  Activity
 ```
 
-Names may evolve when concrete use cases reveal better boundaries. Avoid the name `Attribute` for the stats domain because it conflicts conceptually with .NET attributes.
+Cross-cutting framework infrastructure includes authentication composition, permissions, auditing, configuration release, MySQL integration, API conventions, typed client contracts, and engine adapters. Infrastructure supports game backends but does not own their game rules.
+
+`Content/GameConfig` also owns the extracted neutral snapshot-validation mechanism. The concrete
+`GameConfigSnapshotValidator` and immutable `ValidatedGameConfigSnapshot` are reusable protocol
+services inside the existing Domain project; they do not create another business domain or physical
+module. Their C# API remains experimental after M2 even though the extraction behavior is verified.
+
+### Candidate Common Mechanisms
+
+The following are possible reusable mechanisms, not current NovaGame modules or implementation commitments:
+
+- deterministic stat or attribute values and modifiers;
+- item identity, configuration references, and ownership primitives;
+- inventory placement and equipment-assignment state;
+- reusable transaction, idempotency, audit, and configuration mechanisms used by a game-owned capability.
+
+These candidates must first work in a specific game. A future authorized extraction may move only the smallest independently useful mechanism supported by evidence. In C# namespaces and folders, prefer `Stats` over the bare name `Attribute` to avoid confusion with .NET attributes.
+
+### Specific Game-Owned By Default
+
+Complete business systems and their policies remain in each game's backend by default, including:
+
+- character definitions, progression, and game-specific stat formulas;
+- combat, skills, effects, targeting, and battle sequencing;
+- equipment restrictions, enhancement, affixes, set bonuses, durability, and crafting;
+- drops, rewards, probability, pity rules, quests, maps, monsters, and content orchestration;
+- shops, pricing, currencies, purchase limits, economy, and monetization policy;
+- mail, ranking, activity, and other live-operations behavior when their semantics depend on the game.
+
+A generic name does not make a full system reusable. NovaGame may later own a proven mechanism used by one of these systems, but the game retains its terminology, policy, configuration meaning, orchestration, persistence extensions, APIs, and operator workflows.
 
 ## Domain Ownership
 
@@ -100,7 +126,7 @@ Application coordinates cross-domain use cases. Domain events communicate comple
 
 ## Physical Module Rule
 
-A domain is not automatically a physical NovaCore module. M0.5 built-in domains remain in the six standard business-layer projects; Deployment and DbMigrator remain operational composition projects.
+A domain is not automatically a physical NovaCore module. The M0.5 framework-owned `Operations/AdminAccess` and `Content/GameConfig` capabilities remain in the six standard business-layer projects; Deployment and DbMigrator remain operational composition projects.
 
 A physical module is justified only after validation demonstrates a need for an independent package, dependency graph, persistence boundary, feature lifecycle, installation, or removal lifecycle. One entity is never sufficient justification.
 
@@ -120,11 +146,18 @@ The published version also stores a lowercase hexadecimal SHA-256 hash of the co
 
 The server verifies both the complete snapshot hash and the embedded canonical-content hash before serving stored bytes. Clients must verify schema compatibility and both integrity boundaries before atomically replacing their active snapshot.
 
+The extracted `GameConfigSnapshotValidator` applies the same neutral producer contract to exact
+snapshot bytes for .NET consumers and returns immutable verified metadata plus canonical content.
+It is synchronous, stateless, and independent of transport, persistence, HTTP, OpenAPI, caching,
+and game content policy. The engine-independent TypeScript client enforces the corresponding wire
+rules for its supported schema. This cross-runtime behavior evidence does not by itself make the C#
+constructor, method signature, result shape, dependency-injection lifetime, or failure model stable.
+
 ## Runtime Boundaries
 
 ### Server
 
-The server is authoritative for identity, ownership, progression, rewards, prices, permissions, time-sensitive decisions, and economy changes.
+Each concrete game server is authoritative for identity, ownership, progression, rewards, prices, permissions, time-sensitive decisions, and economy changes. NovaGame provides reusable infrastructure and promoted mechanisms; the game backend owns its game decisions.
 
 Use UTC, an injectable clock, exact numeric types for authoritative values, explicit transactions, idempotency for retryable mutations, optimistic concurrency where conflicting writes are possible, and audit records for privileged or economy-affecting changes.
 
@@ -132,11 +165,11 @@ EF provider execution-strategy retries are disabled in M0.5. NovaCore currently 
 
 ### Admin
 
-The Vben `web-ele` admin is an operational API client. It contains presentation and interaction behavior, not domain policy. It uses server permission codes for navigation and action visibility while the server remains the authorization authority.
+The Vben `web-ele` NovaGame admin is an operational client for framework-owned APIs such as administrator access and GameConfig. It contains presentation and interaction behavior, not domain policy. Each game owns its game-specific operator pages and consumes its own backend APIs, while it may reuse the NovaGame shell, authentication flow, components, and conventions. Server permission codes control navigation and action visibility; the owning server remains the authorization authority.
 
 ### Client
 
-Engine-independent TypeScript packages own reusable contracts and snapshot behavior. Cocos adapters own engine integration. A specific game consumes both and adds its own gameplay and content.
+Engine-independent TypeScript packages own promoted reusable contracts and snapshot behavior. Cocos adapters own engine integration. A specific game consumes both and adds its own game systems, presentation, and content; those game packages do not move into the NovaGame client framework merely because another game might need similar behavior.
 
 Future client-engine support must preserve server contracts and server-side business logic, but each engine may have a separate adapter and implementation language.
 
@@ -144,7 +177,7 @@ Future client-engine support must preserve server contracts and server-side busi
 
 Do not expose EF Core entities or mutable domain aggregates. Public APIs use explicit DTOs, stable error codes, and documented semantics.
 
-M0.5 abstractions remain experimental until validated. After promotion, prefer additive changes and version breaking changes. SwordMaster must continue to pass as a contract consumer after extraction or public API evolution.
+An extracted contract remains experimental until an explicit maturity decision promotes it. Extraction validates ownership and reuse; stable promotion additionally requires evidence for the public API shape and compatibility boundary. After promotion, prefer additive changes and version breaking changes. SwordMaster must continue to pass as a contract consumer after extraction or public API evolution.
 
 ## M0.5 Decisions
 
@@ -154,4 +187,4 @@ M0.5 abstractions remain experimental until validated. After promotion, prefer a
 - Administrator authentication and permissions are real server capabilities, not a mock-only frontend flow.
 - Versioned GameConfig is the first complete infrastructure vertical slice.
 - Cocos and SwordMaster validate configuration snapshot consumption only.
-- Mail, Ranking, Shop, Activity, and gameplay systems remain out of scope.
+- Complete game-owned systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity remain outside the NovaGame baseline unless a later evidence-backed extraction promotes only a reusable mechanism.
