@@ -35,5 +35,6 @@ public sealed class SwordMasterDbMigratorModule : NovaCoreModule
                 $"{SwordMasterPlayerAssetsDevelopmentSeedOptions.SectionName} must define valid non-empty identifiers, a configured item identifier, and base attributes.")
             .ValidateOnStart();
         services.AddScoped<SwordMasterPlayerAssetsDevelopmentSeedRunner>();
+        services.AddScoped<SwordMasterPlayerEquipmentGrantPermissionSeedRunner>();
     }
 }

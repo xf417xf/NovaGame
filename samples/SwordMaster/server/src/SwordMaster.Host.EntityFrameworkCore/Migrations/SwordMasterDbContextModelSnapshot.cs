@@ -64,6 +64,134 @@ namespace SwordMaster.Host.EntityFrameworkCore.Migrations
                     b.ToTable("sm_player_assets_profiles", (string)null);
                 });
 
+            modelBuilder.Entity("SwordMaster.Domain.PlayerAssets.PlayerEquipmentGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("GrantId");
+
+                    b.Property<Guid>("ConfigurationVersionId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("ConfiguredItemId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("varchar(128)")
+                        .UseCollation("utf8mb4_0900_bin");
+
+                    b.Property<string>("GrantCorrelationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("varchar(128)");
+
+                    b.Property<Guid>("GrantIdempotencyKey")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("GrantIpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("GrantReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<string>("GrantRequestFingerprint")
+                        .IsRequired()
+                        .HasColumnType("char(64)")
+                        .UseCollation("ascii_bin");
+
+                    MySqlPropertyBuilderExtensions.HasCharSet(b.Property<string>("GrantRequestFingerprint"), "ascii");
+
+                    b.Property<long>("GrantResultingRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("GrantUserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)");
+
+                    b.Property<DateTime>("GrantedAtUtc")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("GrantedByAdministratorId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("OwnedItemId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("PlayerIdValue")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("PlayerId");
+
+                    b.Property<string>("RollbackCorrelationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("varchar(128)");
+
+                    b.Property<Guid?>("RollbackIdempotencyKey")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("RollbackIpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("RollbackReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)");
+
+                    b.Property<string>("RollbackRequestFingerprint")
+                        .HasColumnType("char(64)")
+                        .UseCollation("ascii_bin");
+
+                    MySqlPropertyBuilderExtensions.HasCharSet(b.Property<string>("RollbackRequestFingerprint"), "ascii");
+
+                    b.Property<long?>("RollbackResultingRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("RollbackUserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)");
+
+                    b.Property<DateTime?>("RolledBackAtUtc")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid?>("RolledBackByAdministratorId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint unsigned");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlayerIdValue", "GrantIdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sm_player_equipment_grants_player_grant_key");
+
+                    b.HasIndex("PlayerIdValue", "OwnedItemId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sm_player_equipment_grants_player_item");
+
+                    b.HasIndex("PlayerIdValue", "RollbackIdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sm_player_equipment_grants_player_rollback_key");
+
+                    b.HasIndex("PlayerIdValue", "GrantedAtUtc", "Id")
+                        .HasDatabaseName("ix_sm_player_equipment_grants_player_granted");
+
+                    b.ToTable("sm_player_equipment_grants", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_sm_player_equipment_grants_grant_revision", "`GrantResultingRevision` > 0");
+
+                            t.HasCheckConstraint("ck_sm_player_equipment_grants_rollback_complete", "((`Status` = 1 AND `RolledBackByAdministratorId` IS NULL AND `RolledBackAtUtc` IS NULL AND `RollbackReason` IS NULL AND `RollbackIdempotencyKey` IS NULL AND `RollbackRequestFingerprint` IS NULL AND `RollbackResultingRevision` IS NULL AND `RollbackIpAddress` IS NULL AND `RollbackUserAgent` IS NULL AND `RollbackCorrelationId` IS NULL) OR (`Status` = 2 AND `RolledBackByAdministratorId` IS NOT NULL AND `RolledBackAtUtc` IS NOT NULL AND `RollbackReason` IS NOT NULL AND `RollbackIdempotencyKey` IS NOT NULL AND `RollbackRequestFingerprint` IS NOT NULL AND `RollbackResultingRevision` IS NOT NULL))");
+
+                            t.HasCheckConstraint("ck_sm_player_equipment_grants_rollback_revision", "`RollbackResultingRevision` IS NULL OR `RollbackResultingRevision` > 0");
+
+                            t.HasCheckConstraint("ck_sm_player_equipment_grants_rollback_time", "`RolledBackAtUtc` IS NULL OR `RolledBackAtUtc` >= `GrantedAtUtc`");
+
+                            t.HasCheckConstraint("ck_sm_player_equipment_grants_status", "`Status` IN (1, 2)");
+                        });
+                });
+
             modelBuilder.Entity("SwordMaster.Domain.PlayerAssets.PlayerAssetsProfile", b =>
                 {
                     b.OwnsMany("SwordMaster.Domain.PlayerAssets.EquipmentAssignment", "EquipmentAssignments", b1 =>
@@ -195,6 +323,16 @@ namespace SwordMaster.Host.EntityFrameworkCore.Migrations
                     b.Navigation("EquipmentAssignments");
 
                     b.Navigation("OwnedItems");
+                });
+
+            modelBuilder.Entity("SwordMaster.Domain.PlayerAssets.PlayerEquipmentGrant", b =>
+                {
+                    b.HasOne("SwordMaster.Domain.PlayerAssets.PlayerAssetsProfile", null)
+                        .WithMany()
+                        .HasForeignKey("PlayerIdValue")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sm_player_equipment_grants_player");
                 });
 #pragma warning restore 612, 618
         }

@@ -29,7 +29,9 @@ public sealed class SwordMasterApplicationModule : NovaCoreModule
                 $"{PlayerAssetsGameConfigOptions.SectionName}:Environment must be a lowercase safe slug.")
             .ValidateOnStart();
         services.TryAddSingleton<PlayerAssetsGameConfigSnapshotParser>();
+        services.TryAddSingleton<PlayerEquipmentGrantRequestFingerprint>();
         services.AddScoped<IEquipmentDefinitionProvider, GameConfigEquipmentDefinitionProvider>();
         services.AddScoped<IPlayerAssetsAppService, PlayerAssetsAppService>();
+        services.AddScoped<IPlayerEquipmentGrantAppService, PlayerEquipmentGrantAppService>();
     }
 }

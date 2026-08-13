@@ -1,0 +1,71 @@
+{
+  "name": "@swordmaster/admin-web-ele",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "imports": {
+    "#/*": "./src/*"
+  },
+  "scripts": {
+    "build": "pnpm vite build --mode production",
+    "contract:generate": "openapi-ts --file openapi-ts.config.mjs",
+    "dev": "pnpm vite --mode development",
+    "format:check": "oxfmt --config oxfmt.config.mts --check .",
+    "lint": "oxlint --deny-warnings e2e openapi-ts.config.mjs oxfmt.config.mts oxlint.config.mts playwright.config.ts src vite.config.mts vitest.config.mts",
+    "preview": "vite preview --host 127.0.0.1",
+    "test:auth": "vitest run --config vitest.config.mts src/api/api-result.test.ts src/api/core/auth.test.ts src/api/core/user.test.ts src/api/request.test.ts src/store/auth.test.ts src/router/auth-routing.test.ts src/storage-namespace.test.ts src/main.test.ts src/bootstrap.test.ts",
+    "test:equipment-grant-model": "vitest run --config vitest.config.mts src/features/player-equipment-grants/model.test.ts",
+    "test:equipment-grant-transport": "vitest run --config vitest.config.mts src/api/player-equipment-grants.test.ts",
+    "test:equipment-grant-view": "vitest run --config vitest.config.mts src/views/player-equipment-grants/index.test.ts",
+    "test:e2e:equipment-grant": "playwright test --config playwright.config.ts",
+    "test:unit": "vitest run --config vitest.config.mts",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck"
+  },
+  "dependencies": {
+    "@vben/access": "workspace:*",
+    "@vben/common-ui": "workspace:*",
+    "@vben/constants": "workspace:*",
+    "@vben/hooks": "workspace:*",
+    "@vben/icons": "workspace:*",
+    "@vben/layouts": "workspace:*",
+    "@vben/locales": "workspace:*",
+    "@vben/preferences": "workspace:*",
+    "@vben/request": "workspace:*",
+    "@vben/stores": "workspace:*",
+    "@vben/styles": "workspace:*",
+    "@vben/types": "workspace:*",
+    "@vben/utils": "workspace:*",
+    "@vueuse/core": "catalog:",
+    "dayjs": "catalog:",
+    "element-plus": "catalog:",
+    "pinia": "catalog:",
+    "vue": "catalog:",
+    "vue-router": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@hey-api/openapi-ts": "0.99.0",
+    "@types/node": "catalog:",
+    "@vben/oxfmt-config": "workspace:*",
+    "@vben/oxlint-config": "workspace:*",
+    "@vben/tsconfig": "workspace:*",
+    "@vben/vite-config": "workspace:*",
+    "@vitejs/plugin-basic-ssl": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/test-utils": "catalog:",
+    "happy-dom": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:",
+    "unplugin-element-plus": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue-tsc": "catalog:"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.33.4"
+}

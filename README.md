@@ -23,7 +23,15 @@ Each specific game owns and deploys its own backend, schema and migrations, APIs
 
 ## Current Status
 
-M0.5, [M1](docs/goals/m1.md), and [M2](docs/goals/m2.md) are complete. Repository bootstrap, the pinned NovaCore 0.2.0 server baseline, MySQL 8.4, administrator access, versioned GameConfig, the real-API Vben Admin 5 `web-ele` workspace, the reusable Cocos TypeScript configuration client, the SwordMaster configuration-loading consumer, and the approved SwordMaster-owned `equipment-attribute-effect` vertical slice have passed their acceptance paths. M2 extracted only the narrower `game-config-snapshot-consumer-validation` mechanism, and SwordMaster consumes the generalized validator while retaining all equipment and PlayerAssets policy. The extracted C# `GameConfigSnapshotValidator` remains experimental. Its one-time extraction authorization was consumed and grants no continuing authorization. M2 is complete and no repository milestone is active.
+M0.5, [M1](docs/goals/m1.md), and [M2](docs/goals/m2.md) are complete. Repository bootstrap, the pinned NovaCore 0.2.0 server baseline, MySQL 8.4, administrator access, versioned GameConfig, the real-API Vben Admin 5 `web-ele` workspace, the reusable Cocos TypeScript configuration client, the SwordMaster configuration-loading consumer, and the approved SwordMaster-owned `equipment-attribute-effect` vertical slice have passed their acceptance paths. M2 extracted only the narrower `game-config-snapshot-consumer-validation` mechanism, and SwordMaster consumes the generalized validator while retaining all equipment and PlayerAssets policy. The extracted C# `GameConfigSnapshotValidator` remains experimental. Its one-time extraction authorization was consumed and grants no continuing authorization.
+
+M3 is complete. Its [completed goal record](docs/goals/m3.md) verifies Domain, Application, MySQL, administrator API, independent
+Vben admin, real dual-MySQL API, desktop/mobile browser, exact 28-command cumulative acceptance,
+boundary, reuse-evidence, secret, NovaCore, and cleanup paths are verified. The complete
+player-equipment-grant capability remains SwordMaster-owned.
+`request-audit-context-consumer-contract` remains a possible later candidate only and is neither
+implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
+another capability, M4, or NovaCore changes. No repository milestone is active.
 
 ## Prerequisites
 
@@ -93,5 +101,6 @@ The verified SwordMaster smoke consumer is documented in [samples/SwordMaster](s
 - [M0.5 completed goal record](docs/goals/m0.5.md)
 - [M1 completed goal record](docs/goals/m1.md)
 - [M2 completed goal record](docs/goals/m2.md)
+- [M3 completed goal record](docs/goals/m3.md)
 
 Codex and other coding agents must read [AGENTS.md](AGENTS.md) before changing this repository and the nearest scoped `AGENTS.md` before changing a subtree.

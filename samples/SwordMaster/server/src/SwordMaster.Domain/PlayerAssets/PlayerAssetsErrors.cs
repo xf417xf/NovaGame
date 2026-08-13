@@ -14,6 +14,12 @@ public static class PlayerAssetsErrorCodes
     public const string InvalidModifier = "SwordMaster.PlayerAssets.InvalidModifier";
     public const string ConcurrencyConflict = "SwordMaster.PlayerAssets.ConcurrencyConflict";
     public const string IdempotencyConflict = "SwordMaster.PlayerAssets.IdempotencyConflict";
+    public const string EquipmentGrantAlreadyRolledBack =
+        "SwordMaster.PlayerAssets.EquipmentGrants.AlreadyRolledBack";
+    public const string EquipmentGrantRollbackBlockedItemEquipped =
+        "SwordMaster.PlayerAssets.EquipmentGrants.RollbackBlockedItemEquipped";
+    public const string EquipmentGrantGrantedItemMissing =
+        "SwordMaster.PlayerAssets.EquipmentGrants.GrantedItemMissing";
 }
 
 public sealed class PlayerAssetsDomainException : BusinessException

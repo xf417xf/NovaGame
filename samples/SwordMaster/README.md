@@ -172,7 +172,15 @@ validated the narrower `game-config-snapshot-consumer-validation` candidate, whi
 capability remains entirely SwordMaster-owned. SwordMaster now consumes the extracted neutral
 validator without moving equipment or PlayerAssets policy into NovaGame. The extracted C#
 `GameConfigSnapshotValidator` remains experimental. The one-time authorization was consumed and
-grants no continuing authorization. M2 is complete and no repository milestone is active.
+grants no continuing authorization. M2 is complete.
+
+M3 is complete. The completed [Player Equipment Grant design](docs/player-equipment-grant.md),
+server, independent SwordMaster Vben admin, real dual-MySQL API, desktop/mobile browser, exact
+28-command cumulative acceptance, boundary, reuse-evidence, secret, NovaCore, and cleanup paths are
+verified. The complete player-equipment-grant capability remains SwordMaster-owned.
+`request-audit-context-consumer-contract` remains a possible later candidate only and is neither
+implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
+another capability, M4, or NovaCore changes. No repository milestone is active.
 
 The current [M1-07 reuse evidence](docs/player-assets-m1-07-reuse-evidence.md) records the concrete
 audit and keeps every broader PlayerAssets, equipment, attribute, and gameplay candidate game-owned.

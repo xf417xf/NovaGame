@@ -22,7 +22,7 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 - `admin/AGENTS.md` for the operations admin.
 - `clients/cocos/AGENTS.md` for the Cocos client framework.
 
-Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, and M2 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, and `docs/goals/m2.md`. M2 is complete and no repository milestone is active. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
+Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task. No repository milestone is active.
 
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
@@ -39,7 +39,25 @@ M0.5 is complete and defines the verified reusable baseline for bootstrapping Sw
 - an engine-independent TypeScript configuration client;
 - a SwordMaster configuration-loading smoke test without gameplay.
 
-Preserve this baseline unless a user explicitly requests a maintenance change. The user approved the game-owned SwordMaster `equipment-attribute-effect` capability on 2026-08-01 and reconfirmed it on 2026-08-02. M1 and every M1 stage and task are complete. M2 completed extraction of only the narrower `game-config-snapshot-consumer-validation` mechanism after the user separately authorized that exact candidate on 2026-08-10. That one-time authorization was consumed by the completed M2 runbook and grants no continuing authorization for another extraction or capability. The complete `equipment-attribute-effect` capability remains SwordMaster-owned, and the extracted C# `GameConfigSnapshotValidator` contract remains experimental.
+Preserve this baseline unless a user explicitly requests a maintenance change. The user approved the game-owned SwordMaster `equipment-attribute-effect` capability on 2026-08-01 and reconfirmed it on 2026-08-02. M1 and every M1 stage and task are complete. M2 completed extraction of only the narrower `game-config-snapshot-consumer-validation` mechanism after the user separately authorized that exact candidate on 2026-08-10. That one-time authorization was consumed by the completed M2 runbook and grants no continuing authorization for extraction. The complete `equipment-attribute-effect` capability remains SwordMaster-owned, and the extracted C# `GameConfigSnapshotValidator` contract remains experimental.
+
+The user explicitly approved the SwordMaster-owned `player-equipment-grant` capability on
+2026-08-10. M3 is complete. The complete player-equipment-grant capability remains SwordMaster-owned.
+M3 grants no continuing authorization for extraction, another capability, M4, or NovaCore changes.
+
+M3-06-T01 froze the requirement-to-evidence matrix and exact non-mock acceptance contract.
+M3-06-T02 completed the real composed API and dual-MySQL acceptance path, and M3-06-T03 completed
+the real browser acceptance path. M3-06-T04 completed cumulative verification and the cleanup audit,
+so M3-06 is complete. M3-07-T01 froze, independently reconstructed, and verified the reproducible
+completed-M3-06 baseline. M3-07-T02 completed the evidence-only reuse-pressure audit, and
+M3-07-T03 recorded `request-audit-context-consumer-contract` as a possible later extraction
+candidate without authorizing extraction, and M3-07-T04 completed the post-baseline path,
+documentation, framework-boundary, and cumulative SwordMaster audit. M3-07 is complete. M3-08-T01
+completed the exact ordered 28-command repository acceptance set, M3-08-T02 completed the final
+dependency, contract, migration, secret, NovaCore, and disposable-resource audit, and M3-08-T03
+completed documentation synchronization, local-evidence cleanup, and deactivation. The recorded
+`request-audit-context-consumer-contract` remains a possible later candidate only; it is not
+implemented or authorized for extraction.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

@@ -5,7 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using NovaGame.Host.EntityFrameworkCore;
 using SwordMaster.Api.PlayerAssets;
+using SwordMaster.Domain.PlayerAssets;
 using SwordMaster.Host.EntityFrameworkCore;
+using SwordMaster.Host.EntityFrameworkCore.PlayerAssets;
 using Swashbuckle.AspNetCore.Swagger;
 using Xunit;
 
@@ -44,6 +46,8 @@ public sealed class SwordMasterRuntimeCompositionTests
         Assert.Equal(
             typeof(SwordMasterDbContext).Assembly.FullName,
             swordMasterDbContext.GetService<IMigrationsAssembly>().Assembly.FullName);
+        Assert.IsType<PlayerEquipmentGrantRepository>(
+            scope.ServiceProvider.GetRequiredService<IPlayerEquipmentGrantRepository>());
     }
 
     [Fact]

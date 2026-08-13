@@ -1,0 +1,8 @@
+{
+  "auth": {
+    "login": "登录"
+  },
+  "playerEquipmentGrants": {
+    "title": "玩家装备发放"
+  }
+}

@@ -105,6 +105,12 @@ The following are possible reusable mechanisms, not current NovaGame modules or 
 
 These candidates must first work in a specific game. A future authorized extraction may move only the smallest independently useful mechanism supported by evidence. In C# namespaces and folders, prefer `Stats` over the bare name `Attribute` to avoid confusion with .NET attributes.
 
+M3-07 recorded `request-audit-context-consumer-contract` as evidence vocabulary for the
+consumability and layer placement of NovaGame's existing request-audit context. Extraction remains
+unauthorized and unimplemented: the record adds no public API, business domain, physical module, or
+parallel provider. The complete SwordMaster equipment-grant and rollback lifecycle, persistence,
+administration workflow, and game policy remain owned by SwordMaster.
+
 ### Specific Game-Owned By Default
 
 Complete business systems and their policies remain in each game's backend by default, including:

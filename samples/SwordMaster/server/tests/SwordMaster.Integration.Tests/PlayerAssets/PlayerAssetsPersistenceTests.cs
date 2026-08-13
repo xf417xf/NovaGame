@@ -23,9 +23,13 @@ public sealed class PlayerAssetsPersistenceTests
 
         Assert.Equal("Pomelo.EntityFrameworkCore.MySql", dbContext.Database.ProviderName);
         Assert.True(await dbContext.Database.CanConnectAsync());
+        var appliedMigrations = await dbContext.Database.GetAppliedMigrationsAsync();
         Assert.Contains(
             SwordMasterMySqlDatabaseFixture.InitialMigrationId,
-            await dbContext.Database.GetAppliedMigrationsAsync());
+            appliedMigrations);
+        Assert.Contains(
+            SwordMasterMySqlDatabaseFixture.PlayerEquipmentGrantMigrationId,
+            appliedMigrations);
         Assert.False(dbContext.Database.HasPendingModelChanges());
 
         var connection = dbContext.Database.GetDbConnection();
@@ -71,7 +75,8 @@ public sealed class PlayerAssetsPersistenceTests
                 "sm_player_asset_command_receipts",
                 "sm_player_assets_profiles",
                 "sm_player_character_base_attributes",
-                "sm_player_characters"
+                "sm_player_characters",
+                "sm_player_equipment_grants"
             ],
             actualTables);
 
@@ -85,6 +90,10 @@ public sealed class PlayerAssetsPersistenceTests
                 OR (TABLE_NAME = 'sm_owned_equipment_items' AND COLUMN_NAME = 'ConfiguredItemId')
                 OR (TABLE_NAME = 'sm_player_character_base_attributes' AND COLUMN_NAME = 'StatCode')
                 OR (TABLE_NAME = 'sm_player_asset_command_receipts' AND COLUMN_NAME = 'RequestFingerprint')
+                OR (TABLE_NAME = 'sm_player_equipment_grants' AND COLUMN_NAME IN (
+                    'ConfiguredItemId',
+                    'GrantRequestFingerprint',
+                    'RollbackRequestFingerprint'))
               )
             """;
         await using var collationReader = await collationCommand.ExecuteReaderAsync();
@@ -92,10 +101,17 @@ public sealed class PlayerAssetsPersistenceTests
         while (await collationReader.ReadAsync())
         {
             checkedColumns++;
-            Assert.Equal("utf8mb4_0900_bin", collationReader.GetString(2));
+            var tableName = collationReader.GetString(0);
+            var columnName = collationReader.GetString(1);
+            var expectedCollation =
+                tableName == "sm_player_equipment_grants" &&
+                columnName is "GrantRequestFingerprint" or "RollbackRequestFingerprint"
+                    ? "ascii_bin"
+                    : "utf8mb4_0900_bin";
+            Assert.Equal(expectedCollation, collationReader.GetString(2));
         }
 
-        Assert.Equal(5, checkedColumns);
+        Assert.Equal(8, checkedColumns);
     }
 
     [Fact]

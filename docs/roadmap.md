@@ -89,7 +89,7 @@ M1-01 is the capability-selection gate. It may begin only after an explicit user
 
 **Completed goal record:** [M2 First Validated Extraction](goals/m2.md)
 
-**Execution state:** Complete. The user explicitly authorized extraction of only `game-config-snapshot-consumer-validation` on 2026-08-10. M2 extracted the generalized `Content/GameConfig` validator, migrated SwordMaster without changing its equipment or PlayerAssets policy, verified behavior and boundaries, kept the C# API experimental because only one external .NET game consumer and no versioned package boundary are proven, and completed repository acceptance. The one-time authorization was consumed by this extraction and grants no continuing authorization. M2 is complete and no repository milestone is active.
+**Execution state:** Complete. The user explicitly authorized extraction of only `game-config-snapshot-consumer-validation` on 2026-08-10. M2 extracted the generalized `Content/GameConfig` validator, migrated SwordMaster without changing its equipment or PlayerAssets policy, verified behavior and boundaries, kept the C# API experimental because only one external .NET game consumer and no versioned package boundary are proven, and completed repository acceptance. The one-time authorization was consumed by this extraction and grants no continuing authorization. M2 closed with no active repository milestone; M3 was authorized later and does not alter the completed M2 record.
 
 ### Goal
 
@@ -108,11 +108,22 @@ The complete SwordMaster domain, backend schema, APIs, admin workflows, and clie
 
 ## M3 - Game Operations Validation
 
-**Status:** Unscheduled
+**Status:** Complete
+
+**Completed goal record:** [M3 SwordMaster Player Equipment Grant](goals/m3.md)
+
+**Execution state:** M3 is complete. Its server, independent Vben admin, real dual-MySQL API,
+desktop/mobile browser, exact 28-command cumulative acceptance, boundary, reuse-evidence, secret,
+NovaCore, and cleanup paths are verified. The complete player-equipment-grant capability remains
+SwordMaster-owned. `request-audit-context-consumer-contract` remains a possible later candidate only
+and is neither implemented nor authorized for extraction. M3 grants no continuing authorization for
+extraction, another capability, M4, or NovaCore changes. No repository milestone is active.
 
 ### Goal
 
-Implement an operations capability in the SwordMaster backend and its game-admin extension only in response to a concrete live-operations need. Shop, Mail, Ranking, Activity, and similar domains remain game-owned by default; this milestone does not make them NovaGame modules.
+Implement the approved single-equipment grant capability in the SwordMaster backend and its
+independent game-admin extension. Shop, Mail, Ranking, Activity, generic rewards, and similar
+domains remain game-owned and outside this milestone; M3 does not make them NovaGame modules.
 
 ### Exit Criteria
 

@@ -19,6 +19,9 @@ public sealed class SwordMasterDbContext : BaseDbContext
     public DbSet<PlayerAssetCommandReceipt> PlayerAssetCommandReceipts =>
         Set<PlayerAssetCommandReceipt>();
 
+    public DbSet<PlayerEquipmentGrant> PlayerEquipmentGrants =>
+        Set<PlayerEquipmentGrant>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasCharSet("utf8mb4");

@@ -1,5 +1,6 @@
 using System.Globalization;
 using MySqlConnector;
+using SwordMaster.Application.Contracts.PlayerAssets;
 using Xunit;
 
 namespace SwordMaster.Integration.Tests.RuntimeComposition;
@@ -49,7 +50,10 @@ public sealed class SwordMasterRuntimeDatabaseTests
             ],
             novaGameMigrations);
         Assert.Equal(
-            ["20260801121309_InitialPlayerAssets"],
+            [
+                "20260801121309_InitialPlayerAssets",
+                "20260810105902_AddPlayerEquipmentGrants"
+            ],
             swordMasterMigrations);
 
         var novaGameTables = await ReadStringsAsync(
@@ -79,6 +83,18 @@ public sealed class SwordMasterRuntimeDatabaseTests
                 novaGameConnection,
                 "SELECT COUNT(*) FROM admin_administrators WHERE NormalizedUserName = @normalizedUserName",
                 ("@normalizedUserName", "RUNTIME-ADMIN")));
+        Assert.Equal(
+            1,
+            await CountAsync(
+                novaGameConnection,
+                "SELECT COUNT(*) FROM admin_role_permissions AS permission INNER JOIN admin_roles AS role ON role.Id = permission.RoleId WHERE role.NormalizedName = 'ADMINISTRATORS' AND permission.Name = @permissionName",
+                ("@permissionName", PlayerEquipmentGrantPermissions.Manage)));
+        Assert.Equal(
+            1,
+            await CountAsync(
+                novaGameConnection,
+                "SELECT COUNT(*) FROM admin_audit_records AS audit INNER JOIN admin_roles AS role ON role.Id = audit.RoleId WHERE role.NormalizedName = 'ADMINISTRATORS' AND audit.Action = 'PermissionGranted' AND audit.Succeeded = 1 AND audit.PermissionName = @permissionName",
+                ("@permissionName", PlayerEquipmentGrantPermissions.Manage)));
 
         await using var connection = new MySqlConnection(_swordMasterConnectionString);
         await connection.OpenAsync();

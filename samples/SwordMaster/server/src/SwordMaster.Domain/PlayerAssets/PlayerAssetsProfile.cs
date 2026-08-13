@@ -55,6 +55,58 @@ public sealed class PlayerAssetsProfile : AggregateRoot<Guid>
                 "The requested owned equipment item does not belong to this player.");
     }
 
+    public OwnedEquipmentItem GrantEquipment(
+        long expectedRevision,
+        OwnedItemId ownedItemId,
+        string configuredItemId)
+    {
+        ArgumentNullException.ThrowIfNull(ownedItemId);
+        EnsureRevision(expectedRevision);
+
+        var ownedItem = new OwnedEquipmentItem(ownedItemId, configuredItemId);
+        if (_ownedItems.Any(item => item.OwnedItemId.Equals(ownedItemId)))
+        {
+            throw new ArgumentException(
+                "The owned-item identifier already exists in this player profile.",
+                nameof(ownedItemId));
+        }
+
+        var nextRevision = NextRevision();
+        _ownedItems.Add(ownedItem);
+        Revision = nextRevision;
+        return ownedItem;
+    }
+
+    public OwnedEquipmentItem RollbackGrantedEquipment(
+        long expectedRevision,
+        OwnedItemId ownedItemId)
+    {
+        ArgumentNullException.ThrowIfNull(ownedItemId);
+        EnsureRevision(expectedRevision);
+
+        var ownedItem = _ownedItems.SingleOrDefault(
+            item => item.OwnedItemId.Equals(ownedItemId));
+        if (ownedItem is null)
+        {
+            throw new PlayerAssetsDomainException(
+                PlayerAssetsErrorCodes.EquipmentGrantGrantedItemMissing,
+                "The equipment item created by this active grant is no longer owned by the player.");
+        }
+
+        if (_equipmentAssignments.Any(
+                assignment => assignment.OwnedItemId.Equals(ownedItemId)))
+        {
+            throw new PlayerAssetsDomainException(
+                PlayerAssetsErrorCodes.EquipmentGrantRollbackBlockedItemEquipped,
+                "The equipment item created by this grant must be unequipped before rollback.");
+        }
+
+        var nextRevision = NextRevision();
+        _ownedItems.Remove(ownedItem);
+        Revision = nextRevision;
+        return ownedItem;
+    }
+
     public EquipmentAssignment Equip(
         long expectedRevision,
         CharacterId characterId,

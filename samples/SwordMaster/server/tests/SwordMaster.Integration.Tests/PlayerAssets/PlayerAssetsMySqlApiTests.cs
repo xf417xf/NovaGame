@@ -417,13 +417,18 @@ public sealed class PlayerAssetsMySqlApiTests
             var receipts = await dbContext.PlayerAssetCommandReceipts
                 .Where(receipt => receipt.PlayerId == playerId)
                 .ToListAsync();
+            var grants = await dbContext.PlayerEquipmentGrants
+                .Where(grant => EF.Property<Guid>(grant, "PlayerIdValue") == SeedPlayerId)
+                .ToListAsync();
+            dbContext.PlayerEquipmentGrants.RemoveRange(grants);
             dbContext.PlayerAssetCommandReceipts.RemoveRange(receipts);
+            await dbContext.SaveChangesAsync();
             if (existingProfile is not null)
             {
                 dbContext.PlayerAssetsProfiles.Remove(existingProfile);
+                await dbContext.SaveChangesAsync();
             }
 
-            await dbContext.SaveChangesAsync();
             dbContext.ChangeTracker.Clear();
             await dbContext.PlayerAssetsProfiles.AddAsync(new PlayerAssetsProfile(
                 playerId,

@@ -23,5 +23,9 @@
           Link="ClientContracts\player-assets.openapi.json"
           CopyToOutputDirectory="PreserveNewest"
           Condition="Exists('..\..\..\contracts\player-assets.openapi.json')" />
+    <None Include="..\..\..\admin\contracts\player-equipment-grants.openapi.json"
+          Link="ClientContracts\player-equipment-grants.openapi.json"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\..\..\admin\contracts\player-equipment-grants.openapi.json')" />
   </ItemGroup>
 </Project>

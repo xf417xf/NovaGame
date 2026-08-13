@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using NovaCore.BuildingBlocks.MultiTenancy;
 using SwordMaster.Host.EntityFrameworkCore;
 using SwordMaster.Host.EntityFrameworkCore.DependencyInjection;
@@ -15,6 +16,8 @@ public sealed class SwordMasterMySqlCollection : ICollectionFixture<SwordMasterM
 public sealed class SwordMasterMySqlDatabaseFixture : IAsyncLifetime
 {
     public const string InitialMigrationId = "20260801121309_InitialPlayerAssets";
+    public const string PlayerEquipmentGrantMigrationId =
+        "20260810105902_AddPlayerEquipmentGrants";
 
     public SwordMasterMySqlDatabaseFixture()
     {
@@ -37,13 +40,18 @@ public sealed class SwordMasterMySqlDatabaseFixture : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    public SwordMasterDbContext CreateDbContext()
+    public SwordMasterDbContext CreateDbContext(params IInterceptor[] interceptors)
     {
+        ArgumentNullException.ThrowIfNull(interceptors);
         var options = new DbContextOptionsBuilder<SwordMasterDbContext>();
         SwordMasterEntityFrameworkCoreServiceCollectionExtensions.ConfigureMySql(
             options,
             ConnectionString,
             "8.4.0");
+        if (interceptors.Length > 0)
+        {
+            options.AddInterceptors(interceptors);
+        }
 
         return new SwordMasterDbContext(options.Options, new CurrentTenant());
     }

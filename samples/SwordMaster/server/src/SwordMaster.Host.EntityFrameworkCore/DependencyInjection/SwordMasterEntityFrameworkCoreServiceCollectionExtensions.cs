@@ -43,6 +43,7 @@ public static class SwordMasterEntityFrameworkCoreServiceCollectionExtensions
         services.AddScoped<IPlayerAssetsTransactionManager, PlayerAssetsTransactionManager>();
         services.AddScoped<IPlayerAssetsProfileRepository, PlayerAssetsProfileRepository>();
         services.AddScoped<IPlayerAssetCommandReceiptRepository, PlayerAssetCommandReceiptRepository>();
+        services.AddScoped<IPlayerEquipmentGrantRepository, PlayerEquipmentGrantRepository>();
         return services;
     }
 

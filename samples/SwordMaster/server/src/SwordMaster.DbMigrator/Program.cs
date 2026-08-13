@@ -38,7 +38,9 @@ try
         await ApplyMigrationsAsync(host.Services, logger);
 
         logger.LogInformation("Running configured NovaGame administrator seed.");
-        await SeedNovaGameAdministratorAsync(host.Services);
+        await SeedNovaGameAdministratorAndSwordMasterPermissionAsync(
+            host.Services,
+            logger);
 
         if (ShouldRunSwordMasterDevelopmentSeed(builder.Environment))
         {
@@ -93,8 +95,9 @@ static async Task ApplyMigrationsAsync(
         .MigrateAsync(cancellationToken);
 }
 
-static async Task SeedNovaGameAdministratorAsync(
+static async Task SeedNovaGameAdministratorAndSwordMasterPermissionAsync(
     IServiceProvider services,
+    ILogger logger,
     CancellationToken cancellationToken = default)
 {
     await using var scope = services.CreateAsyncScope();
@@ -106,6 +109,12 @@ static async Task SeedNovaGameAdministratorAsync(
 
     await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
     await contributor.SeedAsync(new DataSeedContext(), cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    logger.LogInformation("Running SwordMaster player-equipment-grant permission seed.");
+    await scope.ServiceProvider
+        .GetRequiredService<SwordMasterPlayerEquipmentGrantPermissionSeedRunner>()
+        .SeedAsync(cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
     await transaction.CommitAsync(cancellationToken);
 }

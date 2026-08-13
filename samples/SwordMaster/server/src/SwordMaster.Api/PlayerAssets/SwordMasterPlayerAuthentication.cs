@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,8 +77,44 @@ public static class SwordMasterPlayerAuthentication
         services.TryAddScoped<ICurrentPlayerContext, HttpCurrentPlayerContext>();
         services.TryAddScoped<PlayerAssetsOperationLogger>();
         services.TryAddScoped<PlayerAssetsExceptionFilter>();
+        services.TryAddScoped<
+            ICurrentSwordMasterAdministrator,
+            HttpCurrentSwordMasterAdministrator>();
+        services.TryAddScoped<
+            IPlayerEquipmentGrantAuditContextAccessor,
+            HttpPlayerEquipmentGrantAuditContextAccessor>();
+        services.TryAddScoped<PlayerEquipmentGrantOperationLogger>();
+        services.TryAddScoped<PlayerEquipmentGrantExceptionFilter>();
+        services.TryAddScoped<PlayerEquipmentGrantUnsupportedMediaTypeResultFilter>();
+        services.Replace(
+            ServiceDescriptor.Singleton<
+                IAuthorizationMiddlewareResultHandler,
+                PlayerEquipmentGrantAuthorizationMiddlewareResultHandler>());
         services.Configure<Microsoft.AspNetCore.Mvc.MvcOptions>(options =>
-            options.Filters.AddService<PlayerAssetsExceptionFilter>());
+        {
+            options.Filters.AddService<PlayerAssetsExceptionFilter>();
+            options.Filters.AddService<PlayerEquipmentGrantExceptionFilter>();
+            options.Filters.AddService<PlayerEquipmentGrantUnsupportedMediaTypeResultFilter>();
+        });
+        services.PostConfigure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+        {
+            var fallbackFactory = options.InvalidModelStateResponseFactory;
+            options.InvalidModelStateResponseFactory = context =>
+            {
+                if (!PlayerEquipmentGrantEndpoint.IsController(context.ActionDescriptor))
+                {
+                    return fallbackFactory(context);
+                }
+
+                context.HttpContext.RequestServices
+                    .GetRequiredService<PlayerEquipmentGrantOperationLogger>()
+                    .LogInvalidRequest(context.HttpContext);
+                return new Microsoft.AspNetCore.Mvc.BadRequestObjectResult(
+                    ApiResponse.Failure(
+                        PlayerEquipmentGrantErrorCodes.InvalidRequest,
+                        "The request is invalid."));
+            };
+        });
 
         services
             .AddControllers()
@@ -94,6 +132,7 @@ public static class SwordMasterPlayerAuthentication
                 Description = "SwordMaster player JWT. Administrator tokens are not valid for player endpoints."
             });
             options.OperationFilter<PlayerAssetsOpenApiOperationFilter>();
+            options.OperationFilter<PlayerEquipmentGrantOpenApiOperationFilter>();
         });
 
         return services;
