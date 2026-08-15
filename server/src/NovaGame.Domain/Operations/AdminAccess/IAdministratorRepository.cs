@@ -6,7 +6,15 @@ public interface IAdministratorRepository
 
     Task<Administrator?> FindByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<Administrator?> FindByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
     Task<Administrator?> FindByNormalizedUserNameAsync(
+        string normalizedUserName,
+        CancellationToken cancellationToken = default);
+
+    Task<Administrator?> FindByNormalizedUserNameForUpdateAsync(
         string normalizedUserName,
         CancellationToken cancellationToken = default);
 

@@ -51,6 +51,12 @@ public static class NovaGameEntityFrameworkCoreServiceCollectionExtensions
         services.AddScoped<IAdminRoleRepository, AdminRoleRepository>();
         services.AddScoped<IRefreshTokenSessionRepository, RefreshTokenSessionRepository>();
         services.AddScoped<IAdminAccessAuditRepository, AdminAccessAuditRepository>();
+        services.AddScoped<AdminAccessManagementRepository>();
+        services.AddScoped<IAdminAccessManagementRepository>(serviceProvider =>
+            serviceProvider.GetRequiredService<AdminAccessManagementRepository>());
+        services.AddScoped<IAdminAccessManagementReadSnapshot>(serviceProvider =>
+            serviceProvider.GetRequiredService<AdminAccessManagementRepository>());
+        services.AddScoped<IAdminAccessCommandReceiptRepository, AdminAccessCommandReceiptRepository>();
         services.AddScoped<IGameConfigDraftRepository, GameConfigDraftRepository>();
         services.AddScoped<IPublishedGameConfigVersionRepository, PublishedGameConfigVersionRepository>();
         services.AddScoped<IGameConfigEnvironmentRepository, GameConfigEnvironmentRepository>();

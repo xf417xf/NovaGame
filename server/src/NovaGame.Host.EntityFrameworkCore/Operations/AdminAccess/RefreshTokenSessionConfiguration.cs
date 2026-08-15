@@ -8,7 +8,12 @@ public sealed class RefreshTokenSessionConfiguration : IEntityTypeConfiguration<
 {
     public void Configure(EntityTypeBuilder<RefreshTokenSession> builder)
     {
-        builder.ToTable("admin_refresh_token_sessions");
+        builder.ToTable("admin_refresh_token_sessions", tableBuilder =>
+        {
+            tableBuilder.HasCheckConstraint(
+                "ck_admin_refresh_sessions_revocation",
+                "(`RevokedAtUtc` IS NULL AND `RevocationReason` IS NULL AND `ReplacedBySessionId` IS NULL) OR (`RevokedAtUtc` IS NOT NULL AND `RevocationReason` IS NOT NULL AND ((`RevocationReason` = 'Rotated' AND `ReplacedBySessionId` IS NOT NULL) OR (`RevocationReason` <> 'Rotated' AND `ReplacedBySessionId` IS NULL)))");
+        });
         builder.HasKey(session => session.Id);
 
         builder.Property(session => session.Id).HasColumnType("char(36)");
@@ -28,10 +33,20 @@ public sealed class RefreshTokenSessionConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(session => session.TokenHash)
             .IsUnique()
             .HasDatabaseName("ux_admin_refresh_sessions_token_hash");
-        builder.HasIndex(session => new { session.FamilyId, session.RevokedAtUtc })
-            .HasDatabaseName("ix_admin_refresh_sessions_family_revoked");
+        builder.HasIndex(session => new { session.FamilyId, session.CreatedAtUtc, session.Id })
+            .HasDatabaseName("ix_admin_refresh_sessions_family_order");
         builder.HasIndex(session => new { session.AdministratorId, session.ExpiresAtUtc })
             .HasDatabaseName("ix_admin_refresh_sessions_admin_expiry");
+        builder.HasIndex(session => new
+        {
+            session.AdministratorId,
+            session.FamilyId,
+            session.CreatedAtUtc,
+            session.Id
+        })
+            .HasDatabaseName("ix_admin_refresh_sessions_admin_family_order");
+        builder.HasIndex(session => new { session.FamilyId, session.ReplacedBySessionId })
+            .HasDatabaseName("ix_admin_refresh_sessions_family_replacement");
 
         builder.HasOne<Administrator>()
             .WithMany()

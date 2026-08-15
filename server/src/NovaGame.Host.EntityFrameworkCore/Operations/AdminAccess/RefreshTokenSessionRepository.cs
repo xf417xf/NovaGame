@@ -12,7 +12,7 @@ public sealed class RefreshTokenSessionRepository : IRefreshTokenSessionReposito
         _dbContext = dbContext;
     }
 
-    public async Task<RefreshTokenSession?> FindByTokenHashForUpdateAsync(
+    public async Task<RefreshTokenSession?> FindByTokenHashAsync(
         byte[] tokenHash,
         CancellationToken cancellationToken = default)
     {
@@ -21,8 +21,9 @@ public sealed class RefreshTokenSessionRepository : IRefreshTokenSessionReposito
                 SELECT *
                 FROM `admin_refresh_token_sessions`
                 WHERE `TokenHash` = {tokenHash}
-                LIMIT 1 FOR UPDATE
+                LIMIT 1
                 """)
+            .AsNoTracking()
             .ToListAsync(cancellationToken);
 
         return sessions.SingleOrDefault();
@@ -38,6 +39,7 @@ public sealed class RefreshTokenSessionRepository : IRefreshTokenSessionReposito
                 SELECT *
                 FROM `admin_refresh_token_sessions`
                 WHERE `FamilyId` = {familyIdText}
+                ORDER BY `FamilyId`, `CreatedAtUtc`, `Id`
                 FOR UPDATE
                 """)
             .ToListAsync(cancellationToken);

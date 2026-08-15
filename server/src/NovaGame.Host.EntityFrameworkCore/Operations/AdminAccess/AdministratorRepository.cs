@@ -24,6 +24,23 @@ public sealed class AdministratorRepository : IAdministratorRepository
             cancellationToken);
     }
 
+    public async Task<Administrator?> FindByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var idText = id.ToString();
+        var administrators = await _dbContext.Administrators
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM `admin_administrators`
+                WHERE `Id` = {idText}
+                ORDER BY `Id`
+                FOR UPDATE
+                """)
+            .ToListAsync(cancellationToken);
+        return administrators.SingleOrDefault();
+    }
+
     public Task<Administrator?> FindByNormalizedUserNameAsync(
         string normalizedUserName,
         CancellationToken cancellationToken = default)
@@ -31,6 +48,22 @@ public sealed class AdministratorRepository : IAdministratorRepository
         return _dbContext.Administrators.SingleOrDefaultAsync(
             administrator => administrator.NormalizedUserName == normalizedUserName,
             cancellationToken);
+    }
+
+    public async Task<Administrator?> FindByNormalizedUserNameForUpdateAsync(
+        string normalizedUserName,
+        CancellationToken cancellationToken = default)
+    {
+        var administrators = await _dbContext.Administrators
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM `admin_administrators`
+                WHERE `NormalizedUserName` = {normalizedUserName}
+                ORDER BY `NormalizedUserName`, `Id`
+                FOR UPDATE
+                """)
+            .ToListAsync(cancellationToken);
+        return administrators.SingleOrDefault();
     }
 
     public async Task<AdministratorAuthorizationSnapshot?> GetAuthorizationSnapshotAsync(
@@ -69,11 +102,19 @@ public sealed class AdministratorRepository : IAdministratorRepository
                 .OrderBy(name => name)
                 .ToArrayAsync(cancellationToken);
 
-        var permissionNames = roleIds.Length == 0
+        var activeRoleIds = roleIds.Length == 0
+            ? []
+            : await _dbContext.AdminRoles
+                .AsNoTracking()
+                .Where(role => roleIds.Contains(role.Id) && role.IsActive)
+                .Select(role => role.Id)
+                .ToArrayAsync(cancellationToken);
+
+        var permissionNames = activeRoleIds.Length == 0
             ? []
             : await _dbContext.RolePermissions
                 .AsNoTracking()
-                .Where(permission => roleIds.Contains(permission.RoleId))
+                .Where(permission => activeRoleIds.Contains(permission.RoleId))
                 .Select(permission => permission.Name)
                 .Distinct()
                 .OrderBy(name => name)

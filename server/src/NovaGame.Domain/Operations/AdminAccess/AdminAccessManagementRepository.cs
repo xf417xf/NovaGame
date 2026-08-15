@@ -79,6 +79,13 @@ public sealed record AdminAccessAuditRecordSnapshot(
     string? CorrelationId,
     long? TargetRevision);
 
+public interface IAdminAccessManagementReadSnapshot
+{
+    Task<TResult> ExecuteAsync<TResult>(
+        Func<CancellationToken, Task<TResult>> operation,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IAdminAccessManagementRepository
 {
     Task<AdminAccessPageResult<AdministratorManagementSnapshot>> GetAdministratorPageAsync(

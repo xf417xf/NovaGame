@@ -15,7 +15,10 @@ public sealed class RolePermissionConfiguration : IEntityTypeConfiguration<RoleP
             .HasColumnType("char(36)")
             .ValueGeneratedNever();
         builder.Property(permission => permission.RoleId).HasColumnType("char(36)");
-        builder.Property(permission => permission.Name).HasMaxLength(128).IsRequired();
+        builder.Property(permission => permission.Name)
+            .HasMaxLength(128)
+            .UseCollation("utf8mb4_bin")
+            .IsRequired();
         builder.Property(permission => permission.GrantedAtUtc).HasPrecision(6);
         builder.Property(permission => permission.GrantedByAdministratorId).HasColumnType("char(36)");
 

@@ -62,12 +62,13 @@ implemented or authorized for extraction.
 The user separately authorized the NovaGame-owned `administrator-management` capability on
 2026-08-13. M3.5 completed its evidence-backed baseline audit, frozen-contract stage, and M35-03
 Domain/Application implementation. The domain, security, Application, HTTP, MySQL, Vben, browser,
-and verification contracts remain frozen and verified. Only `M35-04-T01` is executable. Follow
-`docs/goals/m3.5.md`. It authorizes only the approved repository queries, row locks, mappings,
-indexes, all three frozen receipt kinds, and the explicit MySQL migration. It does not authorize
-M35-04-T02 or later M35-04 work, permission seeding, HTTP APIs, OpenAPI, Admin UI, SwordMaster
-changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4 remains
-`Unscheduled`.
+and verification contracts remain frozen and verified. M35-04-T01 completed its persistence
+implementation, independent review fixes, and real-MySQL verification. Only `M35-04-T02` is
+executable. Follow `docs/goals/m3.5.md`. It authorizes only registered management permission
+definitions and idempotent DbMigrator synchronization of the built-in role, with focused seed
+verification. It does not authorize M35-04-T03 or later M35-04 work, HTTP APIs, OpenAPI, Admin UI,
+SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
+remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

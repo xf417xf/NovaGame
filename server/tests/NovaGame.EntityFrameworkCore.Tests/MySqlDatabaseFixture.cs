@@ -17,6 +17,7 @@ public sealed class MySqlDatabaseFixture : IAsyncLifetime
     public const string InitialMigrationId = "20260723160000_InitialMySqlBaseline";
     public const string AdministratorAccessMigrationId = "20260725101129_AddAdministratorAccess";
     public const string GameConfigMigrationId = "20260725122154_AddGameConfig";
+    public const string AdminAccessManagementMigrationId = "20260815030331_AddAdminAccessManagement";
 
     public MySqlDatabaseFixture()
     {

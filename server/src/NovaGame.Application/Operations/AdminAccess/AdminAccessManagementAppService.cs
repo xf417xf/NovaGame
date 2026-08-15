@@ -15,9 +15,9 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
 {
     private static readonly TimeSpan MaximumAuditRange =
         TimeSpan.FromDays(AdminAccessManagementContractLimits.MaximumAuditRangeDays);
-
     private readonly IUnitOfWorkManager _unitOfWorkManager;
     private readonly IAdminAccessManagementRepository _repository;
+    private readonly IAdminAccessManagementReadSnapshot _readSnapshot;
     private readonly IAdminAccessCommandReceiptRepository _receiptRepository;
     private readonly AdminAccessManagementPolicy _policy;
     private readonly RefreshTokenFamilyPolicy _refreshTokenFamilyPolicy;
@@ -32,6 +32,7 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
     public AdminAccessManagementAppService(
         IUnitOfWorkManager unitOfWorkManager,
         IAdminAccessManagementRepository repository,
+        IAdminAccessManagementReadSnapshot readSnapshot,
         IAdminAccessCommandReceiptRepository receiptRepository,
         AdminAccessManagementPolicy policy,
         RefreshTokenFamilyPolicy refreshTokenFamilyPolicy,
@@ -45,6 +46,7 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
     {
         _unitOfWorkManager = unitOfWorkManager;
         _repository = repository;
+        _readSnapshot = readSnapshot;
         _receiptRepository = receiptRepository;
         _policy = policy;
         _refreshTokenFamilyPolicy = refreshTokenFamilyPolicy;
@@ -66,21 +68,21 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
         var search = NormalizeSearch(request!.Search, normalizeForIdentity: true);
         ValidateOptionalIdentifier(request.RoleId, nameof(request.RoleId));
 
-        await using var unitOfWork = await BeginUnitOfWorkAsync(cancellationToken);
-        var page = await _repository.GetAdministratorPageAsync(
-            search,
-            request.IsActive,
-            request.RoleId,
-            paging.SkipCount,
-            paging.PageSize,
-            cancellationToken);
-        var result = new AdminAccessPageDto<AdministratorDto>(
-            page.Items.Select(MapAdministrator).ToArray(),
-            page.TotalCount,
-            paging.Page,
-            paging.PageSize);
-        await unitOfWork.CompleteAsync(cancellationToken);
-        return result;
+        return await ExecuteManagementListReadAsync(async token =>
+        {
+            var page = await _repository.GetAdministratorPageAsync(
+                search,
+                request.IsActive,
+                request.RoleId,
+                paging.SkipCount,
+                paging.PageSize,
+                token);
+            return new AdminAccessPageDto<AdministratorDto>(
+                page.Items.Select(MapAdministrator).ToArray(),
+                page.TotalCount,
+                paging.Page,
+                paging.PageSize);
+        }, cancellationToken);
     }
 
     public async Task<AdministratorDto> CreateAdministratorAsync(
@@ -507,22 +509,22 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
         var search = NormalizeSearch(request!.Search, normalizeForIdentity: true);
         var registeredPermissionNames = GetRegisteredPermissionNames();
 
-        await using var unitOfWork = await BeginUnitOfWorkAsync(cancellationToken);
-        var page = await _repository.GetRolePageAsync(
-            search,
-            request.IsActive,
-            request.IsBuiltIn,
-            registeredPermissionNames,
-            paging.SkipCount,
-            paging.PageSize,
-            cancellationToken);
-        var result = new AdminAccessPageDto<AdminRoleSummaryDto>(
-            page.Items.Select(MapRoleSummary).ToArray(),
-            page.TotalCount,
-            paging.Page,
-            paging.PageSize);
-        await unitOfWork.CompleteAsync(cancellationToken);
-        return result;
+        return await ExecuteManagementListReadAsync(async token =>
+        {
+            var page = await _repository.GetRolePageAsync(
+                search,
+                request.IsActive,
+                request.IsBuiltIn,
+                registeredPermissionNames,
+                paging.SkipCount,
+                paging.PageSize,
+                token);
+            return new AdminAccessPageDto<AdminRoleSummaryDto>(
+                page.Items.Select(MapRoleSummary).ToArray(),
+                page.TotalCount,
+                paging.Page,
+                paging.PageSize);
+        }, cancellationToken);
     }
 
     public async Task<AdminRoleDto> CreateAdminRoleAsync(
@@ -808,21 +810,21 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
             : null;
         var now = GetUtcNow();
 
-        await using var unitOfWork = await BeginUnitOfWorkAsync(cancellationToken);
-        var page = await _repository.GetSessionFamilyPageAsync(
-            request.AdministratorId,
-            state,
-            now,
-            paging.SkipCount,
-            paging.PageSize,
-            cancellationToken);
-        var result = new AdminAccessPageDto<AdminSessionFamilyDto>(
-            page.Items.Select(MapSessionFamily).ToArray(),
-            page.TotalCount,
-            paging.Page,
-            paging.PageSize);
-        await unitOfWork.CompleteAsync(cancellationToken);
-        return result;
+        return await ExecuteManagementListReadAsync(async token =>
+        {
+            var page = await _repository.GetSessionFamilyPageAsync(
+                request.AdministratorId,
+                state,
+                now,
+                paging.SkipCount,
+                paging.PageSize,
+                token);
+            return new AdminAccessPageDto<AdminSessionFamilyDto>(
+                page.Items.Select(MapSessionFamily).ToArray(),
+                page.TotalCount,
+                paging.Page,
+                paging.PageSize);
+        }, cancellationToken);
     }
 
     public async Task<AdminSessionFamilyDto> RevokeSessionFamilyAsync(
@@ -899,19 +901,19 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
         var paging = ValidatePaging(request?.Page, request?.PageSize);
         var query = ValidateAuditQuery(request!);
 
-        await using var unitOfWork = await BeginUnitOfWorkAsync(cancellationToken);
-        var page = await _repository.GetAuditPageAsync(
-            query,
-            paging.SkipCount,
-            paging.PageSize,
-            cancellationToken);
-        var result = new AdminAccessPageDto<AdminAccessAuditRecordDto>(
-            page.Items.Select(MapAuditRecord).ToArray(),
-            page.TotalCount,
-            paging.Page,
-            paging.PageSize);
-        await unitOfWork.CompleteAsync(cancellationToken);
-        return result;
+        return await ExecuteManagementListReadAsync(async token =>
+        {
+            var page = await _repository.GetAuditPageAsync(
+                query,
+                paging.SkipCount,
+                paging.PageSize,
+                token);
+            return new AdminAccessPageDto<AdminAccessAuditRecordDto>(
+                page.Items.Select(MapAuditRecord).ToArray(),
+                page.TotalCount,
+                paging.Page,
+                paging.PageSize);
+        }, cancellationToken);
     }
 
     private async Task<Guid> RequirePermissionAsync(
@@ -940,6 +942,19 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
     private Task<IUnitOfWorkScope> BeginUnitOfWorkAsync(CancellationToken cancellationToken)
     {
         return _unitOfWorkManager.BeginAsync(cancellationToken: cancellationToken);
+    }
+
+    private Task<TResult> ExecuteManagementListReadAsync<TResult>(
+        Func<CancellationToken, Task<TResult>> operation,
+        CancellationToken cancellationToken)
+    {
+        if (_unitOfWorkManager.Current is not null)
+        {
+            throw new InvalidOperationException(
+                "Management list queries require a root transactional unit of work.");
+        }
+
+        return _readSnapshot.ExecuteAsync(operation, cancellationToken);
     }
 
     private async Task<ReceiptClaim> ClaimReceiptAsync(

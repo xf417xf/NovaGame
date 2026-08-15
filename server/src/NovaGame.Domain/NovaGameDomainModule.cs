@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NovaCore.BuildingBlocks.Modularity;
 using NovaGame.Domain.Content.GameConfig;
+using NovaGame.Domain.Operations.AdminAccess;
 using NovaGame.Domain.Shared;
 
 namespace NovaGame.Domain;
@@ -14,5 +15,6 @@ public sealed class NovaGameDomainModule : NovaCoreModule
         services.AddSingleton<GameConfigContentProcessor>();
         services.AddSingleton<GameConfigSnapshotValidator>();
         services.AddSingleton<GameConfigSnapshotBuilder>();
+        services.AddSingleton<RefreshTokenFamilyPolicy>();
     }
 }

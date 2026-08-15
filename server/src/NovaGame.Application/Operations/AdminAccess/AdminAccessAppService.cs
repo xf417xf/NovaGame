@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using NovaCore.BuildingBlocks.CurrentUser;
 using NovaCore.BuildingBlocks.Infrastructure;
 using NovaCore.BuildingBlocks.Timing;
@@ -21,6 +22,7 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
     private readonly IPasswordHashingService _passwordHashingService;
     private readonly IAccessTokenIssuer _accessTokenIssuer;
     private readonly IRefreshTokenService _refreshTokenService;
+    private readonly RefreshTokenFamilyPolicy _refreshTokenFamilyPolicy;
     private readonly IRequestAuditContextAccessor _requestAuditContextAccessor;
     private readonly ICurrentUser _currentUser;
     private readonly IGuidGenerator _guidGenerator;
@@ -34,6 +36,7 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
         IPasswordHashingService passwordHashingService,
         IAccessTokenIssuer accessTokenIssuer,
         IRefreshTokenService refreshTokenService,
+        RefreshTokenFamilyPolicy refreshTokenFamilyPolicy,
         IRequestAuditContextAccessor requestAuditContextAccessor,
         ICurrentUser currentUser,
         IGuidGenerator guidGenerator,
@@ -46,6 +49,7 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
         _passwordHashingService = passwordHashingService;
         _accessTokenIssuer = accessTokenIssuer;
         _refreshTokenService = refreshTokenService;
+        _refreshTokenFamilyPolicy = refreshTokenFamilyPolicy;
         _requestAuditContextAccessor = requestAuditContextAccessor;
         _currentUser = currentUser;
         _guidGenerator = guidGenerator;
@@ -64,7 +68,7 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
 
         if (AdministratorUserName.TryCreate(request.UserName, out var userName))
         {
-            administrator = await _administratorRepository.FindByNormalizedUserNameAsync(
+            administrator = await _administratorRepository.FindByNormalizedUserNameForUpdateAsync(
                 userName.NormalizedValue,
                 cancellationToken);
         }
@@ -146,11 +150,11 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
         string? refreshToken,
         CancellationToken cancellationToken = default)
     {
-        await using var unitOfWork = await _unitOfWorkManager.BeginAsync(cancellationToken: cancellationToken);
-        var now = _clock.UtcNow;
-
         if (!_refreshTokenService.TryHash(refreshToken, out var tokenHash))
         {
+            await using var invalidTokenUnitOfWork = await _unitOfWorkManager.BeginAsync(
+                cancellationToken: cancellationToken);
+            var now = _clock.UtcNow;
             await AddAuditAsync(
                 AdminAccessAuditAction.Refresh,
                 now,
@@ -159,7 +163,7 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
                     ? AdminAccessErrorCodes.RefreshTokenRequired
                     : AdminAccessErrorCodes.RefreshTokenInvalid,
                 cancellationToken: cancellationToken);
-            await unitOfWork.CompleteAsync(cancellationToken);
+            await invalidTokenUnitOfWork.CompleteAsync(cancellationToken);
             throw new AdminAccessException(
                 string.IsNullOrWhiteSpace(refreshToken)
                     ? AdminAccessErrorCodes.RefreshTokenRequired
@@ -167,15 +171,64 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
                 "A valid refresh token is required.");
         }
 
-        var session = await _refreshTokenSessionRepository.FindByTokenHashForUpdateAsync(
+        var tokenProbe = await _refreshTokenSessionRepository.FindByTokenHashAsync(
             tokenHash,
             cancellationToken);
-        if (session is null)
+        if (tokenProbe is null)
         {
+            await using var missingTokenUnitOfWork = await _unitOfWorkManager.BeginAsync(
+                cancellationToken: cancellationToken);
+            var now = _clock.UtcNow;
             await AddAuditAsync(
                 AdminAccessAuditAction.Refresh,
                 now,
                 succeeded: false,
+                errorCode: AdminAccessErrorCodes.RefreshTokenInvalid,
+                cancellationToken: cancellationToken);
+            await missingTokenUnitOfWork.CompleteAsync(cancellationToken);
+            throw new AdminAccessException(
+                AdminAccessErrorCodes.RefreshTokenInvalid,
+                "The refresh token is invalid.");
+        }
+
+        await using var unitOfWork = await _unitOfWorkManager.BeginAsync(cancellationToken: cancellationToken);
+        var administrator = await _administratorRepository.FindByIdForUpdateAsync(
+            tokenProbe.AdministratorId,
+            cancellationToken);
+        if (administrator is null)
+        {
+            var missingAdministratorTime = _clock.UtcNow;
+            await AddAuditAsync(
+                AdminAccessAuditAction.Refresh,
+                missingAdministratorTime,
+                succeeded: false,
+                administratorId: tokenProbe.AdministratorId,
+                errorCode: AdminAccessErrorCodes.RefreshTokenInvalid,
+                cancellationToken: cancellationToken);
+            await unitOfWork.CompleteAsync(cancellationToken);
+            throw new AdminAccessException(
+                AdminAccessErrorCodes.RefreshTokenInvalid,
+                "The refresh token is invalid.");
+        }
+
+        var sessions = await _refreshTokenSessionRepository.GetFamilyForUpdateAsync(
+            tokenProbe.FamilyId,
+            cancellationToken);
+        var currentTime = _clock.UtcNow;
+        var identity = _refreshTokenFamilyPolicy.RequireValidIdentity(sessions);
+        var session = sessions.SingleOrDefault(candidate =>
+            CryptographicOperations.FixedTimeEquals(candidate.TokenHash, tokenHash));
+        if (session is null ||
+            identity.FamilyId != tokenProbe.FamilyId ||
+            identity.AdministratorId != tokenProbe.AdministratorId ||
+            session.FamilyId != tokenProbe.FamilyId ||
+            session.AdministratorId != administrator.Id)
+        {
+            await AddAuditAsync(
+                AdminAccessAuditAction.Refresh,
+                currentTime,
+                succeeded: false,
+                administratorId: administrator.Id,
                 errorCode: AdminAccessErrorCodes.RefreshTokenInvalid,
                 cancellationToken: cancellationToken);
             await unitOfWork.CompleteAsync(cancellationToken);
@@ -188,16 +241,16 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
         {
             if (session.WasRotated)
             {
-                await RevokeFamilyAsync(
-                    session.FamilyId,
+                _ = _refreshTokenFamilyPolicy.Revoke(
+                    sessions,
                     RefreshTokenRevocationReason.ReuseDetected,
-                    now,
-                    cancellationToken);
+                    currentTime,
+                    _requestAuditContextAccessor.Current.IpAddress);
                 await AddAuditAsync(
                     AdminAccessAuditAction.RefreshTokenReuseDetected,
-                    now,
+                    currentTime,
                     succeeded: false,
-                    administratorId: session.AdministratorId,
+                    administratorId: administrator.Id,
                     errorCode: AdminAccessErrorCodes.RefreshTokenReused,
                     cancellationToken: cancellationToken);
                 await unitOfWork.CompleteAsync(cancellationToken);
@@ -208,9 +261,9 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
 
             await AddAuditAsync(
                 AdminAccessAuditAction.Refresh,
-                now,
+                currentTime,
                 succeeded: false,
-                administratorId: session.AdministratorId,
+                administratorId: administrator.Id,
                 errorCode: AdminAccessErrorCodes.RefreshTokenInvalid,
                 cancellationToken: cancellationToken);
             await unitOfWork.CompleteAsync(cancellationToken);
@@ -219,17 +272,17 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
                 "The refresh token is invalid.");
         }
 
-        if (session.IsExpired(now))
+        if (session.IsExpired(currentTime))
         {
             session.Revoke(
                 RefreshTokenRevocationReason.Expired,
-                now,
+                currentTime,
                 _requestAuditContextAccessor.Current.IpAddress);
             await AddAuditAsync(
                 AdminAccessAuditAction.Refresh,
-                now,
+                currentTime,
                 succeeded: false,
-                administratorId: session.AdministratorId,
+                administratorId: administrator.Id,
                 errorCode: AdminAccessErrorCodes.RefreshTokenExpired,
                 cancellationToken: cancellationToken);
             await unitOfWork.CompleteAsync(cancellationToken);
@@ -238,21 +291,18 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
                 "The refresh token has expired.");
         }
 
-        var administrator = await _administratorRepository.FindByIdAsync(
-            session.AdministratorId,
-            cancellationToken);
-        if (administrator is not { IsActive: true })
+        if (!administrator.IsActive)
         {
-            await RevokeFamilyAsync(
-                session.FamilyId,
+            _ = _refreshTokenFamilyPolicy.Revoke(
+                sessions,
                 RefreshTokenRevocationReason.AdministratorInactive,
-                now,
-                cancellationToken);
+                currentTime,
+                _requestAuditContextAccessor.Current.IpAddress);
             await AddAuditAsync(
                 AdminAccessAuditAction.Refresh,
-                now,
+                currentTime,
                 succeeded: false,
-                administratorId: session.AdministratorId,
+                administratorId: administrator.Id,
                 errorCode: AdminAccessErrorCodes.AccountInactive,
                 cancellationToken: cancellationToken);
             await unitOfWork.CompleteAsync(cancellationToken);
@@ -263,28 +313,28 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
 
         var replacementToken = _refreshTokenService.Create();
         var replacementSessionId = _guidGenerator.Create();
-        var replacementExpiresAtUtc = now.Add(RefreshTokenLifetime);
-        session.Rotate(replacementSessionId, now, _requestAuditContextAccessor.Current.IpAddress);
+        var replacementExpiresAtUtc = currentTime.Add(RefreshTokenLifetime);
+        session.Rotate(replacementSessionId, currentTime, _requestAuditContextAccessor.Current.IpAddress);
         await _refreshTokenSessionRepository.AddAsync(
             new RefreshTokenSession(
                 replacementSessionId,
                 administrator.Id,
                 session.FamilyId,
                 replacementToken.Hash,
-                now,
+                currentTime,
                 replacementExpiresAtUtc,
                 _requestAuditContextAccessor.Current.IpAddress),
             cancellationToken);
 
-        var accessTokenExpiresAtUtc = now.Add(AccessTokenLifetime);
+        var accessTokenExpiresAtUtc = currentTime.Add(AccessTokenLifetime);
         var accessToken = _accessTokenIssuer.Issue(
             administrator.Id,
             administrator.UserName,
-            now,
+            currentTime,
             accessTokenExpiresAtUtc);
         await AddAuditAsync(
             AdminAccessAuditAction.Refresh,
-            now,
+            currentTime,
             succeeded: true,
             administratorId: administrator.Id,
             cancellationToken: cancellationToken);
@@ -304,27 +354,51 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
             return;
         }
 
-        await using var unitOfWork = await _unitOfWorkManager.BeginAsync(cancellationToken: cancellationToken);
-        var session = await _refreshTokenSessionRepository.FindByTokenHashForUpdateAsync(
+        var tokenProbe = await _refreshTokenSessionRepository.FindByTokenHashAsync(
             tokenHash,
             cancellationToken);
-        if (session is null)
+        if (tokenProbe is null)
+        {
+            return;
+        }
+
+        await using var unitOfWork = await _unitOfWorkManager.BeginAsync(cancellationToken: cancellationToken);
+        var administrator = await _administratorRepository.FindByIdForUpdateAsync(
+            tokenProbe.AdministratorId,
+            cancellationToken);
+        if (administrator is null)
+        {
+            await unitOfWork.CompleteAsync(cancellationToken);
+            return;
+        }
+
+        var sessions = await _refreshTokenSessionRepository.GetFamilyForUpdateAsync(
+            tokenProbe.FamilyId,
+            cancellationToken);
+        var identity = _refreshTokenFamilyPolicy.RequireValidIdentity(sessions);
+        var session = sessions.SingleOrDefault(candidate =>
+            CryptographicOperations.FixedTimeEquals(candidate.TokenHash, tokenHash));
+        if (session is null ||
+            identity.FamilyId != tokenProbe.FamilyId ||
+            identity.AdministratorId != tokenProbe.AdministratorId ||
+            session.FamilyId != tokenProbe.FamilyId ||
+            session.AdministratorId != administrator.Id)
         {
             await unitOfWork.CompleteAsync(cancellationToken);
             return;
         }
 
         var now = _clock.UtcNow;
-        await RevokeFamilyAsync(
-            session.FamilyId,
+        _ = _refreshTokenFamilyPolicy.Revoke(
+            sessions,
             RefreshTokenRevocationReason.Logout,
             now,
-            cancellationToken);
+            _requestAuditContextAccessor.Current.IpAddress);
         await AddAuditAsync(
             AdminAccessAuditAction.Logout,
             now,
             succeeded: true,
-            administratorId: session.AdministratorId,
+            administratorId: administrator.Id,
             cancellationToken: cancellationToken);
         await unitOfWork.CompleteAsync(cancellationToken);
     }
@@ -366,21 +440,6 @@ public sealed class AdminAccessAppService : IAdminAccessAppService
         }
 
         return snapshot;
-    }
-
-    private async Task RevokeFamilyAsync(
-        Guid familyId,
-        RefreshTokenRevocationReason reason,
-        DateTime revokedAtUtc,
-        CancellationToken cancellationToken)
-    {
-        var sessions = await _refreshTokenSessionRepository.GetFamilyForUpdateAsync(
-            familyId,
-            cancellationToken);
-        foreach (var familySession in sessions.Where(candidate => !candidate.IsRevoked))
-        {
-            familySession.Revoke(reason, revokedAtUtc, _requestAuditContextAccessor.Current.IpAddress);
-        }
     }
 
     private Task AddAuditAsync(

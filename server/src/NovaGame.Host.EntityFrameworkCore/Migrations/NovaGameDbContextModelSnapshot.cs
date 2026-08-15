@@ -285,7 +285,8 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                     b.Property<string>("Action")
                         .IsRequired()
                         .HasMaxLength(48)
-                        .HasColumnType("varchar(48)");
+                        .HasColumnType("varchar(48)")
+                        .UseCollation("utf8mb4_bin");
 
                     b.Property<Guid?>("ActorAdministratorId")
                         .HasColumnType("char(36)");
@@ -295,7 +296,8 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
 
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(128)
-                        .HasColumnType("varchar(128)");
+                        .HasColumnType("varchar(128)")
+                        .UseCollation("utf8mb4_bin");
 
                     b.Property<string>("ErrorCode")
                         .HasMaxLength(128)
@@ -311,9 +313,13 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
 
                     b.Property<string>("PermissionName")
                         .HasMaxLength(128)
-                        .HasColumnType("varchar(128)");
+                        .HasColumnType("varchar(128)")
+                        .UseCollation("utf8mb4_bin");
 
                     b.Property<Guid?>("RoleId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid?>("SessionFamilyId")
                         .HasColumnType("char(36)");
 
                     b.Property<string>("SubjectUserName")
@@ -323,19 +329,93 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                     b.Property<bool>("Succeeded")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<long?>("TargetRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("UserAgent")
                         .HasMaxLength(512)
                         .HasColumnType("varchar(512)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Action", "OccurredAtUtc")
-                        .HasDatabaseName("ix_admin_audit_records_action_time");
+                    b.HasIndex("OccurredAtUtc", "Id")
+                        .IsDescending()
+                        .HasDatabaseName("ix_admin_audit_records_time_id");
 
-                    b.HasIndex("AdministratorId", "OccurredAtUtc")
-                        .HasDatabaseName("ix_admin_audit_records_admin_time");
+                    b.HasIndex("Action", "OccurredAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_admin_audit_records_action_time_id");
 
-                    b.ToTable("admin_audit_records", (string)null);
+                    b.HasIndex("ActorAdministratorId", "OccurredAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_admin_audit_records_actor_time_id");
+
+                    b.HasIndex("AdministratorId", "OccurredAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_admin_audit_records_subject_time_id");
+
+                    b.HasIndex("CorrelationId", "OccurredAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_admin_audit_records_correlation_time_id");
+
+                    b.HasIndex("RoleId", "OccurredAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_admin_audit_records_role_time_id");
+
+                    b.HasIndex("Succeeded", "OccurredAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("ix_admin_audit_records_success_time_id");
+
+                    b.ToTable("admin_audit_records", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_admin_audit_records_target_revision", "`TargetRevision` IS NULL OR `TargetRevision` > 0");
+                        });
+                });
+
+            modelBuilder.Entity("NovaGame.Domain.Operations.AdminAccess.AdminAccessCommandReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("char(36)");
+
+                    b.Property<Guid>("ActorAdministratorId")
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("CommandKind")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("varchar(48)")
+                        .UseCollation("utf8mb4_bin");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("char(36)")
+                        .UseCollation("ascii_bin");
+
+                    b.Property<byte[]>("RequestFingerprint")
+                        .IsRequired()
+                        .HasColumnType("binary(32)");
+
+                    b.Property<long>("ResultingRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("TargetResourceId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorAdministratorId", "CommandKind", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_admin_access_receipts_actor_kind_key");
+
+                    b.ToTable("admin_access_command_receipts", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_admin_access_receipts_command_kind", "`CommandKind` IN ('AdministratorCreate', 'AdminRoleCreate', 'AdministratorPasswordReset')");
+
+                            t.HasCheckConstraint("ck_admin_access_receipts_revision", "`ResultingRevision` > 0");
+                        });
                 });
 
             modelBuilder.Entity("NovaGame.Domain.Operations.AdminAccess.AdminRole", b =>
@@ -344,9 +424,19 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("char(36)");
 
+                    b.Property<sbyte?>("BuiltInRoleSlot")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("tinyint")
+                        .HasComputedColumnSql("CASE WHEN `IsBuiltIn` = 1 THEN 1 ELSE NULL END", true);
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasPrecision(6)
                         .HasColumnType("datetime(6)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("IsBuiltIn")
                         .HasColumnType("tinyint(1)");
@@ -354,20 +444,49 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
+                        .HasColumnType("varchar(64)")
+                        .UseCollation("utf8mb4_bin");
 
                     b.Property<string>("NormalizedName")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
+                        .HasColumnType("varchar(64)")
+                        .UseCollation("utf8mb4_bin");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BuiltInRoleSlot")
+                        .IsUnique()
+                        .HasDatabaseName("ux_admin_roles_built_in_slot");
 
                     b.HasIndex("NormalizedName")
                         .IsUnique()
                         .HasDatabaseName("ux_admin_roles_normalized_name");
 
-                    b.ToTable("admin_roles", (string)null);
+                    b.HasIndex("IsBuiltIn", "NormalizedName", "Id")
+                        .IsDescending(true, false, false)
+                        .HasDatabaseName("ix_admin_roles_list");
+
+                    b.HasIndex("IsActive", "IsBuiltIn", "NormalizedName", "Id")
+                        .IsDescending(false, true, false, false)
+                        .HasDatabaseName("ix_admin_roles_active_list");
+
+                    b.ToTable("admin_roles", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_admin_roles_built_in_identity", "`IsBuiltIn` = 0 OR (`IsActive` = 1 AND BINARY `Name` = BINARY 'Administrators' AND BINARY `NormalizedName` = BINARY 'ADMINISTRATORS')");
+
+                            t.HasCheckConstraint("ck_admin_roles_revision", "`Revision` > 0");
+                        });
                 });
 
             modelBuilder.Entity("NovaGame.Domain.Operations.AdminAccess.Administrator", b =>
@@ -395,12 +514,19 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                     b.Property<string>("NormalizedUserName")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
+                        .HasColumnType("varchar(64)")
+                        .UseCollation("utf8mb4_bin");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("varchar(512)");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasPrecision(6)
@@ -417,7 +543,13 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_admin_administrators_normalized_name");
 
-                    b.ToTable("admin_administrators", (string)null);
+                    b.HasIndex("IsActive", "NormalizedUserName", "Id")
+                        .HasDatabaseName("ix_admin_administrators_active_name_id");
+
+                    b.ToTable("admin_administrators", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_admin_administrators_revision", "`Revision` > 0");
+                        });
                 });
 
             modelBuilder.Entity("NovaGame.Domain.Operations.AdminAccess.AdministratorRole", b =>
@@ -441,12 +573,12 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RoleId")
-                        .HasDatabaseName("ix_admin_role_memberships_role");
-
                     b.HasIndex("AdministratorId", "RoleId")
                         .IsUnique()
                         .HasDatabaseName("ux_admin_role_memberships_admin_role");
+
+                    b.HasIndex("RoleId", "AdministratorId")
+                        .HasDatabaseName("ix_admin_role_memberships_role_admin");
 
                     b.ToTable("admin_role_memberships", (string)null);
                 });
@@ -503,10 +635,19 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                     b.HasIndex("AdministratorId", "ExpiresAtUtc")
                         .HasDatabaseName("ix_admin_refresh_sessions_admin_expiry");
 
-                    b.HasIndex("FamilyId", "RevokedAtUtc")
-                        .HasDatabaseName("ix_admin_refresh_sessions_family_revoked");
+                    b.HasIndex("FamilyId", "ReplacedBySessionId")
+                        .HasDatabaseName("ix_admin_refresh_sessions_family_replacement");
 
-                    b.ToTable("admin_refresh_token_sessions", (string)null);
+                    b.HasIndex("FamilyId", "CreatedAtUtc", "Id")
+                        .HasDatabaseName("ix_admin_refresh_sessions_family_order");
+
+                    b.HasIndex("AdministratorId", "FamilyId", "CreatedAtUtc", "Id")
+                        .HasDatabaseName("ix_admin_refresh_sessions_admin_family_order");
+
+                    b.ToTable("admin_refresh_token_sessions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_admin_refresh_sessions_revocation", "(`RevokedAtUtc` IS NULL AND `RevocationReason` IS NULL AND `ReplacedBySessionId` IS NULL) OR (`RevokedAtUtc` IS NOT NULL AND `RevocationReason` IS NOT NULL AND ((`RevocationReason` = 'Rotated' AND `ReplacedBySessionId` IS NOT NULL) OR (`RevocationReason` <> 'Rotated' AND `ReplacedBySessionId` IS NULL)))");
+                        });
                 });
 
             modelBuilder.Entity("NovaGame.Domain.Operations.AdminAccess.RolePermission", b =>
@@ -524,7 +665,8 @@ namespace NovaGame.Host.EntityFrameworkCore.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("varchar(128)");
+                        .HasColumnType("varchar(128)")
+                        .UseCollation("utf8mb4_bin");
 
                     b.Property<Guid>("RoleId")
                         .HasColumnType("char(36)");

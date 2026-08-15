@@ -174,6 +174,47 @@ public sealed class AdminAccessManagementAuthorizationTests
         fixture.AssertNoProtectedWork();
     }
 
+    [Fact]
+    public async Task ManagementListQueriesUseExplicitTransactionalRootUnitsOfWork()
+    {
+        var fixture = new AdminAccessManagementApplicationFixture();
+
+        await fixture.Service.ListAdministratorsAsync(new ListAdministratorsRequest());
+        await fixture.Service.ListAdminRolesAsync(new ListAdminRolesRequest());
+        await fixture.Service.ListSessionFamiliesAsync(new ListAdminSessionFamiliesRequest());
+        await fixture.Service.ListAuditRecordsAsync(new ListAdminAccessAuditRecordsRequest
+        {
+            FromUtc = AdminAccessManagementApplicationFixture.NowUtc.AddDays(-1),
+            ToUtc = AdminAccessManagementApplicationFixture.NowUtc.AddDays(1)
+        });
+
+        Assert.Equal(0, fixture.UnitOfWork.BeginCount);
+        Assert.Empty(fixture.UnitOfWork.BeginOptions);
+        Assert.Equal(4, fixture.Repository.ReadSnapshotExecutionCount);
+        Assert.Equal(0, fixture.UnitOfWork.CompleteCount);
+        Assert.Equal(0, fixture.UnitOfWork.DisposeCount);
+        Assert.Equal(
+            ["query-administrators", "query-roles", "query-session-families", "query-audits"],
+            fixture.Repository.Calls);
+    }
+
+    [Fact]
+    public async Task ManagementListQueriesRejectAnAmbientUnitOfWork()
+    {
+        var fixture = new AdminAccessManagementApplicationFixture();
+        await using var ambientScope = await fixture.UnitOfWork.BeginAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.ListAdministratorsAsync(new ListAdministratorsRequest()));
+
+        Assert.Equal(
+            "Management list queries require a root transactional unit of work.",
+            exception.Message);
+        Assert.Equal(1, fixture.UnitOfWork.BeginCount);
+        Assert.Equal(0, fixture.Repository.ReadSnapshotExecutionCount);
+        Assert.Empty(fixture.Repository.Calls);
+    }
+
     private static async Task InvokeMalformedAsync(
         IAdminAccessManagementAppService service,
         ManagementOperation operation)
@@ -307,6 +348,7 @@ internal sealed class AdminAccessManagementApplicationFixture
 
         Service = new AdminAccessManagementAppService(
             UnitOfWork,
+            Repository,
             Repository,
             ReceiptRepository,
             new AdminAccessManagementPolicy(),
@@ -524,6 +566,7 @@ internal sealed class TestRequestAuditContextAccessor : IRequestAuditContextAcce
 internal sealed class TestUnitOfWorkManager : IUnitOfWorkManager
 {
     private readonly AsyncLocal<TestUnitOfWorkScope?> _current = new();
+    private readonly ConcurrentQueue<UnitOfWorkOptions> _beginOptions = new();
     private int _beginCount;
     private int _completeAttemptCount;
     private int _completeCount;
@@ -536,6 +579,8 @@ internal sealed class TestUnitOfWorkManager : IUnitOfWorkManager
     public int CompleteCount => Volatile.Read(ref _completeCount);
 
     public int DisposeCount => Volatile.Read(ref _disposeCount);
+
+    public IReadOnlyList<UnitOfWorkOptions> BeginOptions => _beginOptions.ToArray();
 
     public Exception? CompleteFailure { get; set; }
 
@@ -554,10 +599,12 @@ internal sealed class TestUnitOfWorkManager : IUnitOfWorkManager
             throw new InvalidOperationException("Nested test units of work are not supported.");
         }
 
+        var resolvedOptions = options ?? new UnitOfWorkOptions();
+        _beginOptions.Enqueue(resolvedOptions);
         Interlocked.Increment(ref _beginCount);
         var scope = new TestUnitOfWorkScope(
             this,
-            options ?? new UnitOfWorkOptions());
+            resolvedOptions);
         _current.Value = scope;
         return Task.FromResult<IUnitOfWorkScope>(scope);
     }
@@ -753,7 +800,9 @@ internal sealed class TestAdminAccessCommandReceiptRepository : IAdminAccessComm
         Guid IdempotencyKey);
 }
 
-internal sealed class TestAdminAccessManagementRepository : IAdminAccessManagementRepository
+internal sealed class TestAdminAccessManagementRepository :
+    IAdminAccessManagementRepository,
+    IAdminAccessManagementReadSnapshot
 {
     private readonly TestUnitOfWorkManager _unitOfWork;
     private readonly object _sync = new();
@@ -781,7 +830,11 @@ internal sealed class TestAdminAccessManagementRepository : IAdminAccessManageme
 
     public Exception? AuditFailure { get; set; }
 
+    public int ReadSnapshotExecutionCount => Volatile.Read(ref _readSnapshotExecutionCount);
+
     public bool UseDetachedRoleUpdates { get; set; }
+
+    private int _readSnapshotExecutionCount;
 
     public Func<Administrator, CancellationToken, Task>? OnAddAdministratorAsync { get; set; }
 
@@ -800,6 +853,16 @@ internal sealed class TestAdminAccessManagementRepository : IAdminAccessManageme
     public void SeedSession(RefreshTokenSession session)
     {
         Sessions.Add(session);
+    }
+
+    public async Task<TResult> ExecuteAsync<TResult>(
+        Func<CancellationToken, Task<TResult>> operation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _readSnapshotExecutionCount);
+        return await operation(cancellationToken);
     }
 
     public Task<AdminAccessPageResult<AdministratorManagementSnapshot>> GetAdministratorPageAsync(

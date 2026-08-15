@@ -20,8 +20,8 @@ public sealed class AdministratorRoleConfiguration : IEntityTypeConfiguration<Ad
         builder.HasIndex(membership => new { membership.AdministratorId, membership.RoleId })
             .IsUnique()
             .HasDatabaseName("ux_admin_role_memberships_admin_role");
-        builder.HasIndex(membership => membership.RoleId)
-            .HasDatabaseName("ix_admin_role_memberships_role");
+        builder.HasIndex(membership => new { membership.RoleId, membership.AdministratorId })
+            .HasDatabaseName("ix_admin_role_memberships_role_admin");
 
         builder.HasOne<AdminRole>()
             .WithMany()

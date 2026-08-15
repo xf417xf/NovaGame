@@ -27,6 +27,9 @@ public sealed class NovaGameDbContext : BaseDbContext
 
     public DbSet<AdminAccessAuditRecord> AdminAccessAuditRecords => Set<AdminAccessAuditRecord>();
 
+    public DbSet<AdminAccessCommandReceipt> AdminAccessCommandReceipts =>
+        Set<AdminAccessCommandReceipt>();
+
     public DbSet<GameConfigDraft> GameConfigDrafts => Set<GameConfigDraft>();
 
     public DbSet<PublishedGameConfigVersion> PublishedGameConfigVersions => Set<PublishedGameConfigVersion>();
