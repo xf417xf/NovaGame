@@ -147,12 +147,12 @@ layer and real-MySQL API/OpenAPI verification; M35-04-T04 completed the frozen r
 integration evidence for migrations, seed, permissions, account/role/session/audit queries,
 mutations, locking, replay, and atomic audit behavior. M35-04 completed final sequential server,
 database, authentication, management-contract, documentation, repository, and whitespace
-verification. M3.5 is active at `M35-05`, with only `M35-05-T02` executable. The user separately
-authorized the NovaGame-owned `administrator-management` capability on 2026-08-13. M35-05-T02
-authorizes only administrator list/filter, create/edit, role assignment, activation, deactivation,
-password-reset UI, and focused component tests. This authorization does not come from M3 and does
-not authorize role, session, or audit workspaces, M35-05-T03 or later work, SwordMaster changes,
-extraction, M4, or NovaCore changes.
+verification. M35-05-T02 completed the administrator workspace and focused component coverage.
+M3.5 is active at `M35-05`, with only `M35-05-T03` executable. The user separately authorized the
+NovaGame-owned `administrator-management` capability on 2026-08-13. M35-05-T03 authorizes only
+custom-role list, create/edit, activation, permission-assignment UI, and focused component tests.
+This authorization does not come from M3 and does not authorize session or audit workspaces,
+M35-05-T04 or later work, SwordMaster changes, extraction, M4, or NovaCore changes.
 
 ### Goal
 

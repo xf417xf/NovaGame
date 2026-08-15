@@ -34,14 +34,13 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5](docs/goals/m3.5.md) is now the only active repository milestone at `M35-05`, with only
-`M35-05-T02` executable after M35-05-T01 completed pinned Vben transport and route verification.
-It advances the
-NovaGame-owned `Operations/AdminAccess` `administrator-management` vertical slice across .NET,
-MySQL 8.4, and the generic Vben Admin 5 `web-ele` application. The active task authorizes only
-administrator list/filter, create/edit, role assignment, activation, deactivation, password-reset
-UI, and focused component tests. It does not authorize role, session, or audit workspaces,
-M35-05-T03 or later tasks, SwordMaster, extraction, M4, or NovaCore changes; M4 remains
-`Unscheduled`.
+`M35-05-T03` executable after M35-05-T02 completed the administrator workspace and focused
+component coverage. It advances the NovaGame-owned `Operations/AdminAccess`
+`administrator-management` vertical slice across .NET, MySQL 8.4, and the generic Vben Admin 5
+`web-ele` application. The active task authorizes only custom-role list, create/edit, activation,
+permission-assignment UI, and focused component tests. It does not authorize session or audit
+workspaces, M35-05-T04 or later tasks, SwordMaster, extraction, M4, or NovaCore changes; M4
+remains `Unscheduled`.
 
 ## Prerequisites
 

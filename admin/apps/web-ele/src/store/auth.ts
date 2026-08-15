@@ -19,6 +19,10 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { $t } from '#/locales';
+import {
+  refreshAccessibleRoutes,
+  resetAccessibleRoutes,
+} from '#/router/access';
 
 export const useAuthStore = defineStore('auth', () => {
   const accessStore = useAccessStore();
@@ -79,6 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {
       // Local state still has to be cleared when the server is unavailable.
     }
+    resetAccessibleRoutes(router);
     resetAllStores();
     accessStore.setLoginExpired(false);
     await router.replace({
@@ -90,6 +95,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function expireSession() {
+    resetAccessibleRoutes(router);
     resetAllStores();
     accessStore.setLoginExpired(false);
     if (router.currentRoute.value.path !== LOGIN_PATH) {
@@ -134,6 +140,28 @@ export const useAuthStore = defineStore('auth', () => {
     return userInfo;
   }
 
+  /**
+   * Reconcile the current session after a server-authoritative permission change.
+   * A forbidden refresh means the authenticated shell is no longer usable.
+   */
+  async function refreshAuthenticatedState() {
+    try {
+      const userInfo = await loadAuthenticatedState();
+      const { accessibleMenus, accessibleRoutes } =
+        await refreshAccessibleRoutes(router, accessStore.accessCodes);
+      accessStore.setAccessMenus(accessibleMenus);
+      accessStore.setAccessRoutes(accessibleRoutes);
+      accessStore.setIsAccessChecked(true);
+      return { accessibleRoutes, userInfo };
+    } catch (error) {
+      if (toNovaGameApiError(error).status === 403) {
+        await expireSession();
+        return null;
+      }
+      throw error;
+    }
+  }
+
   function $reset() {
     loginLoading.value = false;
     restorePromise = null;
@@ -146,6 +174,7 @@ export const useAuthStore = defineStore('auth', () => {
     fetchUserInfo,
     loginLoading,
     logout,
+    refreshAuthenticatedState,
     restoreSession,
   };
 });

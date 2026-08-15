@@ -32,7 +32,7 @@ const routes: RouteRecordRaw[] = [
   {
     children: [
       {
-        component: comingSoonComponent,
+        component: () => import('#/views/admin-access/administrators.vue'),
         meta: { title: 'Administrators' },
         name: 'AdminAccessAdministrators',
         path: '/admin-access/administrators',

@@ -69,11 +69,12 @@ completed the frozen thin management HTTP layer and real-MySQL API/OpenAPI verif
 M35-04-T04 completed the frozen real-MySQL integration evidence for migrations, seed,
 permissions, management queries, mutations, locking, replay, and atomic audit behavior.
 M35-04 is complete after final sequential server, database, authentication, management-contract,
-documentation, repository, and whitespace verification. M35-05 is active only at `M35-05-T02`.
-Follow `docs/goals/m3.5.md`. The active task authorizes only administrator list/filter,
-create/edit, role assignment, activation, deactivation, password-reset UI, and focused component
-tests. It does not authorize M35-05-T03 or later work, SwordMaster changes, an admin-shell
-extraction, another capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
+documentation, repository, and whitespace verification. M35-05-T02 completed the administrator
+workspace and its focused component coverage. M35-05 is active only at `M35-05-T03`. Follow
+`docs/goals/m3.5.md`. The active task authorizes only custom-role list, create/edit, activation,
+and permission-assignment UI plus focused component tests. It does not authorize M35-05-T04 or
+later work, SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore
+changes. M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

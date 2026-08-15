@@ -5,10 +5,10 @@ import { preferences } from '@vben/preferences';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { startProgress, stopProgress } from '@vben/utils';
 
-import { accessRoutes, coreRouteNames } from '#/router/routes';
+import { coreRouteNames } from '#/router/routes';
 import { useAuthStore } from '#/store';
 
-import { generateAccess } from './access';
+import { refreshAccessibleRoutes } from './access';
 
 function setupCommonGuard(router: Router) {
   const loadedPaths = new Set<string>();
@@ -70,11 +70,10 @@ function setupAccessGuard(router: Router) {
     }
 
     const userInfo = userStore.userInfo || (await authStore.fetchUserInfo());
-    const { accessibleMenus, accessibleRoutes } = await generateAccess({
-      roles: accessStore.accessCodes,
+    const { accessibleMenus, accessibleRoutes } = await refreshAccessibleRoutes(
       router,
-      routes: accessRoutes,
-    });
+      accessStore.accessCodes,
+    );
 
     accessStore.setAccessMenus(accessibleMenus);
     accessStore.setAccessRoutes(accessibleRoutes);
