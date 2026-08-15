@@ -1,3 +1,4 @@
+export * from './admin-access';
 export * from './core';
 export * from './game-config';
 export * from './nova-game-contracts';

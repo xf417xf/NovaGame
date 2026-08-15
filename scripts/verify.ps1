@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Documentation", "Repository", "Server", "Database", "Authentication", "GameConfig", "AdminManagement", "AdminE2E", "Admin", "Client", "SwordMaster", "All")]
+    [ValidateSet("Documentation", "Repository", "Server", "Database", "Authentication", "GameConfig", "AdminManagement", "AdminManagementAdmin", "AdminE2E", "Admin", "Client", "SwordMaster", "All")]
     [string]$Scope = "All",
 
     [string]$VbenTemplateRoot,
@@ -6499,48 +6499,75 @@ function Test-Documentation {
                 "M3-07-T02 reuse-pressure row '$m307ReusePressureId' must link current test or executable verifier evidence."
         }
 
-        $m307GenericAdminSourceRoot = [System.IO.Path]::GetFullPath(
-            "admin/apps/web-ele/src")
-        $m307SwordMasterAdminSourceRoot = [System.IO.Path]::GetFullPath(
-            "samples/SwordMaster/admin/src")
-        foreach ($m307AdminSourceRoot in @(
-            $m307GenericAdminSourceRoot,
-            $m307SwordMasterAdminSourceRoot
-        )) {
+        # M3 T02 recorded this comparison at the completed-M3 baseline. Read
+        # Git objects from that snapshot so later authorized generic-admin work
+        # does not retroactively change the evidence record.
+        $m307T02EvidenceSnapshotCommit =
+            "42d1ffe83770571d8f48cdb58f35bfc591a4bd1c"
+        $m307T02EvidenceSnapshot = @(
+            & git ls-tree -r $m307T02EvidenceSnapshotCommit -- `
+                "admin/apps/web-ele/src" `
+                "samples/SwordMaster/admin/src"
+        )
+        Assert-Condition `
+            ($LASTEXITCODE -eq 0) `
+            "Unable to read the completed-M3 admin evidence snapshot."
+
+        $m307GenericAdminPrefix = "admin/apps/web-ele/src/"
+        $m307SwordMasterAdminPrefix = "samples/SwordMaster/admin/src/"
+        $m307GenericAdminObjects = @{}
+        $m307SwordMasterAdminObjects = @{}
+        foreach ($m307T02EvidenceSnapshotLine in $m307T02EvidenceSnapshot) {
+            $m307T02EvidenceSnapshotMatch = [regex]::Match(
+                [string]$m307T02EvidenceSnapshotLine,
+                '^[0-9]{6} blob (?<object>[0-9a-f]{40})\t(?<path>.+)$')
             Assert-Condition `
-                (Test-Path -LiteralPath $m307AdminSourceRoot -PathType Container) `
-                "M3-07-T02 admin source root '$m307AdminSourceRoot' is missing."
+                $m307T02EvidenceSnapshotMatch.Success `
+                "Completed-M3 admin evidence snapshot contains an invalid tree entry."
+
+            $m307T02EvidencePath =
+                $m307T02EvidenceSnapshotMatch.Groups["path"].Value
+            $m307T02EvidenceObject =
+                $m307T02EvidenceSnapshotMatch.Groups["object"].Value
+            if ($m307T02EvidencePath.StartsWith(
+                    $m307GenericAdminPrefix,
+                    [StringComparison]::Ordinal)) {
+                $m307GenericAdminObjects[$m307T02EvidencePath] =
+                    $m307T02EvidenceObject
+            }
+            elseif ($m307T02EvidencePath.StartsWith(
+                    $m307SwordMasterAdminPrefix,
+                    [StringComparison]::Ordinal)) {
+                $m307SwordMasterAdminObjects[$m307T02EvidencePath] =
+                    $m307T02EvidenceObject
+            }
+            else {
+                throw "Completed-M3 admin evidence snapshot contains an out-of-scope path '$m307T02EvidencePath'."
+            }
         }
+        Assert-Condition `
+            ($m307GenericAdminObjects.Count -gt 0 -and
+                $m307SwordMasterAdminObjects.Count -gt 0) `
+            "Completed-M3 admin evidence snapshot is missing a source root."
 
         $m307AdminOverlapCount = 0
         $m307AdminIdenticalCount = 0
         $m307AdminDifferentCount = 0
         $m307SwordMasterOnlyCount = 0
-        foreach ($m307SwordMasterAdminFile in @(
-            Get-ChildItem `
-                -LiteralPath $m307SwordMasterAdminSourceRoot `
-                -Recurse `
-                -File
-        )) {
-            $m307AdminRelativePath = [System.IO.Path]::GetRelativePath(
-                $m307SwordMasterAdminSourceRoot,
-                $m307SwordMasterAdminFile.FullName)
-            $m307GenericAdminFile = Join-Path `
-                $m307GenericAdminSourceRoot `
-                $m307AdminRelativePath
-            if (-not (Test-Path -LiteralPath $m307GenericAdminFile -PathType Leaf)) {
+        foreach ($m307SwordMasterAdminObject in
+            $m307SwordMasterAdminObjects.GetEnumerator()) {
+            $m307AdminRelativePath = $m307SwordMasterAdminObject.Key.Substring(
+                $m307SwordMasterAdminPrefix.Length)
+            $m307GenericAdminPath =
+                $m307GenericAdminPrefix + $m307AdminRelativePath
+            if (-not $m307GenericAdminObjects.ContainsKey($m307GenericAdminPath)) {
                 $m307SwordMasterOnlyCount++
                 continue
             }
 
             $m307AdminOverlapCount++
-            $m307SwordMasterAdminHash = (Get-FileHash `
-                -LiteralPath $m307SwordMasterAdminFile.FullName `
-                -Algorithm SHA256).Hash
-            $m307GenericAdminHash = (Get-FileHash `
-                -LiteralPath $m307GenericAdminFile `
-                -Algorithm SHA256).Hash
-            if ($m307SwordMasterAdminHash -eq $m307GenericAdminHash) {
+            if ($m307SwordMasterAdminObject.Value -eq
+                $m307GenericAdminObjects[$m307GenericAdminPath]) {
                 $m307AdminIdenticalCount++
             }
             else {
@@ -6556,21 +6583,19 @@ function Test-Documentation {
 
         $m307UnpinnedIdenticalAdminPath =
             "router/routes/core.ts"
-        $m307UnpinnedSwordMasterAdminPath = Join-Path `
-            $m307SwordMasterAdminSourceRoot `
-            $m307UnpinnedIdenticalAdminPath
-        $m307UnpinnedGenericAdminPath = Join-Path `
-            $m307GenericAdminSourceRoot `
-            $m307UnpinnedIdenticalAdminPath
+        $m307UnpinnedSwordMasterAdminPath =
+            $m307SwordMasterAdminPrefix + $m307UnpinnedIdenticalAdminPath
+        $m307UnpinnedGenericAdminPath =
+            $m307GenericAdminPrefix + $m307UnpinnedIdenticalAdminPath
         Assert-Condition `
-            ((Test-Path -LiteralPath $m307UnpinnedSwordMasterAdminPath -PathType Leaf) -and
-                (Test-Path -LiteralPath $m307UnpinnedGenericAdminPath -PathType Leaf) -and
-                ((Get-FileHash `
-                        -LiteralPath $m307UnpinnedSwordMasterAdminPath `
-                        -Algorithm SHA256).Hash -eq
-                    (Get-FileHash `
-                        -LiteralPath $m307UnpinnedGenericAdminPath `
-                        -Algorithm SHA256).Hash)) `
+            ($m307SwordMasterAdminObjects.ContainsKey(
+                    $m307UnpinnedSwordMasterAdminPath) -and
+                $m307GenericAdminObjects.ContainsKey(
+                    $m307UnpinnedGenericAdminPath) -and
+                ($m307SwordMasterAdminObjects[
+                    $m307UnpinnedSwordMasterAdminPath] -eq
+                    $m307GenericAdminObjects[
+                        $m307UnpinnedGenericAdminPath])) `
             "M3-07-T02 must retain evidence that '$m307UnpinnedIdenticalAdminPath' is the twelfth identical admin file outside the eleven-copy equality guard."
 
         foreach ($forbiddenM307T02Pattern in @(
@@ -8139,16 +8164,20 @@ function Test-Documentation {
             "src/views/_core/fallback/forbidden.vue",
             "src/views/_core/fallback/not-found.vue"
         )) {
-            $genericCompositionPath = Join-Path `
-                "admin/apps/web-ele" `
-                $boundedSwordMasterCompositionPath
-            $swordMasterCompositionPath = Join-Path `
-                $swordMasterAdminRoot `
-                $boundedSwordMasterCompositionPath
+            $genericCompositionPath =
+                "admin/apps/web-ele/" + $boundedSwordMasterCompositionPath
+            $swordMasterCompositionPath =
+                "samples/SwordMaster/admin/" + $boundedSwordMasterCompositionPath
             Assert-Condition `
-                ((Get-FileHash -LiteralPath $swordMasterCompositionPath -Algorithm SHA256).Hash -eq
-                    (Get-FileHash -LiteralPath $genericCompositionPath -Algorithm SHA256).Hash) `
-                "Bounded SwordMaster composition copy '$boundedSwordMasterCompositionPath' drifted from generic web-ele."
+                ($m307SwordMasterAdminObjects.ContainsKey(
+                        $swordMasterCompositionPath) -and
+                    $m307GenericAdminObjects.ContainsKey(
+                        $genericCompositionPath) -and
+                    ($m307SwordMasterAdminObjects[
+                        $swordMasterCompositionPath] -eq
+                        $m307GenericAdminObjects[
+                            $genericCompositionPath])) `
+                "Completed-M3 bounded SwordMaster composition copy '$boundedSwordMasterCompositionPath' is missing or differs from its generic snapshot."
         }
 
         $swordMasterAuthContracts = Get-Content `
@@ -9443,6 +9472,135 @@ function Test-AdminManagement {
         -SkipSolutionTests
     Write-Output `
         "AdminManagement verification passed for $($selectedManifest.Count) focused test families."
+}
+
+function Invoke-AdminManagementVitestWithExecutionCount {
+    param([Parameter(Mandatory)]$Toolchain)
+
+    $adminRoot = [System.IO.Path]::GetFullPath([string]$Toolchain.adminRoot)
+    $sourceRoot = Join-Path $adminRoot "apps\web-ele\src"
+    Assert-Condition `
+        (Test-Path -LiteralPath $sourceRoot -PathType Container) `
+        "Admin management source root is missing at '$sourceRoot'."
+
+    $matchingTestFiles = @(
+        Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -Filter "*.test.ts" |
+            ForEach-Object {
+                $relativePath = [System.IO.Path]::GetRelativePath(
+                    $adminRoot,
+                    $_.FullName).Replace("\", "/")
+                [pscustomobject]@{
+                    FullName = $_.FullName
+                    RelativePath = $relativePath
+                }
+            } |
+            Where-Object {
+                $_.RelativePath -match '^apps/web-ele/src/.*/?admin-access[^/]*\.test\.ts$' -or
+                $_.RelativePath -match '^apps/web-ele/src/views/admin-access/.+\.test\.ts$'
+            } |
+            Sort-Object RelativePath)
+    Assert-Condition `
+        ($matchingTestFiles.Count -gt 0) `
+        "AdminManagementAdmin has no focused transport or route tests."
+    foreach ($matchingTestFile in $matchingTestFiles) {
+        Assert-Condition `
+            ($matchingTestFile.RelativePath -match '^apps/web-ele/src/.*/?admin-access[^/]*\.test\.ts$' -or
+                $matchingTestFile.RelativePath -match '^apps/web-ele/src/views/admin-access/.+\.test\.ts$') `
+            "AdminManagementAdmin selected an out-of-scope test '$($matchingTestFile.RelativePath)'."
+    }
+
+    $resultsRoot = Join-Path `
+        $localRoot `
+        ("test-results\admin-management-admin-vitest-" +
+            [Guid]::NewGuid().ToString("N"))
+    $resolvedResultsRoot = [System.IO.Path]::GetFullPath($resultsRoot)
+    $resolvedLocalRoot = [System.IO.Path]::GetFullPath($localRoot).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+    Assert-Condition `
+        $resolvedResultsRoot.StartsWith(
+            $resolvedLocalRoot,
+            [StringComparison]::OrdinalIgnoreCase) `
+        "AdminManagementAdmin Vitest results must remain under the repository-local '.local' directory."
+
+    New-Item -ItemType Directory -Path $resolvedResultsRoot -Force | Out-Null
+    $resultPath = Join-Path $resolvedResultsRoot "admin-management-admin.json"
+    try {
+        $arguments = @("exec", "vitest", "run") + @(
+            $matchingTestFiles | ForEach-Object { $_.RelativePath }) + @(
+            "--reporter=json", "--outputFile", $resultPath)
+        Invoke-AdminPnpm -Toolchain $Toolchain -ArgumentList $arguments
+        Assert-Condition `
+            (Test-Path -LiteralPath $resultPath -PathType Leaf) `
+            "AdminManagementAdmin did not produce '$resultPath'."
+
+        $testResult = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+        foreach ($requiredCounter in @(
+            "numTotalTests", "numPassedTests", "numFailedTests", "numPendingTests"
+        )) {
+            Assert-Condition `
+                ($null -ne $testResult.PSObject.Properties[$requiredCounter]) `
+                "AdminManagementAdmin result '$resultPath' is missing '$requiredCounter'."
+        }
+
+        $totalCount = [int]$testResult.numTotalTests
+        $passedCount = [int]$testResult.numPassedTests
+        $failedCount = [int]$testResult.numFailedTests
+        $pendingCount = [int]$testResult.numPendingTests
+        Assert-Condition `
+            ($totalCount -gt 0) `
+            "AdminManagementAdmin focused Vitest selection executed zero tests."
+        Assert-Condition `
+            ($passedCount -eq $totalCount -and
+                $failedCount -eq 0 -and
+                $pendingCount -eq 0) `
+            "AdminManagementAdmin focused Vitest result was not completely successful: total=$totalCount, passed=$passedCount, failed=$failedCount, pending=$pendingCount."
+        Write-Output `
+            "AdminManagementAdmin focused Vitest verification passed for $totalCount test(s)."
+    }
+    finally {
+        if (Test-Path -LiteralPath $resolvedResultsRoot -PathType Container) {
+            Remove-Item -LiteralPath $resolvedResultsRoot -Recurse -Force
+        }
+    }
+}
+
+function Test-AdminManagementAdmin {
+    Assert-Condition `
+        ((Get-M35TaskStatus -TaskId "M35-05-T01") -in @(
+                "in_progress", "blocked", "complete")) `
+        "AdminManagementAdmin is unavailable before M35-05-T01 activation."
+
+    $toolchain = Initialize-AdminToolchain
+    $previousCi = $env:CI
+    $previousNodeOptionsExists = Test-Path -LiteralPath "Env:NODE_OPTIONS"
+    $previousNodeOptions = $env:NODE_OPTIONS
+    $env:CI = "true"
+    try {
+        Invoke-AdminPnpm -Toolchain $toolchain -ArgumentList @("run", "format:check")
+        Invoke-AdminPnpm -Toolchain $toolchain -ArgumentList @("run", "lint")
+        Invoke-AdminManagementVitestWithExecutionCount -Toolchain $toolchain
+        Invoke-AdminPnpm `
+            -Toolchain $toolchain `
+            -ArgumentList @("--filter", "@vben/web-ele", "run", "typecheck")
+        $env:NODE_OPTIONS = "--max-old-space-size=8192"
+        Invoke-AdminPnpm `
+            -Toolchain $toolchain `
+            -ArgumentList @(
+                "--filter", "@vben/web-ele...", "--if-present", "run", "build")
+    }
+    finally {
+        if ($previousNodeOptionsExists) {
+            $env:NODE_OPTIONS = $previousNodeOptions
+        }
+        else {
+            Remove-Item -LiteralPath "Env:NODE_OPTIONS" -ErrorAction SilentlyContinue
+        }
+        $env:CI = $previousCi
+    }
+
+    Write-Output "AdminManagementAdmin verification passed."
 }
 
 function Test-Authentication {
@@ -17556,6 +17714,7 @@ switch ($Scope) {
     "Authentication" { Test-Authentication }
     "GameConfig" { Test-GameConfig }
     "AdminManagement" { Test-AdminManagement }
+    "AdminManagementAdmin" { Test-AdminManagementAdmin }
     "AdminE2E" { Test-AdminEndToEnd }
     "Admin" { Test-Admin }
     "Client" { Test-Client }

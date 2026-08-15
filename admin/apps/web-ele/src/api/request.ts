@@ -12,29 +12,38 @@ import { authenticateResponseInterceptor, RequestClient } from '@vben/request';
 import { useAccessStore } from '@vben/stores';
 
 import {
+  isNovaGameRequestCancelled,
   toNovaGameApiError,
   unwrapApiResultBody,
   unwrapApiVoidResultBody,
 } from './api-result';
 
-export { NovaGameApiError, toNovaGameApiError } from './api-result';
+export {
+  isNovaGameRequestCancelled,
+  NovaGameApiError,
+  toNovaGameApiError,
+} from './api-result';
 
 const { apiURL } = useAppConfig(import.meta.env, import.meta.env.PROD);
 const apiRequestTimeoutMs = 60_000;
 
-interface RawResponse<T> {
+export interface NovaGameRawResponse<T> {
   config: { responseReturn?: string };
   data: T;
-  headers: Record<string, string | undefined>;
+  headers: Record<string, unknown> & {
+    get?: (name: string) => unknown;
+  };
   status: number;
 }
 
-export function unwrapApiResult<T>(response: RawResponse<ApiResult<T>>): T {
+export function unwrapApiResult<T>(
+  response: NovaGameRawResponse<ApiResult<T>>,
+): T {
   return unwrapApiResultBody(response.data, response.status);
 }
 
 export function unwrapApiVoidResult(
-  response: RawResponse<ApiVoidResult>,
+  response: NovaGameRawResponse<ApiVoidResult>,
 ): void {
   unwrapApiVoidResultBody(response.data, response.status);
 }
@@ -48,11 +57,9 @@ const publicRequestClient = new RequestClient({
 
 export async function publicPost<T>(url: string, data?: unknown): Promise<T> {
   try {
-    const response = await publicRequestClient.post<RawResponse<ApiResult<T>>>(
-      url,
-      data,
-      { withCredentials: true },
-    );
+    const response = await publicRequestClient.post<
+      NovaGameRawResponse<ApiResult<T>>
+    >(url, data, { withCredentials: true });
     return unwrapApiResult(response);
   } catch (error) {
     throw toNovaGameApiError(error);
@@ -64,11 +71,9 @@ export async function publicPostVoid(
   data?: unknown,
 ): Promise<void> {
   try {
-    const response = await publicRequestClient.post<RawResponse<ApiVoidResult>>(
-      url,
-      data,
-      { withCredentials: true },
-    );
+    const response = await publicRequestClient.post<
+      NovaGameRawResponse<ApiVoidResult>
+    >(url, data, { withCredentials: true });
     unwrapApiVoidResult(response);
   } catch (error) {
     throw toNovaGameApiError(error);
@@ -111,7 +116,7 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
         return response;
       }
       return unwrapApiResult(
-        response as RawResponse<ApiResult<unknown>>,
+        response as NovaGameRawResponse<ApiResult<unknown>>,
       ) as unknown as typeof response;
     },
   });
@@ -136,6 +141,9 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
 
   client.addResponseInterceptor({
     rejected: (error) => {
+      if (isNovaGameRequestCancelled(error)) {
+        throw error;
+      }
       throw toNovaGameApiError(error);
     },
   });

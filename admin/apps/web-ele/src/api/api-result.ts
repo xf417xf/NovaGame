@@ -20,6 +20,20 @@ function isObject(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null;
 }
 
+/**
+ * Axios leaves aborted requests as a transport concern. Callers use this to
+ * avoid rendering a cancelled stale request as a user-visible API failure.
+ */
+export function isNovaGameRequestCancelled(error: unknown): boolean {
+  return (
+    isObject(error) &&
+    (error.__CANCEL__ === true ||
+      error.code === 'ERR_CANCELED' ||
+      error.name === 'AbortError' ||
+      error.name === 'CanceledError')
+  );
+}
+
 function readApiError(value: unknown): ApiErrorPayload | null {
   if (!isObject(value) || !isObject(value.error)) {
     return null;
