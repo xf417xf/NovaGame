@@ -145,8 +145,8 @@ and real-MySQL verification; M35-04-T02 completed management permission registra
 idempotent DbMigrator seed synchronization; M35-04-T03 completed the frozen thin management HTTP
 layer and real-MySQL API/OpenAPI verification; M35-04-T04 completed the frozen real-MySQL
 integration evidence for migrations, seed, permissions, account/role/session/audit queries,
-mutations, locking, replay, and atomic audit behavior; and M35-04-T05 completed real OpenAPI
-capture and checked TypeScript contract generation. M3.5 is active at `M35-04`, with only
+mutations, locking, replay, and atomic audit behavior; and M35-04-T05 completed corrected real
+OpenAPI capture and checked TypeScript contract generation. M3.5 is active at `M35-04`, with only
 `M35-04-T06` executable. The user separately authorized the NovaGame-owned
 `administrator-management` capability on 2026-08-13. M35-04-T06 authorizes only the cumulative
 M35-04 governance verification and state transition. This authorization does not come from M3 and

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Cryptography;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.Swagger;
@@ -9,18 +10,14 @@ namespace NovaGame.EntityFrameworkCore.Tests;
 [Collection(MySqlDatabaseCollection.Name)]
 public sealed class AdminAccessManagementOpenApiTests
 {
+    // Freezes every allowed management schema, wrapper, enum value, and scalar contract shape.
+    private const string FrozenManagementContractSha256 =
+        "DAE222AB8C31BEBF64278BA1C49CDF9383E258B485A77C5CE9C77F1ED082F7F9";
     private const string SeedUserName = "admin";
     private const string SeedPassword = "Test-Administrator-Password-123!";
 
     private static readonly string[] ForbiddenResponseProperties =
     [
-        "password",
-        "initialPassword",
-        "newPassword",
-        "passwordHash",
-        "refreshToken",
-        "token",
-        "tokenHash",
         "sessionId",
         "replacedBySessionId",
         "requestBody",
@@ -44,7 +41,7 @@ public sealed class AdminAccessManagementOpenApiTests
         var specifications = GetOperationSpecifications();
 
         var managementPaths = swagger.Paths
-            .Where(path => path.Key.StartsWith("/api/admin-access/", StringComparison.Ordinal))
+            .Where(path => IsManagementPath(path.Key))
             .ToDictionary(path => path.Key, path => path.Value, StringComparer.Ordinal);
 
         Assert.Equal(
@@ -160,14 +157,19 @@ public sealed class AdminAccessManagementOpenApiTests
         foreach (var specification in GetOperationSpecifications())
         {
             var operation = swagger.Paths[specification.Path].Operations[specification.Method];
-            var responseSchema = GetJsonResponseSchema(swagger, GetResponse(operation, "200"));
-            var responsePropertyNames = GetReachablePropertyNames(swagger, responseSchema);
+            foreach (var statusCode in specification.StatusCodes)
+            {
+                var responseSchema = GetJsonResponseSchema(
+                    swagger,
+                    GetResponse(operation, statusCode));
+                var responsePropertyNames = GetReachablePropertyNames(swagger, responseSchema);
 
-            Assert.All(
-                responsePropertyNames,
-                propertyName => Assert.DoesNotContain(
-                    ForbiddenResponseProperties,
-                    forbidden => string.Equals(forbidden, propertyName, StringComparison.OrdinalIgnoreCase)));
+                Assert.All(
+                    responsePropertyNames,
+                    propertyName => Assert.False(
+                        IsForbiddenResponseProperty(propertyName),
+                        $"Management response schema exposes forbidden property '{propertyName}'."));
+            }
         }
     }
 
@@ -179,6 +181,13 @@ public sealed class AdminAccessManagementOpenApiTests
             .GetRequiredService<ISwaggerProvider>()
             .GetSwagger("v1");
         var actual = AdminAccessManagementOpenApiContract.CreateCanonicalJson(source);
+        Assert.Equal(
+            FrozenManagementContractSha256,
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(actual))));
+        var expectedPath = AdminAccessManagementOpenApiContract.GetTrackedContractPath();
+        Assert.True(
+            File.Exists(expectedPath),
+            $"Tracked administrator-management OpenAPI contract was not found at '{expectedPath}'.");
         var capturePath = Environment.GetEnvironmentVariable(
             AdminAccessManagementOpenApiContract.CapturePathEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(capturePath))
@@ -187,10 +196,6 @@ public sealed class AdminAccessManagementOpenApiTests
             return;
         }
 
-        var expectedPath = AdminAccessManagementOpenApiContract.GetTrackedContractPath();
-        Assert.True(
-            File.Exists(expectedPath),
-            $"Tracked administrator-management OpenAPI contract was not found at '{expectedPath}'.");
         var expectedBytes = File.ReadAllBytes(expectedPath);
 
         Assert.False(expectedBytes.AsSpan().StartsWith(Encoding.UTF8.Preamble));
@@ -512,6 +517,12 @@ public sealed class AdminAccessManagementOpenApiTests
         }
     }
 
+    private static bool IsManagementPath(string path)
+    {
+        return string.Equals(path, "/api/admin-access", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith("/api/admin-access/", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static OpenApiResponse GetResponse(OpenApiOperation operation, string statusCode)
     {
         Assert.True(operation.Responses.TryGetValue(statusCode, out var response));
@@ -700,6 +711,20 @@ public sealed class AdminAccessManagementOpenApiTests
         return propertyNames;
     }
 
+    private static bool IsForbiddenResponseProperty(string propertyName)
+    {
+        return ForbiddenResponseProperties.Any(
+                   forbidden => string.Equals(
+                       forbidden,
+                       propertyName,
+                       StringComparison.OrdinalIgnoreCase)) ||
+               propertyName.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+               propertyName.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+               propertyName.Contains("hash", StringComparison.OrdinalIgnoreCase) ||
+               propertyName.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+               propertyName.Contains("receipt", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void CollectReachablePropertyNames(
         OpenApiDocument swagger,
         OpenApiSchema schema,
@@ -728,6 +753,15 @@ public sealed class AdminAccessManagementOpenApiTests
         if (schema.Items is not null)
         {
             CollectReachablePropertyNames(swagger, schema.Items, propertyNames, visitedReferences);
+        }
+
+        if (schema.AdditionalProperties is not null)
+        {
+            CollectReachablePropertyNames(
+                swagger,
+                schema.AdditionalProperties,
+                propertyNames,
+                visitedReferences);
         }
 
         foreach (var candidate in schema.AllOf.Concat(schema.AnyOf).Concat(schema.OneOf))

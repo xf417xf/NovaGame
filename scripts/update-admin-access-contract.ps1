@@ -282,6 +282,136 @@ function Add-SchemaReferences {
     }
 }
 
+function Test-ForbiddenManagementResponseProperty {
+    param([Parameter(Mandatory)][string]$Name)
+
+    return $Name -match '(?i)(password|token|hash|secret|receipt)' -or
+        $Name -in @(
+            'sessionId',
+            'replacedBySessionId',
+            'requestBody',
+            'requestFingerprint',
+            'idempotencyKey',
+            'commandKind')
+}
+
+function Add-ResponseSchemaPropertyNames {
+    param(
+        [Parameter(Mandatory)]$Schema,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Schemas,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$Names,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$VisitedReferences
+    )
+
+    if ($Schema -isnot [System.Collections.IDictionary]) {
+        return
+    }
+
+    if ($Schema.ContainsKey('$ref')) {
+        $reference = [string]$Schema['$ref']
+        $prefix = '#/components/schemas/'
+        Assert-Condition `
+            ($reference.StartsWith($prefix, [StringComparison]::Ordinal)) `
+            "Management OpenAPI response contains unsupported reference '$reference'."
+        $schemaName = $reference.Substring($prefix.Length).
+            Replace('~1', '/').Replace('~0', '~')
+        if ($VisitedReferences.Add($schemaName)) {
+            Assert-Condition `
+                ($Schemas.ContainsKey($schemaName)) `
+                "Management OpenAPI response references missing schema '$schemaName'."
+            Add-ResponseSchemaPropertyNames `
+                -Schema $Schemas[$schemaName] `
+                -Schemas $Schemas `
+                -Names $Names `
+                -VisitedReferences $VisitedReferences
+        }
+        return
+    }
+
+    if ($Schema.ContainsKey('properties') -and
+        $Schema.properties -is [System.Collections.IDictionary]) {
+        foreach ($property in $Schema.properties.GetEnumerator()) {
+            $null = $Names.Add([string]$property.Key)
+            Add-ResponseSchemaPropertyNames `
+                -Schema $property.Value `
+                -Schemas $Schemas `
+                -Names $Names `
+                -VisitedReferences $VisitedReferences
+        }
+    }
+
+    foreach ($keyword in @('items', 'additionalProperties')) {
+        if ($Schema.ContainsKey($keyword) -and
+            $Schema[$keyword] -is [System.Collections.IDictionary]) {
+            Add-ResponseSchemaPropertyNames `
+                -Schema $Schema[$keyword] `
+                -Schemas $Schemas `
+                -Names $Names `
+                -VisitedReferences $VisitedReferences
+        }
+    }
+
+    foreach ($keyword in @('allOf', 'anyOf', 'oneOf')) {
+        if ($Schema.ContainsKey($keyword) -and
+            $Schema[$keyword] -is [System.Collections.IEnumerable] -and
+            $Schema[$keyword] -isnot [string]) {
+            foreach ($member in $Schema[$keyword]) {
+                Add-ResponseSchemaPropertyNames `
+                    -Schema $member `
+                    -Schemas $Schemas `
+                    -Names $Names `
+                    -VisitedReferences $VisitedReferences
+            }
+        }
+    }
+}
+
+function Assert-ManagementResponseRedaction {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Paths,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Schemas
+    )
+
+    foreach ($path in $Paths.Values) {
+        foreach ($operation in $path.Values) {
+            if ($operation -isnot [System.Collections.IDictionary] -or
+                -not $operation.ContainsKey('responses') -or
+                $operation.responses -isnot [System.Collections.IDictionary]) {
+                continue
+            }
+
+            foreach ($response in $operation.responses.Values) {
+                if ($response -isnot [System.Collections.IDictionary] -or
+                    -not $response.ContainsKey('content') -or
+                    $response.content -isnot [System.Collections.IDictionary]) {
+                    continue
+                }
+
+                foreach ($mediaType in $response.content.Values) {
+                    if ($mediaType -isnot [System.Collections.IDictionary] -or
+                        -not $mediaType.ContainsKey('schema')) {
+                        continue
+                    }
+
+                    $propertyNames = [System.Collections.Generic.HashSet[string]]::new(
+                        [StringComparer]::OrdinalIgnoreCase)
+                    Add-ResponseSchemaPropertyNames `
+                        -Schema $mediaType.schema `
+                        -Schemas $Schemas `
+                        -Names $propertyNames `
+                        -VisitedReferences ([System.Collections.Generic.HashSet[string]]::new(
+                            [StringComparer]::Ordinal))
+                    foreach ($propertyName in $propertyNames) {
+                        Assert-Condition `
+                            (-not (Test-ForbiddenManagementResponseProperty -Name $propertyName)) `
+                            "Management OpenAPI response exposes forbidden property '$propertyName'."
+                    }
+                }
+            }
+        }
+    }
+}
+
 function Assert-ManagementContract {
     param([Parameter(Mandatory)][string]$Path)
 
@@ -347,6 +477,9 @@ function Assert-ManagementContract {
     Assert-Condition `
         ($contract.components.schemas -is [System.Collections.IDictionary]) `
         "Management OpenAPI capture is missing component schemas."
+    Assert-ManagementResponseRedaction `
+        -Paths $contract.paths `
+        -Schemas $contract.components.schemas
     Assert-StringSet `
         -Expected $expectedSchemaNames `
         -Actual @($contract.components.schemas.Keys) `

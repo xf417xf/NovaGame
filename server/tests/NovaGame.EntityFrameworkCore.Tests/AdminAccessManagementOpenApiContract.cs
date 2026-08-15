@@ -13,6 +13,7 @@ internal static class AdminAccessManagementOpenApiContract
         "NOVAGAME_ADMIN_ACCESS_OPENAPI_CAPTURE_PATH";
 
     private const string AdministratorSecurityScheme = "Bearer";
+    private const string AdministratorPathPrefix = "/api/admin-access";
     private const string SchemaReferencePrefix = "#/components/schemas/";
 
     private static readonly HashSet<string> HttpMethods =
@@ -106,7 +107,9 @@ internal static class AdminAccessManagementOpenApiContract
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "NovaGame.sln")))
+            if (File.Exists(Path.Combine(directory.FullName, "NovaGame.sln")) &&
+                Directory.Exists(Path.Combine(directory.FullName, "admin")) &&
+                Directory.Exists(Path.Combine(directory.FullName, "server")))
             {
                 return Path.Combine(
                     directory.FullName,
@@ -239,9 +242,7 @@ internal static class AdminAccessManagementOpenApiContract
     private static void ValidateSourceSurface(JsonObject paths)
     {
         var actualPaths = paths
-            .Where(property => property.Key.StartsWith(
-                "/api/admin-access/",
-                StringComparison.Ordinal))
+            .Where(property => IsManagementPath(property.Key))
             .Select(property => property.Key)
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -276,6 +277,17 @@ internal static class AdminAccessManagementOpenApiContract
             throw new InvalidOperationException(
                 $"The real Program exposes an unapproved management operation set: {string.Join(", ", actualMethods)}.");
         }
+    }
+
+    private static bool IsManagementPath(string path)
+    {
+        return string.Equals(
+                   path,
+                   AdministratorPathPrefix,
+                   StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith(
+                   AdministratorPathPrefix + "/",
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ValidateAdministratorSecurity(JsonObject paths)
