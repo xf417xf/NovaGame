@@ -63,10 +63,11 @@ The user separately authorized the NovaGame-owned `administrator-management` cap
 2026-08-13. M3.5 completed its evidence-backed baseline audit, frozen-contract stage, and M35-03
 Domain/Application implementation. The domain, security, Application, HTTP, MySQL, Vben, browser,
 and verification contracts remain frozen and verified. M35-04-T01 completed its persistence
-implementation, independent review fixes, and real-MySQL verification. Only `M35-04-T02` is
-executable. Follow `docs/goals/m3.5.md`. It authorizes only registered management permission
-definitions and idempotent DbMigrator synchronization of the built-in role, with focused seed
-verification. It does not authorize M35-04-T03 or later M35-04 work, HTTP APIs, OpenAPI, Admin UI,
+implementation, independent review fixes, and real-MySQL verification; M35-04-T02 completed its
+management permission registration and idempotent DbMigrator seed synchronization. Only
+`M35-04-T03` is executable. Follow `docs/goals/m3.5.md`. It authorizes only the frozen thin
+management HTTP layer: controllers, stable errors, structured logs and audit context, authorization,
+paging, ETags, and OpenAPI. It does not authorize M35-04-T04 or later M35-04 work, Admin UI,
 SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
 remains `Unscheduled`.
 

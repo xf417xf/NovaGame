@@ -141,11 +141,12 @@ domains remain game-owned and outside this milestone; M3 does not make them Nova
 froze and verified its domain, security, Application, HTTP, MySQL, Vben, browser, and verification
 contracts, and M35-03 completed its approved Domain/Application implementation and focused-test
 matrix. M35-04-T01 completed its approved persistence implementation, independent review fixes,
-and real-MySQL verification. M3.5 is active at `M35-04`, with only `M35-04-T02` executable. The
-user separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13.
-M35-04-T02 authorizes only registered management permission definitions and idempotent DbMigrator
-synchronization of the built-in role, with focused seed verification. This authorization does not
-come from M3 and does not authorize M35-04-T03 or later work, HTTP APIs or OpenAPI, Admin UI,
+and real-MySQL verification; M35-04-T02 completed management permission registration and
+idempotent DbMigrator seed synchronization. M3.5 is active at `M35-04`, with only `M35-04-T03`
+executable. The user separately authorized the NovaGame-owned `administrator-management` capability
+on 2026-08-13. M35-04-T03 authorizes only the frozen thin management HTTP layer: controllers,
+stable errors, structured logs and audit context, authorization, paging, ETags, and OpenAPI. This
+authorization does not come from M3 and does not authorize M35-04-T04 or later work, Admin UI,
 SwordMaster changes, extraction, M4, or NovaCore changes.
 
 ### Goal

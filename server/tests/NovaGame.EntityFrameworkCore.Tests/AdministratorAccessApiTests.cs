@@ -65,7 +65,15 @@ public sealed class AdministratorAccessApiTests
                     GameConfigPermissions.Activate,
                     GameConfigPermissions.ManageDrafts,
                     GameConfigPermissions.Publish,
-                    AdminAccessPermissions.Access
+                    AdminAccessPermissions.Access,
+                    AdminAccessPermissions.AdministratorsRead,
+                    AdminAccessPermissions.AdministratorsManage,
+                    AdminAccessPermissions.AdministratorsResetPassword,
+                    AdminAccessPermissions.RolesRead,
+                    AdminAccessPermissions.RolesManage,
+                    AdminAccessPermissions.SessionsRead,
+                    AdminAccessPermissions.SessionsRevoke,
+                    AdminAccessPermissions.AuditLogsRead
                 }.OrderBy(permission => permission),
                 permissions);
         }

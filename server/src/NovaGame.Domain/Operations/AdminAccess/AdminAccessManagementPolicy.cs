@@ -40,7 +40,7 @@ public sealed class AdminAccessManagementPolicy
         DateTime createdAtUtc,
         Func<Guid> grantIdFactory)
     {
-        var canonicalPermissionNames = RequireRegisteredPermissionCatalog(registeredPermissionNames);
+        var canonicalPermissionNames = CanonicalizeRegisteredPermissionCatalog(registeredPermissionNames);
         var role = new AdminRole(roleId, BuiltInRoleName, createdAtUtc, isBuiltIn: true);
         AddInitialPermissions(
             role,
@@ -80,11 +80,17 @@ public sealed class AdminAccessManagementPolicy
         Func<Guid> grantIdFactory)
     {
         ArgumentNullException.ThrowIfNull(role);
-        var canonicalPermissionNames = RequireRegisteredPermissionCatalog(registeredPermissionNames);
+        var canonicalPermissionNames = CanonicalizeRegisteredPermissionCatalog(registeredPermissionNames);
         return role.SynchronizeBuiltInPermissions(
             canonicalPermissionNames,
             grantIdFactory,
             changedAtUtc);
+    }
+
+    public IReadOnlyList<string> CanonicalizeRegisteredPermissionCatalog(
+        IEnumerable<string> registeredPermissionNames)
+    {
+        return RequireRegisteredPermissionCatalog(registeredPermissionNames);
     }
 
     public IReadOnlyList<AdminRole> RequireActiveRequestedRoles(
@@ -189,7 +195,8 @@ public sealed class AdminAccessManagementPolicy
     public void EnsureBuiltInRoleIdentity(AdminRole role)
     {
         ArgumentNullException.ThrowIfNull(role);
-        if (!role.IsBuiltIn ||
+        if (role.Id == Guid.Empty ||
+            !role.IsBuiltIn ||
             !role.IsActive ||
             !string.Equals(role.Name, BuiltInRoleName, StringComparison.Ordinal) ||
             !string.Equals(role.NormalizedName, BuiltInRoleNormalizedName, StringComparison.Ordinal))

@@ -4,29 +4,18 @@ using NovaCore.BuildingBlocks.Infrastructure;
 using NovaCore.BuildingBlocks.Permissions;
 using NovaCore.BuildingBlocks.Timing;
 using NovaGame.Domain.Operations.AdminAccess;
-using NovaGame.Domain.Shared.Content.GameConfig;
 using NovaGame.Domain.Shared.Operations.AdminAccess;
 
 namespace NovaGame.Application.Operations.AdminAccess;
 
 public sealed class AdministratorSeedContributor : IDataSeedContributor
 {
-    private const string AdministratorRoleName = "Administrators";
     private const int MinimumSeedPasswordLength = 12;
-
-    private static readonly string[] AdministratorPermissionNames =
-    [
-        AdminAccessPermissions.Access,
-        GameConfigPermissions.Access,
-        GameConfigPermissions.ManageDrafts,
-        GameConfigPermissions.Publish,
-        GameConfigPermissions.Activate
-    ];
 
     private readonly AdminAccessSeedOptions _options;
     private readonly IAdministratorRepository _administratorRepository;
-    private readonly IAdminRoleRepository _roleRepository;
-    private readonly IAdminAccessAuditRepository _auditRepository;
+    private readonly IAdminAccessManagementRepository _managementRepository;
+    private readonly AdminAccessManagementPolicy _managementPolicy;
     private readonly IPasswordHashingService _passwordHashingService;
     private readonly IPermissionDefinitionManager _permissionDefinitionManager;
     private readonly IGuidGenerator _guidGenerator;
@@ -35,8 +24,8 @@ public sealed class AdministratorSeedContributor : IDataSeedContributor
     public AdministratorSeedContributor(
         IOptions<AdminAccessSeedOptions> options,
         IAdministratorRepository administratorRepository,
-        IAdminRoleRepository roleRepository,
-        IAdminAccessAuditRepository auditRepository,
+        IAdminAccessManagementRepository managementRepository,
+        AdminAccessManagementPolicy managementPolicy,
         IPasswordHashingService passwordHashingService,
         IPermissionDefinitionManager permissionDefinitionManager,
         IGuidGenerator guidGenerator,
@@ -44,8 +33,8 @@ public sealed class AdministratorSeedContributor : IDataSeedContributor
     {
         _options = options.Value;
         _administratorRepository = administratorRepository;
-        _roleRepository = roleRepository;
-        _auditRepository = auditRepository;
+        _managementRepository = managementRepository;
+        _managementPolicy = managementPolicy;
         _passwordHashingService = passwordHashingService;
         _permissionDefinitionManager = permissionDefinitionManager;
         _guidGenerator = guidGenerator;
@@ -74,55 +63,54 @@ public sealed class AdministratorSeedContributor : IDataSeedContributor
                 $"Administrator seed passwords must contain {MinimumSeedPasswordLength} to 256 characters.");
         }
 
-        foreach (var permissionName in AdministratorPermissionNames)
-        {
-            if (_permissionDefinitionManager.GetOrNull(permissionName) is null)
-            {
-                throw new InvalidOperationException(
-                    $"Required permission '{permissionName}' is not defined.");
-            }
-        }
-
-        var hasAdministrators = await _administratorRepository.AnyAsync(cancellationToken);
+        var registeredPermissionNames = GetRegisteredPermissionNames();
         var now = _clock.UtcNow;
-        var normalizedRoleName = AdministratorRoleName.ToUpperInvariant();
-        var role = await _roleRepository.FindByNormalizedNameAsync(normalizedRoleName, cancellationToken);
+        var builtInRoles = await _managementRepository.GetBuiltInRolesForUpdateAsync(cancellationToken);
+        var hasAdministrators = await _administratorRepository.AnyAsync(cancellationToken);
+        var role = _managementPolicy.ResolveBuiltInRole(builtInRoles, hasAdministrators);
         if (role is null)
         {
-            if (hasAdministrators)
-            {
-                throw new InvalidOperationException(
-                    $"The built-in '{AdministratorRoleName}' role is missing for existing administrators.");
-            }
-
             if (!hasUserName)
             {
                 return;
             }
 
-            role = new AdminRole(_guidGenerator.Create(), AdministratorRoleName, now, isBuiltIn: true);
-            await _roleRepository.AddAsync(role, cancellationToken);
-            await _auditRepository.AddAsync(
-                CreateSeedAudit(AdminAccessAuditAction.RoleCreated, now, roleId: role.Id),
+            role = _managementPolicy.CreateBuiltInRole(
+                _guidGenerator.Create(),
+                registeredPermissionNames,
+                now,
+                _guidGenerator.Create);
+            await _managementRepository.AddRoleAsync(role, cancellationToken);
+            await AddSeedAuditAsync(
+                AdminAccessAuditAction.RoleCreated,
+                now,
+                roleId: role.Id,
+                targetRevision: role.Revision,
+                cancellationToken: cancellationToken);
+            await AddPermissionDeltaAuditsAsync(
+                role.Permissions,
+                [],
+                role,
+                now,
                 cancellationToken);
         }
-
-        foreach (var permissionName in AdministratorPermissionNames)
+        else
         {
-            var permission = role.GrantPermission(
-                _guidGenerator.Create(),
-                permissionName,
-                now);
-            if (permission is not null)
-            {
-                await _auditRepository.AddAsync(
-                    CreateSeedAudit(
-                        AdminAccessAuditAction.PermissionGranted,
-                        now,
-                        roleId: role.Id,
-                        permissionName: permission.Name),
-                    cancellationToken);
-            }
+            var lockedPermissions = await _managementRepository.GetRolePermissionsForUpdateAsync(
+                role.Id,
+                cancellationToken);
+            EnsureLockedPermissionRowsMatch(role, lockedPermissions);
+            var changeSet = _managementPolicy.SynchronizeBuiltInRolePermissions(
+                role,
+                registeredPermissionNames,
+                now,
+                _guidGenerator.Create);
+            await AddPermissionDeltaAuditsAsync(
+                changeSet.Added,
+                changeSet.Removed,
+                role,
+                now,
+                cancellationToken);
         }
 
         if (hasAdministrators || !hasUserName)
@@ -136,25 +124,110 @@ public sealed class AdministratorSeedContributor : IDataSeedContributor
             userName,
             _options.DisplayName,
             _passwordHashingService.Hash(_options.Password),
-            now);
-        administrator.AssignRole(_guidGenerator.Create(), role.Id, now);
+            now,
+            [new AdministratorRoleTarget(_guidGenerator.Create(), role.Id)]);
 
-        await _administratorRepository.AddAsync(administrator, cancellationToken);
-        await _auditRepository.AddAsync(
-            CreateSeedAudit(
-                AdminAccessAuditAction.AdministratorCreated,
-                now,
-                administrator.Id,
+        await _managementRepository.AddAdministratorAsync(administrator, cancellationToken);
+        await AddSeedAuditAsync(
+            AdminAccessAuditAction.AdministratorCreated,
+            now,
+            administrator.Id,
+            roleId: role.Id,
+            subjectUserName: administrator.UserName,
+            targetRevision: administrator.Revision,
+            cancellationToken: cancellationToken);
+        await AddSeedAuditAsync(
+            AdminAccessAuditAction.RoleAssigned,
+            now,
+            administrator.Id,
+            roleId: role.Id,
+            subjectUserName: administrator.UserName,
+            targetRevision: administrator.Revision,
+            cancellationToken: cancellationToken);
+    }
+
+    private IReadOnlyList<string> GetRegisteredPermissionNames()
+    {
+        var names = _permissionDefinitionManager.Groups
+            .OrderBy(group => group.Name, StringComparer.Ordinal)
+            .SelectMany(group => group.Permissions
+                .OrderBy(permission => permission.Name, StringComparer.Ordinal)
+                .Select(permission => permission.Name))
+            .ToArray();
+        return _managementPolicy.CanonicalizeRegisteredPermissionCatalog(names);
+    }
+
+    private async Task AddPermissionDeltaAuditsAsync(
+        IEnumerable<RolePermission> added,
+        IEnumerable<RolePermission> removed,
+        AdminRole role,
+        DateTime occurredAtUtc,
+        CancellationToken cancellationToken)
+    {
+        foreach (var permission in added.OrderBy(permission => permission.Name, StringComparer.Ordinal))
+        {
+            await AddSeedAuditAsync(
+                AdminAccessAuditAction.PermissionGranted,
+                occurredAtUtc,
                 roleId: role.Id,
-                subjectUserName: administrator.UserName),
-            cancellationToken);
-        await _auditRepository.AddAsync(
-            CreateSeedAudit(
-                AdminAccessAuditAction.RoleAssigned,
-                now,
-                administrator.Id,
+                permissionName: permission.Name,
+                targetRevision: role.Revision,
+                cancellationToken: cancellationToken);
+        }
+
+        foreach (var permission in removed.OrderBy(permission => permission.Name, StringComparer.Ordinal))
+        {
+            await AddSeedAuditAsync(
+                AdminAccessAuditAction.PermissionRevoked,
+                occurredAtUtc,
                 roleId: role.Id,
-                subjectUserName: administrator.UserName),
+                permissionName: permission.Name,
+                targetRevision: role.Revision,
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private static void EnsureLockedPermissionRowsMatch(
+        AdminRole role,
+        IReadOnlyCollection<RolePermission> permissions)
+    {
+        if (permissions.Any(permission => permission.RoleId != role.Id) ||
+            permissions.Select(permission => permission.Id).Distinct().Count() != permissions.Count)
+        {
+            throw new AdminAccessManagementDomainException(
+                AdminAccessManagementErrorCodes.InvariantViolation,
+                "The locked role-permission rows are malformed.");
+        }
+
+        var aggregateIds = role.Permissions.Select(permission => permission.Id).Order().ToArray();
+        var lockedIds = permissions.Select(permission => permission.Id).Order().ToArray();
+        if (!aggregateIds.SequenceEqual(lockedIds))
+        {
+            throw new AdminAccessManagementDomainException(
+                AdminAccessManagementErrorCodes.InvariantViolation,
+                "The locked permission rows do not match the role aggregate.");
+        }
+    }
+
+    private Task AddSeedAuditAsync(
+        AdminAccessAuditAction action,
+        DateTime occurredAtUtc,
+        Guid? administratorId = null,
+        Guid? roleId = null,
+        string? subjectUserName = null,
+        string? permissionName = null,
+        long? targetRevision = null,
+        CancellationToken cancellationToken = default)
+    {
+        return _managementRepository.AddAuditAsync(
+            CreateSeedAudit(
+                action,
+                occurredAtUtc,
+                administratorId,
+                roleId,
+                subjectUserName,
+                permissionName,
+                targetRevision),
             cancellationToken);
     }
 
@@ -164,7 +237,8 @@ public sealed class AdministratorSeedContributor : IDataSeedContributor
         Guid? administratorId = null,
         Guid? roleId = null,
         string? subjectUserName = null,
-        string? permissionName = null)
+        string? permissionName = null,
+        long? targetRevision = null)
     {
         return new AdminAccessAuditRecord(
             _guidGenerator.Create(),
@@ -174,6 +248,7 @@ public sealed class AdministratorSeedContributor : IDataSeedContributor
             administratorId: administratorId,
             roleId: roleId,
             subjectUserName: subjectUserName,
-            permissionName: permissionName);
+            permissionName: permissionName,
+            targetRevision: targetRevision);
     }
 }
