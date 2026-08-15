@@ -25,9 +25,6 @@ const requiredPermissions = {
   AdminAccessLeafPermission
 >;
 
-const comingSoonComponent = () =>
-  import('#/views/_core/fallback/coming-soon.vue');
-
 const routes: RouteRecordRaw[] = [
   {
     children: [
@@ -44,13 +41,13 @@ const routes: RouteRecordRaw[] = [
         path: '/admin-access/roles',
       },
       {
-        component: comingSoonComponent,
+        component: () => import('#/views/admin-access/sessions.vue'),
         meta: { title: 'Sessions' },
         name: 'AdminAccessSessions',
         path: '/admin-access/sessions',
       },
       {
-        component: comingSoonComponent,
+        component: () => import('#/views/admin-access/audit.vue'),
         meta: { title: 'Audit history' },
         name: 'AdminAccessAudit',
         path: '/admin-access/audit',
