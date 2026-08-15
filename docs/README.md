@@ -21,14 +21,15 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone at
-`M35-04`, and only `M35-04-T03` is executable after M35-03, M35-04-T01, and M35-04-T02 completed
-their Domain, Application, persistence, permission, and seed tasks. The authorized
+`M35-04`, and only `M35-04-T04` is executable after M35-03, M35-04-T01, M35-04-T02, and
+M35-04-T03 completed their Domain, Application, persistence, permission, seed, and thin HTTP/API
+tasks. The authorized
 `administrator-management` capability extends the existing NovaGame-owned `Operations/AdminAccess`
 capability through administrator, role and permission, session, audit, and generic Vben `web-ele`
-operations. The active task authorizes only the frozen thin management HTTP layer: controllers,
-stable errors, structured logs and audit context, authorization, paging, ETags, and OpenAPI. It does
-not authorize Admin UI, later M35-04 tasks, SwordMaster changes, extraction, M4, or NovaCore
-changes. M4 remains `Unscheduled`.
+operations. The active task authorizes only the frozen MySQL integration evidence for migrations,
+seed, permissions, management queries, mutations, locking, replay, and atomic audit behavior. It
+does not authorize Admin UI, M35-04-T05 or later work, SwordMaster changes, extraction, M4, or
+NovaCore changes. M4 remains `Unscheduled`.
 
 When sources appear to conflict, stop and resolve the conflict before implementation. Do not silently weaken a repository rule or an active goal acceptance criterion.
 

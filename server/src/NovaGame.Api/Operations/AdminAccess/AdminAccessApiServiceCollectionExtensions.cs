@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using NovaCore.Shared.Json;
 using NovaCore.Shared.Results;
@@ -157,6 +158,10 @@ public static class AdminAccessApiServiceCollectionExtensions
         });
 
         services.AddScoped<IAdminAccessAppService, AdminAccessAppService>();
+        services.AddScoped<IAdminAccessManagementAppService, AdminAccessManagementAppService>();
+        services.TryAddScoped<AdminAccessManagementExceptionFilter>();
+        services.Configure<MvcOptions>(options =>
+            options.Filters.AddService<AdminAccessManagementExceptionFilter>());
         services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
         return services;
     }

@@ -92,6 +92,7 @@ public sealed class NovaGameApiModule : NovaCoreModule, IAspNetCoreModule
                 BearerFormat = "JWT"
             });
             options.OperationFilter<AdminAccessOpenApiOperationFilter>();
+            options.OperationFilter<AdminAccessManagementOpenApiOperationFilter>();
         });
     }
 
