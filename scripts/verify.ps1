@@ -4627,6 +4627,8 @@ function Test-Documentation {
             Paths = @(
                 "admin/package.json",
                 "admin/pnpm-lock.yaml",
+                "admin/pnpm-workspace.yaml",
+                "admin/eslint.config.mjs",
                 "admin/apps/web-ele/package.json",
                 "admin/apps/web-ele/contracts/admin-access.openapi.json",
                 "admin/apps/web-ele/openapi-ts.config.mjs",
@@ -4688,6 +4690,104 @@ function Test-Documentation {
             "M3.5 paths changed before '$($m35ProtectedPathSet.ActivationTask)' activation:`n$($m35ProtectedChanges -join "`n")"
     }
 
+    if ($m35TaskStatuses["M35-04-T05"] -in @(
+            "in_progress", "blocked", "complete")) {
+        $m35T05RequiredPaths = @(
+            "admin/eslint.config.mjs",
+            "admin/pnpm-workspace.yaml",
+            "admin/apps/web-ele/contracts/admin-access.openapi.json",
+            "admin/apps/web-ele/openapi-ts.config.mjs",
+            "admin/apps/web-ele/src/generated/admin-access/types.gen.ts",
+            "scripts/update-admin-access-contract.ps1"
+        )
+        foreach ($m35T05RequiredPath in $m35T05RequiredPaths) {
+            Assert-Condition `
+                (Test-Path -LiteralPath $m35T05RequiredPath -PathType Leaf) `
+                "M35-04-T05 requires '$m35T05RequiredPath'."
+        }
+
+        $m35WebElePackage = Get-Content `
+            -LiteralPath "admin/apps/web-ele/package.json" `
+            -Raw | ConvertFrom-Json
+        $m35OpenApiGenerator = `
+            $m35WebElePackage.devDependencies.PSObject.Properties[
+                "@hey-api/openapi-ts"]
+        Assert-Condition `
+            ($null -ne $m35OpenApiGenerator -and
+                [string]$m35OpenApiGenerator.Value -eq "catalog:") `
+            "M35-04-T05 must reference @hey-api/openapi-ts through the pinned catalog."
+        Assert-Condition `
+            ([string]$m35WebElePackage.scripts."contract:generate" -eq
+                "openapi-ts --file openapi-ts.config.mjs") `
+            "M35-04-T05 must use the checked web-ele OpenAPI config."
+
+        $m35AdminWorkspace = Get-Content `
+            -LiteralPath "admin/pnpm-workspace.yaml" `
+            -Raw
+        Assert-Condition `
+            ([regex]::IsMatch(
+                $m35AdminWorkspace,
+                "(?m)^  '@hey-api/openapi-ts': 0\.99\.0$")) `
+            "M35-04-T05 workspace catalog must pin @hey-api/openapi-ts exactly to 0.99.0."
+
+        $m35AdminEslintConfig = Get-Content `
+            -LiteralPath "admin/eslint.config.mjs" `
+            -Raw
+        Assert-Condition `
+            ($m35AdminEslintConfig.Contains(
+                "'apps/web-ele/src/generated/admin-access/types.gen.ts'",
+                [StringComparison]::Ordinal) -and
+            $m35AdminEslintConfig.Contains(
+                "'perfectionist/sort-object-types': 'off'",
+                [StringComparison]::Ordinal) -and
+            $m35AdminEslintConfig.Contains(
+                "'perfectionist/sort-union-types': 'off'",
+                [StringComparison]::Ordinal)) `
+            "M35-04-T05 must exempt only generated AdminAccess type ordering from hand-authored lint rules."
+
+        $m35GeneratorConfig = Get-Content `
+            -LiteralPath "admin/apps/web-ele/openapi-ts.config.mjs" `
+            -Raw
+        $m35TypesPluginMatches = [regex]::Matches(
+            $m35GeneratorConfig,
+            '(?m)^\s*plugins\s*:\s*\[\s*[''"]@hey-api/typescript[''"]\s*\]\s*,?\s*$')
+        Assert-Condition `
+            ($m35TypesPluginMatches.Count -eq 1) `
+            "M35-04-T05 must configure only the @hey-api/typescript plugin."
+        foreach ($m35RequiredGeneratorSetting in @(
+                "NOVAGAME_ADMIN_ACCESS_OPENAPI_INPUT",
+                "NOVAGAME_ADMIN_ACCESS_TYPES_OUTPUT",
+                "entryFile\s*:\s*false",
+                "clean\s*:\s*true",
+                'postProcess\s*:\s*\[\s*[''"]oxfmt[''"]\s*\]')) {
+            Assert-Condition `
+                ([regex]::IsMatch(
+                    $m35GeneratorConfig,
+                    $m35RequiredGeneratorSetting)) `
+                "M35-04-T05 OpenAPI config is missing '$m35RequiredGeneratorSetting'."
+        }
+
+        $m35AdminLock = (Get-Content `
+            -LiteralPath "admin/pnpm-lock.yaml" `
+            -Raw).Replace("`r`n", "`n")
+        $m35WebEleImporter = [regex]::Match(
+            $m35AdminLock,
+            "(?ms)^  apps/web-ele:\n(?<body>.*?)(?=^  \S|\z)")
+        Assert-Condition `
+            $m35WebEleImporter.Success `
+            "M35-04-T05 lockfile is missing the web-ele importer."
+        Assert-Condition `
+            ([regex]::IsMatch(
+                $m35WebEleImporter.Groups["body"].Value,
+                "(?m)^      '@hey-api/openapi-ts':\n        specifier: 'catalog:'\n        version: 0\.99\.0\(magicast@0\.5\.3\)\(typescript@6\.0\.3\)$")) `
+            "M35-04-T05 must resolve @hey-api/openapi-ts 0.99.0 against TypeScript 6.0.3."
+        Assert-Condition `
+            ([regex]::IsMatch(
+                $m35AdminLock,
+                "(?m)^  '@hey-api/openapi-ts@0\.99\.0':$")) `
+            "M35-04-T05 lockfile is missing the pinned @hey-api/openapi-ts package resolution."
+    }
+
     $m35UnownedWorkspaceTrackedChanges = @(
         & git diff --name-only --no-ext-diff `
             42d1ffe83770571d8f48cdb58f35bfc591a4bd1c -- `
@@ -4706,9 +4806,30 @@ function Test-Documentation {
         $m35UnownedWorkspaceTrackedChanges
         $m35UnownedWorkspaceUntrackedChanges
     )
-    Assert-Condition `
-        ($m35UnownedWorkspaceChanges.Count -eq 0) `
-        "M3.5 has no task authorized to change admin/pnpm-workspace.yaml."
+    if ($m35TaskStatuses["M35-04-T05"] -in @(
+            "in_progress", "blocked", "complete")) {
+        Assert-Condition `
+            ($m35UnownedWorkspaceUntrackedChanges.Count -eq 0) `
+            "M35-04-T05 must not replace the tracked admin workspace file."
+        $m35WorkspaceDiffStat = @(
+            & git diff --numstat --no-ext-diff `
+                42d1ffe83770571d8f48cdb58f35bfc591a4bd1c -- `
+                admin/pnpm-workspace.yaml |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to audit the M35-04-T05 workspace catalog diff."
+        }
+        Assert-Condition `
+            ($m35WorkspaceDiffStat.Count -eq 1 -and
+                $m35WorkspaceDiffStat[0] -eq
+                    "1`t0`tadmin/pnpm-workspace.yaml") `
+            "M35-04-T05 may add only the pinned OpenAPI generator catalog entry."
+    }
+    else {
+        Assert-Condition `
+            ($m35UnownedWorkspaceChanges.Count -eq 0) `
+            "M3.5 has no task authorized to change admin/pnpm-workspace.yaml."
+    }
 
     if ($m35TaskStatuses["M35-07-T01"] -in @(
             "in_progress", "blocked", "complete")) {

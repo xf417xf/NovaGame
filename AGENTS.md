@@ -67,12 +67,13 @@ implementation, independent review fixes, and real-MySQL verification; M35-04-T0
 management permission registration and idempotent DbMigrator seed synchronization; M35-04-T03
 completed the frozen thin management HTTP layer and real-MySQL API/OpenAPI verification; and
 M35-04-T04 completed the frozen real-MySQL integration evidence for migrations, seed,
-permissions, management queries, mutations, locking, replay, and atomic audit behavior. Only
-`M35-04-T05` is executable. Follow `docs/goals/m3.5.md`. The active task authorizes only capture
-of the frozen management OpenAPI surface and checked generation of the admin TypeScript contracts.
-It does not authorize M35-04-T06 or later M35-04 work, Vben management UI implementation,
-SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
-remains `Unscheduled`.
+permissions, management queries, mutations, locking, replay, and atomic audit behavior.
+M35-04-T05 completed real OpenAPI capture and checked TypeScript contract generation, including
+the fixed Vben catalog, type-only output, drift checks, and read-only regeneration evidence. Only
+`M35-04-T06` is executable. Follow `docs/goals/m3.5.md`. The active task authorizes only the
+cumulative M35-04 governance verification and state transition. It does not authorize M35-05
+implementation, SwordMaster changes, an admin-shell extraction, another capability, M4, or
+NovaCore changes. M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

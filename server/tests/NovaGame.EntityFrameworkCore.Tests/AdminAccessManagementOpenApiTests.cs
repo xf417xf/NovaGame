@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.Swagger;
@@ -168,6 +169,35 @@ public sealed class AdminAccessManagementOpenApiTests
                     ForbiddenResponseProperties,
                     forbidden => string.Equals(forbidden, propertyName, StringComparison.OrdinalIgnoreCase)));
         }
+    }
+
+    [Fact]
+    public async Task RealProgramManagementContractMatchesTrackedArtifact()
+    {
+        await using var factory = CreateFactory();
+        var source = factory.Services
+            .GetRequiredService<ISwaggerProvider>()
+            .GetSwagger("v1");
+        var actual = AdminAccessManagementOpenApiContract.CreateCanonicalJson(source);
+        var capturePath = Environment.GetEnvironmentVariable(
+            AdminAccessManagementOpenApiContract.CapturePathEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(capturePath))
+        {
+            AdminAccessManagementOpenApiContract.WriteCapture(capturePath, actual);
+            return;
+        }
+
+        var expectedPath = AdminAccessManagementOpenApiContract.GetTrackedContractPath();
+        Assert.True(
+            File.Exists(expectedPath),
+            $"Tracked administrator-management OpenAPI contract was not found at '{expectedPath}'.");
+        var expectedBytes = File.ReadAllBytes(expectedPath);
+
+        Assert.False(expectedBytes.AsSpan().StartsWith(Encoding.UTF8.Preamble));
+        var expected = new UTF8Encoding(false, true).GetString(expectedBytes);
+        Assert.Equal(
+            actual,
+            AdminAccessManagementOpenApiContract.CanonicalizeJson(expected));
     }
 
     private NovaGameApiFactory CreateFactory()

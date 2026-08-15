@@ -17,6 +17,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm vite build --mode production",
+    "contract:generate": "openapi-ts --file openapi-ts.config.mjs",
     "build:analyze": "pnpm vite build --mode analyze",
     "dev": "pnpm vite --mode development",
     "preview": "vite preview --host 127.0.0.1",
@@ -49,6 +50,7 @@
     "vue-router": "catalog:"
   },
   "devDependencies": {
+    "@hey-api/openapi-ts": "catalog:",
     "@vitejs/plugin-basic-ssl": "catalog:",
     "@vue/test-utils": "catalog:",
     "unplugin-element-plus": "catalog:"
