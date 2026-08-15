@@ -1,6 +1,9 @@
 using System.Text;
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.Swagger;
@@ -77,41 +80,27 @@ public sealed class AdminAccessManagementOpenApiTests
     {
         await using var factory = CreateFactory();
         var endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
-        var actual = new List<ManagementEndpointOperation>();
+        AssertExactManagementEndpointSurface(endpointDataSource.Endpoints);
+    }
 
-        foreach (var endpoint in endpointDataSource.Endpoints.OfType<RouteEndpoint>())
-        {
-            var rawPath = endpoint.RoutePattern.RawText;
-            if (string.IsNullOrWhiteSpace(rawPath))
-            {
-                continue;
-            }
+    [Fact]
+    public async Task RuntimeEndpointSurfaceRejectsHiddenParameterizedManagementRoute()
+    {
+        await using var factory = CreateFactory();
+        var endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        var hiddenEndpoint = new RouteEndpoint(
+            _ => Task.CompletedTask,
+            RoutePatternFactory.Parse("api/{area}/internal"),
+            order: 0,
+            new EndpointMetadataCollection(
+                new HttpMethodMetadata(["GET"]),
+                new ApiExplorerSettingsAttribute { IgnoreApi = true }),
+            "Hidden parameterized management route");
 
-            var path = NormalizeRoutePath(rawPath);
-            if (!IsManagementPath(path))
-            {
-                continue;
-            }
+        var exception = Assert.ThrowsAny<Exception>(
+            () => AssertExactManagementEndpointSurface(endpointDataSource.Endpoints.Append(hiddenEndpoint)));
 
-            var httpMethods = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;
-            Assert.NotNull(httpMethods);
-            Assert.NotEmpty(httpMethods);
-            actual.AddRange(httpMethods.Select(method => new ManagementEndpointOperation(path, method)));
-        }
-
-        var expected = GetOperationSpecifications()
-            .Select(specification => new ManagementEndpointOperation(
-                specification.Path,
-                specification.Method.ToString().ToUpperInvariant()))
-            .OrderBy(operation => operation.Path, StringComparer.Ordinal)
-            .ThenBy(operation => operation.Method, StringComparer.Ordinal)
-            .ToArray();
-        var orderedActual = actual
-            .OrderBy(operation => operation.Path, StringComparer.Ordinal)
-            .ThenBy(operation => operation.Method, StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(expected, orderedActual);
+        Assert.Contains("/api/{area}/internal", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -564,6 +553,88 @@ public sealed class AdminAccessManagementOpenApiTests
     {
         return string.Equals(path, "/api/admin-access", StringComparison.OrdinalIgnoreCase) ||
                path.StartsWith("/api/admin-access/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertExactManagementEndpointSurface(IEnumerable<Endpoint> endpoints)
+    {
+        var actual = new List<ManagementEndpointOperation>();
+        foreach (var endpoint in endpoints.OfType<RouteEndpoint>())
+        {
+            if (!CanMatchManagementPath(endpoint.RoutePattern))
+            {
+                continue;
+            }
+
+            var rawPath = endpoint.RoutePattern.RawText;
+            Assert.False(
+                string.IsNullOrWhiteSpace(rawPath),
+                "A route that can match the management prefix must expose a raw template for exact surface verification.");
+
+            var httpMethods = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;
+            Assert.NotNull(httpMethods);
+            Assert.NotEmpty(httpMethods);
+            var path = NormalizeRoutePath(rawPath!);
+            actual.AddRange(httpMethods.Select(method => new ManagementEndpointOperation(path, method)));
+        }
+
+        var expected = GetOperationSpecifications()
+            .Select(specification => new ManagementEndpointOperation(
+                specification.Path,
+                specification.Method.ToString().ToUpperInvariant()))
+            .OrderBy(operation => operation.Path, StringComparer.Ordinal)
+            .ThenBy(operation => operation.Method, StringComparer.Ordinal)
+            .ToArray();
+        var orderedActual = actual
+            .OrderBy(operation => operation.Path, StringComparer.Ordinal)
+            .ThenBy(operation => operation.Method, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, orderedActual);
+    }
+
+    private static bool CanMatchManagementPath(RoutePattern routePattern)
+    {
+        return CanMatchManagementPrefix(routePattern.PathSegments, routeSegmentIndex: 0, prefixSegmentIndex: 0);
+    }
+
+    private static bool CanMatchManagementPrefix(
+        IReadOnlyList<RoutePatternPathSegment> routeSegments,
+        int routeSegmentIndex,
+        int prefixSegmentIndex)
+    {
+        ReadOnlySpan<string> managementPrefix = ["api", "admin-access"];
+        if (prefixSegmentIndex == managementPrefix.Length)
+        {
+            return true;
+        }
+
+        if (routeSegmentIndex == routeSegments.Count)
+        {
+            return false;
+        }
+
+        var routeSegment = routeSegments[routeSegmentIndex];
+        if (routeSegment.Parts.OfType<RoutePatternParameterPart>().Any(part => part.IsCatchAll))
+        {
+            return true;
+        }
+
+        if (CanMatchPathSegment(routeSegment, managementPrefix[prefixSegmentIndex]) &&
+            CanMatchManagementPrefix(routeSegments, routeSegmentIndex + 1, prefixSegmentIndex + 1))
+        {
+            return true;
+        }
+
+        return routeSegment.Parts.Count == 1 &&
+               routeSegment.Parts[0] is RoutePatternParameterPart { IsOptional: true } &&
+               CanMatchManagementPrefix(routeSegments, routeSegmentIndex + 1, prefixSegmentIndex);
+    }
+
+    private static bool CanMatchPathSegment(RoutePatternPathSegment routeSegment, string expectedSegment)
+    {
+        return routeSegment.Parts.Count != 1 ||
+               routeSegment.Parts[0] is not RoutePatternLiteralPart literal ||
+               string.Equals(literal.Content, expectedSegment, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeRoutePath(string rawPath)

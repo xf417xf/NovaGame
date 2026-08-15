@@ -21,14 +21,14 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone at
-`M35-04`, and only `M35-04-T05` is executable after independent review found its route-surface guard
-observed only Swagger and could miss a runtime endpoint hidden from ApiExplorer. The authorized
-`administrator-management` capability extends the existing NovaGame-owned `Operations/AdminAccess`
-capability through administrator, role and permission, session, audit, and generic Vben `web-ele`
-operations. The active task authorizes only correction and full re-verification of checked
-OpenAPI/TypeScript contract generation. It does not authorize M35-04-T06, Vben management UI
-implementation, M35-05 or later work, SwordMaster changes, extraction, M4, or NovaCore changes. M4
-remains `Unscheduled`.
+`M35-05`, and only `M35-05-T01` is executable after M35-04 completed final sequential server,
+database, authentication, management-contract, documentation, repository, and whitespace
+verification. The authorized `administrator-management` capability extends the existing
+NovaGame-owned `Operations/AdminAccess` capability through administrator, role and permission,
+session, audit, and generic Vben `web-ele` operations. The active task authorizes only typed
+management transport, permission constants, static routes, request/error handling, and focused
+transport/route testing. It does not authorize Vben management UI work, M35-05-T02 or later work,
+SwordMaster changes, extraction, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 When sources appear to conflict, stop and resolve the conflict before implementation. Do not silently weaken a repository rule or an active goal acceptance criterion.
 

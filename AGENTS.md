@@ -22,7 +22,7 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 - `admin/AGENTS.md` for the operations admin.
 - `clients/cocos/AGENTS.md` for the Cocos client framework.
 
-Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-04` in `docs/goals/m3.5.md` for the separately authorized NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
+Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-05` in `docs/goals/m3.5.md` for the separately authorized NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
 
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
@@ -68,11 +68,12 @@ management permission registration and idempotent DbMigrator seed synchronizatio
 completed the frozen thin management HTTP layer and real-MySQL API/OpenAPI verification; and
 M35-04-T04 completed the frozen real-MySQL integration evidence for migrations, seed,
 permissions, management queries, mutations, locking, replay, and atomic audit behavior.
-M35-04-T05 is active again after independent review found that its route-surface guard observed
-only Swagger and could miss a runtime endpoint hidden from ApiExplorer. Follow `docs/goals/m3.5.md`.
-The active task authorizes only correction and full re-verification of the checked OpenAPI/TypeScript
-contract workflow. It does not authorize M35-04-T06, M35-05 implementation, SwordMaster changes,
-an admin-shell extraction, another capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
+M35-04 is complete after final sequential server, database, authentication, management-contract,
+documentation, repository, and whitespace verification. M35-05 is active only at `M35-05-T01`.
+Follow `docs/goals/m3.5.md`. The active task authorizes only typed management transport, permission
+constants, static routes, request/error handling, and focused transport/route testing. It does not
+authorize M35-05-T02 or later work, SwordMaster changes, an admin-shell extraction, another
+capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 
