@@ -117,7 +117,7 @@ desktop/mobile browser, exact 28-command cumulative acceptance, boundary, reuse-
 NovaCore, and cleanup paths are verified. The complete player-equipment-grant capability remains
 SwordMaster-owned. `request-audit-context-consumer-contract` remains a possible later candidate only
 and is neither implemented nor authorized for extraction. M3 grants no continuing authorization for
-extraction, another capability, M4, or NovaCore changes. No repository milestone is active.
+extraction, another capability, M4, or NovaCore changes.
 
 ### Goal
 
@@ -130,6 +130,44 @@ domains remain game-owned and outside this milestone; M3 does not make them Nova
 - The selected capability solves a real operational workflow.
 - Authorization, audit, idempotency, and rollback behavior are verified.
 - Any later extraction promotes only an independently useful infrastructure mechanism and follows the same consumer-first rule.
+
+## M3.5 - Administrator Management
+
+**Status:** Active
+
+**Active goal:** [M3.5 Administrator Management](goals/m3.5.md)
+
+**Execution state:** M35-01 completed its evidence-backed current-state and boundary audit, M35-02
+froze and verified its domain, security, Application, HTTP, MySQL, Vben, browser, and verification
+contracts, and M35-03 completed its approved Domain/Application implementation and focused-test
+matrix. M3.5 is active at `M35-04`, with only `M35-04-T01` executable. The user separately
+authorized the NovaGame-owned `administrator-management` capability on 2026-08-13. M35-04-T01
+authorizes only approved repository queries, row locks, mappings, indexes, all three frozen receipt
+kinds, and the explicit MySQL migration. This authorization does not come from M3 and does not
+authorize M35-04-T02 or later work, permission seeding, HTTP APIs or OpenAPI, Admin UI, SwordMaster
+changes, extraction, M4, or NovaCore changes.
+
+### Goal
+
+Complete the existing framework-owned `Operations/AdminAccess` capability so authorized operators
+can manage administrator accounts, custom roles and registered permissions, inspect and revoke
+administrator sessions, and query administrator-access audit history through the generic Vben
+Admin 5 `web-ele` application.
+
+### Exit Criteria
+
+- Administrator, role, permission, session, and audit behavior is server-authoritative and verified.
+- Privileged mutations are authorized, concurrency-safe, transactional, and auditable in MySQL 8.4.
+- The generic Vben admin passes focused and real desktop/mobile browser acceptance.
+- OpenAPI and TypeScript contracts remain synchronized without game-owned navigation or policy.
+- NovaCore and SwordMaster remain unchanged, M4 remains `Unscheduled`, and repository verification passes.
+
+### Non-Goals
+
+- game-owned player, gameplay, economy, reward, or live-operations management;
+- multi-factor authentication, external identity providers, SSO, or tenant management;
+- extracting an admin shell or creating a new physical module or package;
+- M4 portability work or NovaCore changes.
 
 ## M4 - Portability And Reuse Proof
 

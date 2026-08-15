@@ -6,5 +6,7 @@ public enum RefreshTokenRevocationReason
     Logout = 2,
     ReuseDetected = 3,
     Expired = 4,
-    AdministratorInactive = 5
+    AdministratorInactive = 5,
+    PasswordReset = 6,
+    ForcedByAdministrator = 7
 }

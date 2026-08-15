@@ -31,7 +31,15 @@ boundary, reuse-evidence, secret, NovaCore, and cleanup paths are verified. The 
 player-equipment-grant capability remains SwordMaster-owned.
 `request-audit-context-consumer-contract` remains a possible later candidate only and is neither
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
-another capability, M4, or NovaCore changes. No repository milestone is active.
+another capability, M4, or NovaCore changes.
+
+[M3.5](docs/goals/m3.5.md) is now the only active repository milestone at `M35-04`, with only
+`M35-04-T01` executable after the verified Domain, Application, and focused-test tasks. It advances
+the NovaGame-owned `Operations/AdminAccess` `administrator-management` vertical slice across .NET,
+MySQL 8.4, and the generic Vben Admin 5 `web-ele` application. The active task authorizes only
+approved repository queries, row locks, mappings, indexes, all three frozen receipt kinds, and the
+explicit MySQL migration. It does not authorize permission seeding, HTTP APIs or OpenAPI, Admin UI,
+later M35-04 tasks, SwordMaster, extraction, M4, or NovaCore changes; M4 remains `Unscheduled`.
 
 ## Prerequisites
 
@@ -102,5 +110,6 @@ The verified SwordMaster smoke consumer is documented in [samples/SwordMaster](s
 - [M1 completed goal record](docs/goals/m1.md)
 - [M2 completed goal record](docs/goals/m2.md)
 - [M3 completed goal record](docs/goals/m3.md)
+- [M3.5 active Administrator Management goal](docs/goals/m3.5.md)
 
 Codex and other coding agents must read [AGENTS.md](AGENTS.md) before changing this repository and the nearest scoped `AGENTS.md` before changing a subtree.

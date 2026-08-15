@@ -22,7 +22,7 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 - `admin/AGENTS.md` for the operations admin.
 - `clients/cocos/AGENTS.md` for the Cocos client framework.
 
-Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task. No repository milestone is active.
+Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-04` in `docs/goals/m3.5.md` for the separately authorized NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
 
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
@@ -58,6 +58,16 @@ dependency, contract, migration, secret, NovaCore, and disposable-resource audit
 completed documentation synchronization, local-evidence cleanup, and deactivation. The recorded
 `request-audit-context-consumer-contract` remains a possible later candidate only; it is not
 implemented or authorized for extraction.
+
+The user separately authorized the NovaGame-owned `administrator-management` capability on
+2026-08-13. M3.5 completed its evidence-backed baseline audit, frozen-contract stage, and M35-03
+Domain/Application implementation. The domain, security, Application, HTTP, MySQL, Vben, browser,
+and verification contracts remain frozen and verified. Only `M35-04-T01` is executable. Follow
+`docs/goals/m3.5.md`. It authorizes only the approved repository queries, row locks, mappings,
+indexes, all three frozen receipt kinds, and the explicit MySQL migration. It does not authorize
+M35-04-T02 or later M35-04 work, permission seeding, HTTP APIs, OpenAPI, Admin UI, SwordMaster
+changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4 remains
+`Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

@@ -4,6 +4,9 @@ namespace NovaGame.Domain.Operations.AdminAccess;
 
 public sealed class AdminAccessAuditRecord : AggregateRoot<Guid>
 {
+    private Guid? _managementSessionFamilyId;
+    private long? _managementTargetRevision;
+
     private AdminAccessAuditRecord()
     {
     }
@@ -21,7 +24,9 @@ public sealed class AdminAccessAuditRecord : AggregateRoot<Guid>
         string? errorCode = null,
         string? ipAddress = null,
         string? userAgent = null,
-        string? correlationId = null)
+        string? correlationId = null,
+        Guid? sessionFamilyId = null,
+        long? targetRevision = null)
     {
         if (id == Guid.Empty)
         {
@@ -31,6 +36,18 @@ public sealed class AdminAccessAuditRecord : AggregateRoot<Guid>
         if (occurredAtUtc.Kind != DateTimeKind.Utc)
         {
             throw new ArgumentException("The audit timestamp must use UTC.", nameof(occurredAtUtc));
+        }
+
+        if (sessionFamilyId == Guid.Empty)
+        {
+            throw new ArgumentException("Session family identifiers cannot be empty.", nameof(sessionFamilyId));
+        }
+
+        if (targetRevision <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(targetRevision),
+                "Target revisions must be positive when present.");
         }
 
         Id = id;
@@ -46,6 +63,8 @@ public sealed class AdminAccessAuditRecord : AggregateRoot<Guid>
         IpAddress = NormalizeMetadata(ipAddress, 64);
         UserAgent = NormalizeMetadata(userAgent, 512);
         CorrelationId = NormalizeMetadata(correlationId, 128);
+        _managementSessionFamilyId = sessionFamilyId;
+        _managementTargetRevision = targetRevision;
     }
 
     public AdminAccessAuditAction Action { get; private set; }
@@ -71,6 +90,10 @@ public sealed class AdminAccessAuditRecord : AggregateRoot<Guid>
     public string? UserAgent { get; private set; }
 
     public string? CorrelationId { get; private set; }
+
+    public Guid? SessionFamilyId => _managementSessionFamilyId;
+
+    public long? TargetRevision => _managementTargetRevision;
 
     private static string? NormalizeMetadata(string? value, int maximumLength)
     {

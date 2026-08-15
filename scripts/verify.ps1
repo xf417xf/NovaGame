@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("Documentation", "Repository", "Server", "Database", "Authentication", "GameConfig", "AdminE2E", "Admin", "Client", "SwordMaster", "All")]
+    [ValidateSet("Documentation", "Repository", "Server", "Database", "Authentication", "GameConfig", "AdminManagement", "AdminE2E", "Admin", "Client", "SwordMaster", "All")]
     [string]$Scope = "All",
 
     [string]$VbenTemplateRoot,
@@ -60,6 +60,87 @@ function Assert-Condition {
     if (-not $Condition) {
         throw $Message
     }
+}
+
+function Get-M35TaskStatus {
+    param(
+        [Parameter(Mandatory)]
+        [ValidatePattern('^M35-\d{2}-T\d{2}$')]
+        [string]$TaskId
+    )
+
+    $goalPath = Join-Path $repositoryRoot "docs\goals\m3.5.md"
+    Assert-Condition `
+        (Test-Path -LiteralPath $goalPath -PathType Leaf) `
+        "M3.5 goal is missing at '$goalPath'."
+    $goalContent = Get-Content -LiteralPath $goalPath -Raw
+    $taskRegisterMatches = [regex]::Matches(
+        $goalContent,
+        '(?ms)^## Active Task Register\r?\n(?<body>.*?)(?=^##\s+|\z)')
+    Assert-Condition `
+        ($taskRegisterMatches.Count -eq 1) `
+        "M3.5 must contain exactly one Active Task Register."
+    $expectedStageId = $TaskId.Substring(0, 6)
+    $taskPattern = '(?m)^\|[ \t]*' + [regex]::Escape($TaskId) +
+        '[ \t]*\|[ \t]*' + [regex]::Escape($expectedStageId) +
+        '[ \t]*\|[^\r\n]*\|[ \t]*' +
+        '(?<status>pending|in_progress|blocked|complete)[ \t]*\|[ \t]*$'
+    $taskMatches = [regex]::Matches(
+        $taskRegisterMatches[0].Groups["body"].Value,
+        $taskPattern)
+    Assert-Condition `
+        ($taskMatches.Count -eq 1) `
+        "M3.5 task '$TaskId' must appear exactly once in the Active Task Register."
+
+    return $taskMatches[0].Groups["status"].Value
+}
+
+function Test-M35ExternalNovaCoreCheckout {
+    $expectedHead = "ef8db55173ff8f0286bb06abe753861c8a7d2d80"
+    $configuredRoot = [Environment]::GetEnvironmentVariable(
+        "NOVACORE_ROOT",
+        [EnvironmentVariableTarget]::Process)
+    $candidateRoot = if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
+        "D:\Programs\nova-core"
+    }
+    else {
+        $configuredRoot.Trim()
+    }
+
+    Assert-Condition `
+        (Test-Path -LiteralPath $candidateRoot -PathType Container) `
+        "NovaCore source root was not found at '$candidateRoot'. Set NOVACORE_ROOT to override the default."
+    $resolvedRoot = (Resolve-Path -LiteralPath $candidateRoot -ErrorAction Stop).Path
+
+    $insideWorkTree = @(
+        & git --no-optional-locks -C $resolvedRoot `
+            rev-parse --is-inside-work-tree 2>$null)
+    Assert-Condition `
+        ($LASTEXITCODE -eq 0 -and
+            $insideWorkTree.Count -eq 1 -and
+            ([string]$insideWorkTree[0]).Trim() -eq "true") `
+        "NovaCore source root '$resolvedRoot' is not a Git worktree."
+
+    $headOutput = @(
+        & git --no-optional-locks -C $resolvedRoot `
+            rev-parse --verify "HEAD^{commit}" 2>$null)
+    Assert-Condition `
+        ($LASTEXITCODE -eq 0 -and $headOutput.Count -eq 1) `
+        "Unable to resolve NovaCore HEAD at '$resolvedRoot'."
+    $actualHead = ([string]$headOutput[0]).Trim().ToLowerInvariant()
+    Assert-Condition `
+        ($actualHead -eq $expectedHead) `
+        "NovaCore source HEAD '$actualHead' differs from required audit commit '$expectedHead'."
+
+    $statusOutput = @(
+        & git --no-optional-locks -C $resolvedRoot `
+            status --porcelain=v1 --untracked-files=all --ignore-submodules=none)
+    Assert-Condition `
+        ($LASTEXITCODE -eq 0) `
+        "Unable to inspect NovaCore source status at '$resolvedRoot'."
+    Assert-Condition `
+        ($statusOutput.Count -eq 0) `
+        "NovaCore source checkout '$resolvedRoot' is not clean:`n$($statusOutput -join "`n")"
 }
 
 function Invoke-CheckedCommand {
@@ -166,6 +247,1121 @@ function Invoke-AdminPnpm {
         Pop-Location
         $env:PATH = $previousPath
         $env:pnpm_config_store_dir = $previousStorePath
+    }
+}
+
+function Invoke-AdminAcceptanceOwnershipScanner {
+    param(
+        [Parameter(Mandatory)]$Toolchain,
+        [Parameter(Mandatory)][string[]]$SpecPaths,
+        [string]$ExpectedFailureRule
+    )
+
+    $adminRoot = [System.IO.Path]::GetFullPath([string]$Toolchain.adminRoot)
+    $relativeSpecPaths = @(
+        $SpecPaths | ForEach-Object {
+            $resolvedSpecPath = [System.IO.Path]::GetFullPath(
+                (Join-Path $repositoryRoot $_))
+            Assert-Condition `
+                $resolvedSpecPath.StartsWith(
+                    $adminRoot.TrimEnd('\') + '\',
+                    [StringComparison]::OrdinalIgnoreCase) `
+                "Admin acceptance ownership scan path '$_' is outside '$adminRoot'."
+            [System.IO.Path]::GetRelativePath(
+                $adminRoot,
+                $resolvedSpecPath).Replace('\', '/')
+        })
+    $scannerSource = @'
+import path from 'node:path';
+import process from 'node:process';
+import ts from 'typescript';
+
+const [configArgument, ...fileArguments] = process.argv.slice(1);
+const configPath = path.resolve(configArgument);
+const configResult = ts.readConfigFile(configPath, ts.sys.readFile);
+if (configResult.error) {
+  process.stdout.write('typescript-config-invalid\n');
+  process.exit(2);
+}
+const parsed = ts.parseJsonConfigFileContent(
+  configResult.config,
+  ts.sys,
+  path.dirname(configPath),
+  undefined,
+  configPath,
+);
+const requestedFiles = fileArguments.map((value) => path.resolve(value));
+const rootNames = [...new Set([...parsed.fileNames, ...requestedFiles])];
+const program = ts.createProgram({ options: parsed.options, rootNames });
+const checker = program.getTypeChecker();
+const violations = [];
+const adminRoot = path.dirname(configPath);
+const evidenceHelperPath = path.resolve(
+  adminRoot,
+  'apps/web-ele/e2e/acceptance-evidence.ts',
+);
+const requestMethods = new Set([
+  'delete',
+  'fetch',
+  'get',
+  'head',
+  'patch',
+  'post',
+  'put',
+]);
+const routeMethods = new Set(['route', 'unroute']);
+const routeActionMethods = new Set([
+  'abort',
+  'continue',
+  'fallback',
+  'fulfill',
+]);
+const browserTypeConnectionMethods = new Set([
+  'connect',
+  'connectOverCDP',
+  'launch',
+  'launchPersistentContext',
+]);
+const screenshotMethods = new Set(['screenshot', 'toHaveScreenshot']);
+const forbiddenTransportModules = new Set([
+  'axios',
+  'child_process',
+  'http',
+  'https',
+  'net',
+  'node:child_process',
+  'node:http',
+  'node:https',
+  'node:net',
+  'node:tls',
+  'tls',
+  'undici',
+]);
+const forbiddenDynamicModuleModules = new Set(['module', 'node:module']);
+const reflectiveAcquisitionMethods = new Set([
+  'get',
+  'getOwnPropertyDescriptor',
+]);
+const processModuleAcquisitionMethods = new Set([
+  'binding',
+  'getBuiltinModule',
+]);
+const ownershipSensitiveTypes = new Set([
+  'APIRequest',
+  'APIRequestContext',
+  'Browser',
+  'BrowserContext',
+  'BrowserType',
+  'ElementHandle',
+  'Locator',
+  'Page',
+  'Request',
+  'Route',
+]);
+
+function containsType(type, names, location) {
+  if (type.isUnionOrIntersection()) {
+    return type.types.some((entry) => containsType(entry, names, location));
+  }
+  const rendered = checker.typeToString(
+    type,
+    location,
+    ts.TypeFormatFlags.NoTruncation,
+  );
+  const symbolName = (type.aliasSymbol ?? type.getSymbol())?.getName();
+  return [...names].some(
+    (name) =>
+      symbolName === name ||
+      rendered === name ||
+      rendered.endsWith(`.${name}`) ||
+      rendered.startsWith(`${name}<`) ||
+      rendered.includes(`.${name}<`),
+  );
+}
+
+function typeAtLocationContains(node, names) {
+  return containsType(checker.getTypeAtLocation(node), names, node);
+}
+
+function isStructuralTypeEscape(source, target, names) {
+  return typeAtLocationContains(source, names) &&
+    !typeAtLocationContains(target, names);
+}
+
+function originatesFromIdentifier(node, expectedName, visited = new Set()) {
+  let current = node;
+  while (
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isParenthesizedExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  if (!ts.isIdentifier(current)) {
+    return false;
+  }
+  if (current.text === expectedName) {
+    return true;
+  }
+  const symbol = checker.getSymbolAtLocation(current);
+  if (!symbol || visited.has(symbol)) {
+    return false;
+  }
+  visited.add(symbol);
+  return Boolean(symbol.declarations?.some((declaration) =>
+    ts.isVariableDeclaration(declaration) &&
+    declaration.initializer &&
+    originatesFromIdentifier(declaration.initializer, expectedName, visited)
+  ));
+}
+
+function isReflectReceiver(node) {
+  return originatesFromIdentifier(node, 'Reflect') ||
+    typeAtLocationContains(node, new Set(['Reflect']));
+}
+
+function isProcessReceiver(node) {
+  return originatesFromIdentifier(node, 'process') ||
+    typeAtLocationContains(node, new Set(['Process']));
+}
+
+function memberName(node) {
+  if (ts.isPropertyAccessExpression(node)) {
+    return node.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(node) &&
+    (ts.isStringLiteral(node.argumentExpression) ||
+      ts.isNoSubstitutionTemplateLiteral(node.argumentExpression))
+  ) {
+    return node.argumentExpression.text;
+  }
+  return undefined;
+}
+
+function memberReceiver(node) {
+  return ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
+    ? node.expression
+    : undefined;
+}
+
+function signatureOwnerNames(call) {
+  const names = new Set();
+  const declaration = checker.getResolvedSignature(call)?.declaration;
+  let current = declaration;
+  while (current) {
+    if (
+      (ts.isInterfaceDeclaration(current) ||
+        ts.isClassDeclaration(current) ||
+        ts.isTypeAliasDeclaration(current)) &&
+      current.name
+    ) {
+      names.add(current.name.text);
+    }
+    current = current.parent;
+  }
+  return names;
+}
+
+function addViolation(sourceFile, node, rule) {
+  const position = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+  violations.push(
+    `${rule}@${path.basename(sourceFile.fileName)}:${position.line + 1}:${position.character + 1}`,
+  );
+}
+
+function isPlaywrightFixturePageIdentifier(node) {
+  if (!ts.isIdentifier(node) || node.text !== 'page') {
+    return false;
+  }
+  const symbol = checker.getSymbolAtLocation(node);
+  return Boolean(symbol?.declarations?.some((declaration) => {
+    if (
+      !ts.isBindingElement(declaration) ||
+      !ts.isIdentifier(declaration.name) ||
+      declaration.name.text !== 'page' ||
+      !ts.isObjectBindingPattern(declaration.parent)
+    ) {
+      return false;
+    }
+    const propertyName = declaration.propertyName;
+    if (
+      propertyName &&
+      !(
+        (ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName)) &&
+        propertyName.text === 'page'
+      )
+    ) {
+      return false;
+    }
+    const parameter = declaration.parent.parent;
+    if (!ts.isParameter(parameter)) {
+      return false;
+    }
+    const callback = parameter.parent;
+    if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) {
+      return false;
+    }
+    const call = callback.parent;
+    return ts.isCallExpression(call) &&
+      call.arguments.includes(callback) &&
+      ts.isIdentifier(call.expression) &&
+      call.expression.text === 'test' &&
+      containsType(
+        checker.getTypeAtLocation(declaration.name),
+        new Set(['Page']),
+        declaration.name,
+      );
+  }));
+}
+
+function isExactAuditedApiRequestArgument(node) {
+  const call = node.parent;
+  if (
+    !ts.isPropertyAccessExpression(node) ||
+    node.name.text !== 'request' ||
+    !isPlaywrightFixturePageIdentifier(node.expression) ||
+    !ts.isCallExpression(call) ||
+    call.arguments[0] !== node
+  ) {
+    return false;
+  }
+  const callee = call.expression;
+  const receiver = memberReceiver(callee);
+  return memberName(callee) === 'apiRequest' && receiver &&
+    containsType(
+      checker.getTypeAtLocation(receiver),
+      new Set(['AcceptanceEvidenceAudit']),
+      receiver,
+    );
+}
+
+function isDirectCaptureCall(node) {
+  const call = node.parent;
+  if (!ts.isCallExpression(call) || call.expression !== node) {
+    return false;
+  }
+  const receiver = memberReceiver(node);
+  return memberName(node) === 'captureScreenshot' && receiver &&
+    containsType(
+      checker.getTypeAtLocation(receiver),
+      new Set(['AcceptanceEvidenceAudit']),
+      receiver,
+    );
+}
+
+function inspectModuleSpecifier(sourceFile, node, value) {
+  if (forbiddenTransportModules.has(value)) {
+    addViolation(sourceFile, node, 'direct-transport');
+  }
+  if (forbiddenDynamicModuleModules.has(value)) {
+    addViolation(sourceFile, node, 'dynamic-module-loading');
+  }
+  if (!value.startsWith('.')) {
+    return;
+  }
+  const resolved = ts.resolveModuleName(
+    value,
+    sourceFile.fileName,
+    parsed.options,
+    ts.sys,
+  ).resolvedModule?.resolvedFileName;
+  if (/\.(?:cjs|mjs|js)$/i.test(value) || (resolved && /\.(?:cjs|mjs|js)$/i.test(resolved))) {
+    addViolation(sourceFile, node, 'local-javascript-source');
+  }
+}
+
+function inspect(sourceFile, node) {
+  if (node.kind === ts.SyntaxKind.AnyKeyword) {
+    addViolation(sourceFile, node, 'unsafe-type-escape');
+  }
+  if (
+    ts.isTypeReferenceNode(node) &&
+    node.typeName.getText(sourceFile).endsWith('APIRequestContext')
+  ) {
+    addViolation(sourceFile, node, 'direct-api-source');
+  }
+  if (
+    ts.isImportDeclaration(node) &&
+    ts.isStringLiteral(node.moduleSpecifier)
+  ) {
+    inspectModuleSpecifier(sourceFile, node.moduleSpecifier, node.moduleSpecifier.text);
+  }
+  if (
+    ts.isCallExpression(node) &&
+    node.expression.kind === ts.SyntaxKind.ImportKeyword
+  ) {
+    addViolation(sourceFile, node, 'dynamic-module-loading');
+    const moduleArgument = node.arguments[0];
+    if (
+      node.arguments.length === 1 &&
+      moduleArgument &&
+      (ts.isStringLiteral(moduleArgument) ||
+        ts.isNoSubstitutionTemplateLiteral(moduleArgument))
+    ) {
+      inspectModuleSpecifier(sourceFile, moduleArgument, moduleArgument.text);
+    }
+  }
+  if (
+    ts.isCallExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'require'
+  ) {
+    addViolation(sourceFile, node, 'dynamic-module-loading');
+  }
+  if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
+    if (
+      containsType(
+        checker.getTypeAtLocation(node),
+        new Set(['APIRequestContext']),
+        node,
+      )
+    ) {
+      addViolation(sourceFile, node, 'direct-api-source');
+    }
+    if (isStructuralTypeEscape(node.expression, node, ownershipSensitiveTypes)) {
+      addViolation(sourceFile, node, 'unsafe-type-escape');
+    }
+    if (
+      isStructuralTypeEscape(node.expression, node, new Set(['Reflect', 'Process']))
+    ) {
+      addViolation(sourceFile, node, 'dynamic-module-loading');
+    }
+  }
+  if (
+    ts.isBindingElement(node) &&
+    containsType(
+      checker.getTypeAtLocation(node.name),
+      new Set(['APIRequestContext']),
+      node.name,
+    )
+  ) {
+    addViolation(sourceFile, node, 'direct-api-source');
+  }
+  if (
+    ts.isVariableDeclaration(node) &&
+    node.initializer &&
+    containsType(
+      checker.getTypeAtLocation(node.initializer),
+      new Set(['APIRequestContext']),
+      node.initializer,
+    )
+  ) {
+    addViolation(sourceFile, node, 'direct-api-source');
+  }
+  if (
+    ts.isVariableDeclaration(node) &&
+    node.initializer &&
+    isStructuralTypeEscape(
+      node.initializer,
+      node.name,
+      ownershipSensitiveTypes,
+    )
+  ) {
+    addViolation(sourceFile, node, 'unsafe-type-escape');
+  }
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    isStructuralTypeEscape(
+      node.right,
+      node.left,
+      ownershipSensitiveTypes,
+    )
+  ) {
+    addViolation(sourceFile, node, 'unsafe-type-escape');
+  }
+  if (
+    ts.isReturnStatement(node) &&
+    node.expression &&
+    containsType(
+      checker.getTypeAtLocation(node.expression),
+      new Set(['APIRequestContext']),
+      node.expression,
+    )
+  ) {
+    addViolation(sourceFile, node, 'direct-api-source');
+  }
+  if (
+    ts.isVariableDeclaration(node) &&
+    ts.isObjectBindingPattern(node.name) &&
+    node.initializer
+  ) {
+    const initializerType = checker.getTypeAtLocation(node.initializer);
+    for (const element of node.name.elements) {
+      const originalName = element.propertyName &&
+        (ts.isIdentifier(element.propertyName) ||
+          ts.isStringLiteral(element.propertyName))
+        ? element.propertyName.text
+        : ts.isIdentifier(element.name)
+          ? element.name.text
+          : undefined;
+      if (
+        originalName === 'newContext' &&
+        containsType(
+          initializerType,
+          new Set(['APIRequest', 'Browser']),
+          node.initializer,
+        )
+      ) {
+        addViolation(sourceFile, element, 'browser-context-creation');
+      }
+      if (
+        originalName &&
+        requestMethods.has(originalName) &&
+        containsType(
+          initializerType,
+          new Set(['APIRequestContext']),
+          node.initializer,
+        )
+      ) {
+        addViolation(sourceFile, element, 'direct-api-request');
+      }
+      if (
+        originalName === 'request' &&
+        containsType(
+          initializerType,
+          new Set(['BrowserContext', 'Page']),
+          node.initializer,
+        )
+      ) {
+        addViolation(sourceFile, element, 'direct-api-source');
+      }
+      if (
+        originalName &&
+        reflectiveAcquisitionMethods.has(originalName) &&
+        isReflectReceiver(node.initializer)
+      ) {
+        addViolation(sourceFile, element, 'unsafe-type-escape');
+      }
+      if (
+        originalName &&
+        processModuleAcquisitionMethods.has(originalName) &&
+        isProcessReceiver(node.initializer)
+      ) {
+        addViolation(sourceFile, element, 'dynamic-module-loading');
+      }
+    }
+  }
+  if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+    const name = memberName(node);
+    const receiver = memberReceiver(node);
+    const receiverType = checker.getTypeAtLocation(receiver);
+    const dynamicMember = name === undefined;
+    if (
+      name &&
+      reflectiveAcquisitionMethods.has(name) &&
+      isReflectReceiver(receiver)
+    ) {
+      addViolation(sourceFile, node, 'unsafe-type-escape');
+    }
+    if (
+      name &&
+      processModuleAcquisitionMethods.has(name) &&
+      isProcessReceiver(receiver)
+    ) {
+      addViolation(sourceFile, node, 'dynamic-module-loading');
+    }
+    if (
+      (name === 'newContext' || dynamicMember) &&
+      containsType(receiverType, new Set(['APIRequest', 'Browser']), receiver)
+    ) {
+      addViolation(sourceFile, node, 'browser-context-creation');
+    }
+    if (
+      (name === 'newPage' || dynamicMember) &&
+      containsType(receiverType, new Set(['Browser']), receiver)
+    ) {
+      addViolation(sourceFile, node, 'browser-context-creation');
+    }
+    if (
+      (dynamicMember || (name && browserTypeConnectionMethods.has(name))) &&
+      containsType(receiverType, new Set(['BrowserType']), receiver)
+    ) {
+      addViolation(sourceFile, node, 'browser-process-creation');
+    }
+    if (
+      name === 'request' &&
+      containsType(receiverType, new Set(['BrowserContext', 'Page']), receiver) &&
+      !isExactAuditedApiRequestArgument(node)
+    ) {
+      addViolation(sourceFile, node, 'direct-api-source');
+    }
+    if (
+      (dynamicMember || (name && requestMethods.has(name))) &&
+      containsType(receiverType, new Set(['APIRequestContext']), receiver)
+    ) {
+      addViolation(sourceFile, node, 'direct-api-request');
+    }
+    if (
+      ((dynamicMember || (name && routeMethods.has(name))) &&
+        containsType(receiverType, new Set(['BrowserContext', 'Page']), receiver)) ||
+      ((dynamicMember || (name && routeActionMethods.has(name))) &&
+        containsType(receiverType, new Set(['Route']), receiver))
+    ) {
+      addViolation(sourceFile, node, 'request-interception');
+    }
+    if (
+      (dynamicMember || (name && screenshotMethods.has(name))) &&
+      (name === 'toHaveScreenshot' ||
+        containsType(
+          receiverType,
+          new Set(['ElementHandle', 'Locator', 'Page']),
+          receiver,
+        ))
+    ) {
+      addViolation(sourceFile, node, 'screenshot-ownership');
+    }
+    if (name === 'captureScreenshot' && !isDirectCaptureCall(node)) {
+      addViolation(sourceFile, node, 'screenshot-ownership');
+    }
+    if (name === 'observeContext' || name === 'assertScreenshotSurface') {
+      addViolation(sourceFile, node, 'evidence-internal-access');
+    }
+    if (
+      containsType(
+        checker.getTypeAtLocation(node),
+        new Set(['APIRequestContext']),
+        node,
+      ) &&
+      !isExactAuditedApiRequestArgument(node)
+    ) {
+      addViolation(sourceFile, node, 'direct-api-source');
+    }
+  }
+
+  if (ts.isCallExpression(node)) {
+    const callee = node.expression;
+    const name = memberName(callee);
+    const receiver = memberReceiver(callee);
+    const receiverType = receiver
+      ? checker.getTypeAtLocation(receiver)
+      : undefined;
+    const owners = signatureOwnerNames(node);
+    for (const argument of node.arguments) {
+      if (
+        containsType(
+          checker.getTypeAtLocation(argument),
+          new Set(['APIRequestContext']),
+          argument,
+        ) &&
+        !isExactAuditedApiRequestArgument(argument)
+      ) {
+        addViolation(sourceFile, argument, 'direct-api-source');
+      }
+    }
+    if (
+      (name && requestMethods.has(name) && receiverType &&
+        containsType(receiverType, new Set(['APIRequestContext']), receiver)) ||
+      (name && requestMethods.has(name) && owners.has('APIRequestContext'))
+    ) {
+      addViolation(sourceFile, node, 'direct-api-request');
+    }
+    if (
+      (name === 'newContext' && receiverType &&
+        containsType(receiverType, new Set(['APIRequest', 'Browser']), receiver)) ||
+      (name === 'newContext' &&
+        (owners.has('APIRequest') || owners.has('Browser')))
+    ) {
+      addViolation(sourceFile, node, 'browser-context-creation');
+    }
+    if (
+      (name === 'newPage' && receiverType &&
+        containsType(receiverType, new Set(['Browser']), receiver)) ||
+      (name === 'newPage' && owners.has('Browser'))
+    ) {
+      addViolation(sourceFile, node, 'browser-context-creation');
+    }
+    if (
+      (name && browserTypeConnectionMethods.has(name) && receiverType &&
+        containsType(receiverType, new Set(['BrowserType']), receiver)) ||
+      (name && browserTypeConnectionMethods.has(name) && owners.has('BrowserType'))
+    ) {
+      addViolation(sourceFile, node, 'browser-process-creation');
+    }
+    if (
+      (name && routeMethods.has(name) && receiverType &&
+        containsType(receiverType, new Set(['BrowserContext', 'Page']), receiver)) ||
+      (name && routeMethods.has(name) &&
+        (owners.has('BrowserContext') || owners.has('Page'))) ||
+      (name && routeActionMethods.has(name) && receiverType &&
+        containsType(receiverType, new Set(['Route']), receiver)) ||
+      (name && routeActionMethods.has(name) && owners.has('Route'))
+    ) {
+      addViolation(sourceFile, node, 'request-interception');
+    }
+    if (
+      name === 'fetch' ||
+      (ts.isIdentifier(callee) && callee.text === 'fetch')
+    ) {
+      addViolation(sourceFile, node, 'direct-transport');
+    }
+    if (
+      name === 'toHaveScreenshot' ||
+      (name === 'screenshot' && receiverType &&
+        containsType(
+          receiverType,
+          new Set(['ElementHandle', 'Locator', 'Page']),
+          receiver,
+        ))
+    ) {
+      addViolation(sourceFile, node, 'screenshot-ownership');
+    }
+    if (
+      ts.isIdentifier(callee) &&
+      new Set(['eval', 'Function']).has(callee.text)
+    ) {
+      addViolation(sourceFile, node, 'dynamic-code-execution');
+    }
+  }
+  ts.forEachChild(node, (child) => inspect(sourceFile, child));
+}
+
+const invalidRequestedFiles = new Set();
+for (const filePath of requestedFiles) {
+  const sourceFile = program.getSourceFile(filePath);
+  if (!sourceFile) {
+    violations.push(`typescript-source-missing@${path.basename(filePath)}:1:1`);
+    continue;
+  }
+  const diagnostics = [
+    ...program.getSyntacticDiagnostics(sourceFile),
+    ...program.getSemanticDiagnostics(sourceFile),
+  ];
+  if (diagnostics.length > 0) {
+    invalidRequestedFiles.add(path.resolve(sourceFile.fileName));
+    const diagnostic = diagnostics[0];
+    const position = diagnostic.file && diagnostic.start !== undefined
+      ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+      : { line: 0, character: 0 };
+    violations.push(
+      `typescript-type-resolution-failed@${path.basename(filePath)}:${position.line + 1}:${position.character + 1}`,
+    );
+  }
+}
+
+for (const sourceFile of program.getSourceFiles()) {
+  const sourcePath = path.resolve(sourceFile.fileName);
+  const relativePath = path.relative(adminRoot, sourcePath);
+  if (
+    sourceFile.isDeclarationFile ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath) ||
+    sourcePath === evidenceHelperPath ||
+    invalidRequestedFiles.has(sourcePath) ||
+    !/\.(?:cts|mts|tsx?)$/i.test(sourcePath)
+  ) {
+    continue;
+  }
+  inspect(sourceFile, sourceFile);
+}
+
+if (violations.length > 0) {
+  process.stdout.write(`${[...new Set(violations)].sort().join('\n')}\n`);
+  process.exit(1);
+}
+'@
+
+    Push-Location -LiteralPath $adminRoot
+    try {
+        $scannerOutput = @(
+            & ([string]$Toolchain.nodePath) `
+                "--no-warnings" `
+                "--input-type=module" `
+                "--eval" `
+                $scannerSource `
+                "tsconfig.e2e.json" `
+                @relativeSpecPaths 2>&1)
+        $scannerExitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedFailureRule)) {
+        Assert-Condition `
+            ($scannerExitCode -eq 0) `
+            "Admin acceptance ownership scan failed: $($scannerOutput -join ', ')."
+        return
+    }
+    Assert-Condition `
+        ($scannerExitCode -ne 0 -and
+            @($scannerOutput | Where-Object {
+                    ([string]$_).StartsWith(
+                        "$ExpectedFailureRule@",
+                        [StringComparison]::Ordinal)
+                }).Count -ge 1) `
+        "Admin acceptance ownership scan accepted the '$ExpectedFailureRule' negative probe."
+}
+
+function Test-AdminAcceptanceOwnershipPolicy {
+    param(
+        [Parameter(Mandatory)]$Toolchain,
+        [Parameter(Mandatory)][string[]]$SpecPaths
+    )
+
+    Invoke-AdminAcceptanceOwnershipScanner `
+        -Toolchain $Toolchain `
+        -SpecPaths $SpecPaths
+    $probeRelativePath =
+        "admin/apps/web-ele/e2e/.novagame-acceptance-ownership-probe.ts"
+    $probePath = Join-Path $repositoryRoot $probeRelativePath
+    $helperProbeRelativePath =
+        "admin/apps/web-ele/e2e/.novagame-acceptance-ownership-probe-helper.ts"
+    $helperProbePath = Join-Path $repositoryRoot $helperProbeRelativePath
+    Assert-Condition `
+        (-not (Test-Path -LiteralPath $probePath)) `
+        "Admin acceptance ownership probe path already exists."
+    Assert-Condition `
+        (-not (Test-Path -LiteralPath $helperProbePath)) `
+        "Admin acceptance ownership helper probe path already exists."
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    try {
+        foreach ($probe in @(
+                [pscustomobject]@{
+                    Rule = "direct-api-request"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const aliasedPage = page;
+await aliasedPage.request.post('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "direct-api-request"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const { request: aliasedRequest } = page;
+await aliasedRequest.fetch('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "browser-context-creation"
+                    Source = @'
+import type { Browser } from '@playwright/test';
+declare const browser: Browser;
+const { newContext: createContext } = browser;
+await createContext();
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "request-interception"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const aliasedPage = page;
+await aliasedPage.route('**/api/**', async (route) => route.abort());
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "direct-api-request"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const post = page.request.post.bind(page.request);
+await post('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "request-interception"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const intercept = page.route;
+await intercept('**/api/**', async () => {});
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "request-interception"
+                    Source = @'
+import type { Route } from '@playwright/test';
+declare const route: Route;
+const abort = route.abort.bind(route);
+await abort();
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "browser-context-creation"
+                    Source = @'
+import type { Browser } from '@playwright/test';
+declare const browser: Browser;
+await browser.newPage();
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "browser-process-creation"
+                    Source = @'
+import { chromium } from '@playwright/test';
+await chromium.launch();
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "browser-process-creation"
+                    Source = @'
+import { chromium } from '@playwright/test';
+await chromium.launchPersistentContext('output/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "browser-process-creation"
+                    Source = @'
+import { chromium } from '@playwright/test';
+await chromium.connect('ws://127.0.0.1:1');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "browser-process-creation"
+                    Source = @'
+import { chromium } from '@playwright/test';
+await chromium.connectOverCDP('http://127.0.0.1:1');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "direct-api-source"
+                    Source = @'
+import type { Page } from '@playwright/test';
+import type { AcceptanceEvidenceAudit } from './acceptance-evidence';
+declare const evidence: AcceptanceEvidenceAudit;
+declare const page: Page;
+const requestContext = page.request;
+await evidence.apiRequest(requestContext, 'GET', 'http://127.0.0.1/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "direct-api-source"
+                    Source = @'
+import type { Page } from '@playwright/test';
+import type { AcceptanceEvidenceAudit } from './acceptance-evidence';
+declare const evidence: AcceptanceEvidenceAudit;
+declare const page: Page;
+await evidence.apiRequest(
+  page.context().request,
+  'GET',
+  'http://127.0.0.1/api/probe',
+);
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "unsafe-type-escape"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+await (page as any).request.post('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "unsafe-type-escape"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const hiddenPage = page as unknown as {
+  request: { get(url: string): Promise<unknown> };
+};
+await hiddenPage.request.get('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "unsafe-type-escape"
+                    Source = @'
+import type { Page } from '@playwright/test';
+interface HiddenPage {
+  request: { get(url: string): Promise<unknown> };
+}
+declare const page: Page;
+const hiddenPage: HiddenPage = page;
+await hiddenPage.request.get('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "unsafe-type-escape"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const propertyName: string = 'request';
+const reflection = Reflect;
+const hiddenRequest = reflection.get(page, propertyName);
+await hiddenRequest.post('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "unsafe-type-escape"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const acquire = Reflect.get;
+const hiddenRequest = acquire(page, 'request');
+await hiddenRequest.get('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "unsafe-type-escape"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+const { get: acquire } = Reflect;
+const hiddenRequest = acquire(page, 'request');
+await hiddenRequest.get('/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "dynamic-module-loading"
+                    Source = @'
+const runtimeProcess = process;
+const loadModule = runtimeProcess.getBuiltinModule;
+const transport = loadModule('node:http');
+transport.get('http://127.0.0.1/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "dynamic-module-loading"
+                    Source = @'
+const runtimeProcess = process as unknown as {
+  binding(name: string): unknown;
+};
+const { binding: loadBinding } = runtimeProcess;
+loadBinding('fs');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "direct-transport"
+                    Source = @'
+await fetch('http://127.0.0.1/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "direct-transport"
+                    Source = @'
+import { request } from 'node:http';
+request('http://127.0.0.1/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "direct-transport"
+                    Source = @'
+import { spawnSync } from 'node:child_process';
+spawnSync('curl', ['http://127.0.0.1/api/probe']);
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "dynamic-module-loading"
+                    Source = @'
+const transport = await import(`node:http`);
+transport.request('http://127.0.0.1/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "dynamic-module-loading"
+                    Source = @'
+import { createRequire } from 'node:module';
+const loadModule = createRequire(import.meta.url);
+const transport = loadModule('node:http');
+transport.request('http://127.0.0.1/api/probe');
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "local-javascript-source"
+                    Source = @'
+// @ts-ignore -- the scanner must fail closed before JavaScript can hide transport.
+import './hidden-transport.js';
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "screenshot-ownership"
+                    Source = @'
+import type { Page } from '@playwright/test';
+declare const page: Page;
+await page.screenshot({ path: 'output/probe.png' });
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "screenshot-ownership"
+                    Source = @'
+import type { Locator } from '@playwright/test';
+declare const locator: Locator;
+await locator.screenshot({ path: 'output/probe.png' });
+'@
+                },
+                [pscustomobject]@{
+                    Rule = "screenshot-ownership"
+                    Source = @'
+import type { Page } from '@playwright/test';
+import { expect } from '@playwright/test';
+declare const page: Page;
+await expect(page).toHaveScreenshot();
+'@
+                })) {
+            [System.IO.File]::WriteAllText(
+                $probePath,
+                [string]$probe.Source,
+                $utf8)
+            Invoke-AdminAcceptanceOwnershipScanner `
+                -Toolchain $Toolchain `
+                -SpecPaths @($probeRelativePath) `
+                -ExpectedFailureRule ([string]$probe.Rule)
+        }
+        [System.IO.File]::WriteAllText(
+            $helperProbePath,
+            @'
+import type { Browser } from '@playwright/test';
+
+export async function createHiddenContext(browser: Browser) {
+  return browser.newContext();
+}
+'@,
+            $utf8)
+        [System.IO.File]::WriteAllText(
+            $probePath,
+            @'
+import type { Browser } from '@playwright/test';
+import { createHiddenContext } from './.novagame-acceptance-ownership-probe-helper';
+
+declare const browser: Browser;
+await createHiddenContext(browser);
+'@,
+            $utf8)
+        Invoke-AdminAcceptanceOwnershipScanner `
+            -Toolchain $Toolchain `
+            -SpecPaths @($probeRelativePath) `
+            -ExpectedFailureRule "browser-context-creation"
+        [System.IO.File]::WriteAllText(
+            $helperProbePath,
+            @'
+import type { Page } from '@playwright/test';
+
+export function hiddenRequestContext(page: Page) {
+  return page.request;
+}
+'@,
+            $utf8)
+        [System.IO.File]::WriteAllText(
+            $probePath,
+            @'
+import type { Page } from '@playwright/test';
+import type { AcceptanceEvidenceAudit } from './acceptance-evidence';
+import { hiddenRequestContext } from './.novagame-acceptance-ownership-probe-helper';
+
+declare const evidence: AcceptanceEvidenceAudit;
+declare const page: Page;
+await evidence.apiRequest(
+  hiddenRequestContext(page),
+  'GET',
+  'http://127.0.0.1/api/probe',
+);
+'@,
+            $utf8)
+        Invoke-AdminAcceptanceOwnershipScanner `
+            -Toolchain $Toolchain `
+            -SpecPaths @($probeRelativePath) `
+            -ExpectedFailureRule "direct-api-source"
+    }
+    finally {
+        if (Test-Path -LiteralPath $probePath -PathType Leaf) {
+            Remove-Item -LiteralPath $probePath -Force
+        }
+        if (Test-Path -LiteralPath $helperProbePath -PathType Leaf) {
+            Remove-Item -LiteralPath $helperProbePath -Force
+        }
     }
 }
 
@@ -610,6 +1806,818 @@ function Get-SanitizedIsolatedAcceptanceDiagnostics {
     return $diagnostics
 }
 
+function Initialize-AdminManagementDynamicSecretCollectorType {
+    if ("NovaGame.Verification.DynamicSecretPipeCollector" -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @'
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.Pipes;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace NovaGame.Verification
+{
+    public sealed class DynamicSecretRecord
+    {
+        internal DynamicSecretRecord(byte kind, string value)
+        {
+            Kind = kind;
+            Value = value;
+        }
+
+        public byte Kind { get; }
+        public string Value { get; }
+    }
+
+    public sealed class DynamicSecretPipeCollector : IDisposable
+    {
+        private const int MaximumRegistrations = 512;
+        private const int MaximumSecretBytes = 16 * 1024;
+        private const int MaximumTotalSecretBytes = 1024 * 1024;
+        private static readonly Regex AccessTokenPattern = new Regex(
+            @"^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$",
+            RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        private static readonly UTF8Encoding StrictUtf8 =
+            new UTF8Encoding(false, true);
+
+        private readonly byte[] authenticationKey;
+        private readonly CancellationTokenSource acceptCancellation =
+            new CancellationTokenSource();
+        private readonly object gate = new object();
+        private readonly string pipeName;
+        private readonly ManualResetEventSlim ready =
+            new ManualResetEventSlim(false);
+        private readonly Dictionary<string, DynamicSecretRecord> records =
+            new Dictionary<string, DynamicSecretRecord>(StringComparer.Ordinal);
+        private string faultRule;
+        private Task loopTask;
+        private int registrationCount;
+        private int totalSecretBytes;
+        private bool disposed;
+        private bool joined;
+        private bool stopped;
+
+        private DynamicSecretPipeCollector(
+            string pipeName,
+            byte[] authenticationKey)
+        {
+            this.pipeName = pipeName;
+            this.authenticationKey = (byte[])authenticationKey.Clone();
+        }
+
+        public static DynamicSecretPipeCollector Start(
+            string pipeName,
+            byte[] authenticationKey)
+        {
+            if (string.IsNullOrWhiteSpace(pipeName) ||
+                authenticationKey == null ||
+                authenticationKey.Length != 32)
+            {
+                throw new InvalidOperationException(
+                    "dynamic-secret-registry-configuration");
+            }
+
+            var collector = new DynamicSecretPipeCollector(
+                pipeName,
+                authenticationKey);
+            collector.loopTask = Task.Run(collector.RunAsync);
+            return collector;
+        }
+
+        public void WaitUntilReady(TimeSpan timeout)
+        {
+            if (!ready.Wait(timeout))
+            {
+                throw new InvalidOperationException(
+                    "dynamic-secret-registry-start-timeout");
+            }
+
+            ThrowIfFaulted();
+        }
+
+        public DynamicSecretRecord[] StopAndSnapshot(TimeSpan timeout)
+        {
+            RequestStop();
+            Join(timeout);
+            ThrowIfFaulted();
+            return SnapshotForCleanup();
+        }
+
+        public DynamicSecretRecord[] SnapshotForCleanup()
+        {
+            lock (gate)
+            {
+                if (!joined)
+                {
+                    throw new InvalidOperationException(
+                        "dynamic-secret-registry-cleanup-snapshot-before-join");
+                }
+
+                return records.Values.ToArray();
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(TimeSpan.FromSeconds(10));
+        }
+
+        public void Dispose(TimeSpan timeout)
+        {
+            RequestStop();
+            Join(timeout);
+
+            lock (gate)
+            {
+                if (disposed)
+                {
+                    return;
+                }
+
+                disposed = true;
+                CryptographicOperations.ZeroMemory(authenticationKey);
+                acceptCancellation.Dispose();
+                ready.Dispose();
+            }
+        }
+
+        private void RequestStop()
+        {
+            var cancelAccept = false;
+            lock (gate)
+            {
+                if (!stopped)
+                {
+                    stopped = true;
+                    cancelAccept = true;
+                }
+            }
+
+            if (cancelAccept)
+            {
+                acceptCancellation.Cancel();
+            }
+        }
+
+        private void Join(TimeSpan timeout)
+        {
+            var task = loopTask;
+            if (task == null || !task.Wait(timeout))
+            {
+                throw new InvalidOperationException(
+                    "dynamic-secret-registry-stop-timeout");
+            }
+
+            lock (gate)
+            {
+                joined = true;
+            }
+        }
+
+        private async Task RunAsync()
+        {
+            try
+            {
+                while (!acceptCancellation.IsCancellationRequested)
+                {
+                    using (var pipe = new NamedPipeServerStream(
+                        pipeName,
+                        PipeDirection.InOut,
+                        1,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
+                    {
+                        ready.Set();
+                        try
+                        {
+                            await pipe.WaitForConnectionAsync(
+                                acceptCancellation.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                            when (acceptCancellation.IsCancellationRequested)
+                        {
+                            if (pipe.IsConnected)
+                            {
+                                await HandleConnectionAsync(pipe)
+                                    .ConfigureAwait(false);
+                            }
+                            break;
+                        }
+
+                        await HandleConnectionAsync(pipe).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch
+            {
+                SetFault("dynamic-secret-registry-protocol");
+            }
+            finally
+            {
+                ready.Set();
+            }
+        }
+
+        private async Task HandleConnectionAsync(NamedPipeServerStream pipe)
+        {
+            using (var timeout = new CancellationTokenSource())
+            {
+                // Stopping the accept loop must not turn a partial accepted frame
+                // into a successful shutdown. Every accepted frame drains or faults.
+                timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                var header = new byte[10];
+                await ReadExactAsync(pipe, header, timeout.Token)
+                    .ConfigureAwait(false);
+                if (header[0] != (byte)'N' ||
+                    header[1] != (byte)'G' ||
+                    header[2] != (byte)'D' ||
+                    header[3] != (byte)'S' ||
+                    header[4] != 1 ||
+                    (header[5] != 1 && header[5] != 2))
+                {
+                    throw new InvalidDataException();
+                }
+
+                var secretLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(
+                    new ReadOnlySpan<byte>(header, 6, 4)));
+                if (secretLength <= 0 || secretLength > MaximumSecretBytes)
+                {
+                    throw new InvalidDataException();
+                }
+
+                var secretBytes = new byte[secretLength];
+                var suppliedMac = new byte[32];
+                await ReadExactAsync(pipe, secretBytes, timeout.Token)
+                    .ConfigureAwait(false);
+                await ReadExactAsync(pipe, suppliedMac, timeout.Token)
+                    .ConfigureAwait(false);
+                var authenticatedPayload = new byte[header.Length + secretBytes.Length];
+                Buffer.BlockCopy(header, 0, authenticatedPayload, 0, header.Length);
+                Buffer.BlockCopy(
+                    secretBytes,
+                    0,
+                    authenticatedPayload,
+                    header.Length,
+                    secretBytes.Length);
+                var expectedMac = HMACSHA256.HashData(
+                    authenticationKey,
+                    authenticatedPayload);
+                var validMac = CryptographicOperations.FixedTimeEquals(
+                    expectedMac,
+                    suppliedMac);
+                CryptographicOperations.ZeroMemory(expectedMac);
+                CryptographicOperations.ZeroMemory(suppliedMac);
+                CryptographicOperations.ZeroMemory(authenticatedPayload);
+                if (!validMac)
+                {
+                    CryptographicOperations.ZeroMemory(secretBytes);
+                    throw new InvalidDataException();
+                }
+
+                string secret;
+                try
+                {
+                    secret = StrictUtf8.GetString(secretBytes);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(secretBytes);
+                }
+                ValidateSecret(header[5], secret);
+                lock (gate)
+                {
+                    registrationCount++;
+                    totalSecretBytes += secretLength;
+                    if (registrationCount > MaximumRegistrations ||
+                        totalSecretBytes > MaximumTotalSecretBytes)
+                    {
+                        throw new InvalidDataException();
+                    }
+
+                    var key = header[5].ToString() + "\0" + secret;
+                    if (!records.ContainsKey(key))
+                    {
+                        records.Add(
+                            key,
+                            new DynamicSecretRecord(header[5], secret));
+                    }
+                }
+
+                var acknowledgement = new byte[]
+                {
+                    (byte)'N', (byte)'G', (byte)'D', (byte)'A', 1, 0
+                };
+                await pipe.WriteAsync(
+                    acknowledgement.AsMemory(),
+                    timeout.Token).ConfigureAwait(false);
+                await pipe.FlushAsync(timeout.Token).ConfigureAwait(false);
+                var trailingByte = new byte[1];
+                var trailingCount = await pipe.ReadAsync(
+                    trailingByte.AsMemory(),
+                    timeout.Token).ConfigureAwait(false);
+                if (trailingCount != 0)
+                {
+                    throw new InvalidDataException();
+                }
+            }
+        }
+
+        private static async Task ReadExactAsync(
+            Stream stream,
+            byte[] buffer,
+            CancellationToken cancellationToken)
+        {
+            var offset = 0;
+            while (offset < buffer.Length)
+            {
+                var count = await stream.ReadAsync(
+                    buffer.AsMemory(offset, buffer.Length - offset),
+                    cancellationToken).ConfigureAwait(false);
+                if (count == 0)
+                {
+                    throw new EndOfStreamException();
+                }
+
+                offset += count;
+            }
+        }
+
+        private static void ValidateSecret(byte kind, string secret)
+        {
+            if (kind == 1)
+            {
+                if (!AccessTokenPattern.IsMatch(secret))
+                {
+                    throw new InvalidDataException();
+                }
+
+                return;
+            }
+
+            if (!Regex.IsMatch(
+                    secret,
+                    @"^[A-Za-z0-9_-]{43}$",
+                    RegexOptions.CultureInvariant))
+            {
+                throw new InvalidDataException();
+            }
+
+            var padded = secret.Replace('-', '+').Replace('_', '/') + "=";
+            byte[] decoded;
+            try
+            {
+                decoded = Convert.FromBase64String(padded);
+            }
+            catch (FormatException)
+            {
+                throw new InvalidDataException();
+            }
+
+            try
+            {
+                if (decoded.Length != 32)
+                {
+                    throw new InvalidDataException();
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(decoded);
+            }
+        }
+
+        private void SetFault(string rule)
+        {
+            lock (gate)
+            {
+                if (faultRule == null)
+                {
+                    faultRule = rule;
+                }
+            }
+        }
+
+        private void ThrowIfFaulted()
+        {
+            lock (gate)
+            {
+                if (faultRule != null)
+                {
+                    throw new InvalidOperationException(faultRule);
+                }
+            }
+        }
+    }
+}
+'@ -Language CSharp
+}
+
+function New-AdminManagementDynamicSecretCollector {
+    Initialize-AdminManagementDynamicSecretCollectorType
+    $pipeName = "novagame-dynamic-secret-$([Guid]::NewGuid().ToString('N'))"
+    $authenticationKey = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+    $encodedAuthenticationKey = [Convert]::ToBase64String($authenticationKey).
+        TrimEnd('=').
+        Replace('+', '-').
+        Replace('/', '_')
+    $collector = $null
+    try {
+        $collector = [NovaGame.Verification.DynamicSecretPipeCollector]::Start(
+            $pipeName,
+            $authenticationKey)
+        $collector.WaitUntilReady([TimeSpan]::FromSeconds(5))
+        return [pscustomobject]@{
+            Collector = $collector
+            EncodedAuthenticationKey = $encodedAuthenticationKey
+            PipeName = $pipeName
+        }
+    }
+    catch {
+        if ($null -ne $collector) {
+            $collector.Dispose()
+        }
+        throw "dynamic-secret-registry-start-failed"
+    }
+    finally {
+        [Security.Cryptography.CryptographicOperations]::ZeroMemory(
+            $authenticationKey)
+    }
+}
+
+function Send-AdminManagementDynamicSecretProbe {
+    param(
+        [Parameter(Mandatory)]$Channel,
+        [Parameter(Mandatory)][ValidateSet(1, 2)][int]$Kind,
+        [Parameter(Mandatory)][string]$Value,
+        [switch]$InvalidAuthenticationCode
+    )
+
+    $authenticationKey = [Convert]::FromBase64String(
+        ([string]$Channel.EncodedAuthenticationKey).
+            Replace('-', '+').
+            Replace('_', '/') + '=')
+    $secretBytes = [Text.UTF8Encoding]::new($false).GetBytes($Value)
+    $header = [byte[]]::new(10)
+    [Text.Encoding]::ASCII.GetBytes("NGDS").CopyTo($header, 0)
+    $header[4] = 1
+    $header[5] = [byte]$Kind
+    $header[6] = [byte](($secretBytes.Length -shr 24) -band 0xff)
+    $header[7] = [byte](($secretBytes.Length -shr 16) -band 0xff)
+    $header[8] = [byte](($secretBytes.Length -shr 8) -band 0xff)
+    $header[9] = [byte]($secretBytes.Length -band 0xff)
+    $authenticatedPayload = [byte[]]::new(
+        $header.Length + $secretBytes.Length)
+    $header.CopyTo($authenticatedPayload, 0)
+    $secretBytes.CopyTo($authenticatedPayload, $header.Length)
+    $authenticationCode =
+        [Security.Cryptography.HMACSHA256]::HashData(
+            $authenticationKey,
+            $authenticatedPayload)
+    if ($InvalidAuthenticationCode) {
+        $authenticationCode[0] = $authenticationCode[0] -bxor 0xff
+    }
+    $frame = [byte[]]::new(
+        $authenticatedPayload.Length + $authenticationCode.Length)
+    $authenticatedPayload.CopyTo($frame, 0)
+    $authenticationCode.CopyTo($frame, $authenticatedPayload.Length)
+    $client = $null
+    try {
+        $client = [System.IO.Pipes.NamedPipeClientStream]::new(
+            ".",
+            [string]$Channel.PipeName,
+            [System.IO.Pipes.PipeDirection]::InOut,
+            [System.IO.Pipes.PipeOptions]::None)
+        $client.Connect(5000)
+        $client.Write($frame, 0, $frame.Length)
+        $client.Flush()
+        $acknowledgement = [byte[]]::new(6)
+        $offset = 0
+        while ($offset -lt $acknowledgement.Length) {
+            $count = $client.Read(
+                $acknowledgement,
+                $offset,
+                $acknowledgement.Length - $offset)
+            if ($count -eq 0) {
+                break
+            }
+            $offset += $count
+        }
+        return $offset -eq 6 -and
+            [Text.Encoding]::ASCII.GetString(
+                $acknowledgement,
+                0,
+                4) -ceq "NGDA" -and
+            $acknowledgement[4] -eq 1 -and
+            $acknowledgement[5] -eq 0
+    }
+    catch {
+        return $false
+    }
+    finally {
+        if ($null -ne $client) {
+            $client.Dispose()
+        }
+        foreach ($buffer in @(
+                $authenticationKey, $secretBytes, $authenticatedPayload,
+                $authenticationCode, $frame)) {
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory(
+                $buffer)
+        }
+    }
+}
+
+function Test-AdminManagementDynamicSecretClientPolicy {
+    param(
+        [Parameter(Mandatory)]$Toolchain
+    )
+
+    $sourcePath = Join-Path `
+        $repositoryRoot `
+        "admin\apps\web-ele\e2e\acceptance-evidence.ts"
+    $probeModulePath = Join-Path `
+        $repositoryRoot `
+        "admin\apps\web-ele\e2e\.novagame-dynamic-secret-client-probe.mjs"
+    $probeStandardOutputPath = Join-Path `
+        $repositoryRoot `
+        "admin\apps\web-ele\e2e\.novagame-dynamic-secret-client-probe.stdout.log"
+    $probeStandardErrorPath = Join-Path `
+        $repositoryRoot `
+        "admin\apps\web-ele\e2e\.novagame-dynamic-secret-client-probe.stderr.log"
+    Assert-Condition `
+        (Test-Path -LiteralPath $sourcePath -PathType Leaf) `
+        "The production dynamic-secret client source is missing."
+    foreach ($probePath in @(
+            $probeModulePath,
+            $probeStandardOutputPath,
+            $probeStandardErrorPath
+        )) {
+        Assert-Condition `
+            (-not (Test-Path -LiteralPath $probePath)) `
+            "A dynamic-secret client probe path already exists."
+    }
+
+    $channel = $null
+    $jobHandle = [IntPtr]::Zero
+    $probeProcess = $null
+    $channelStopped = $false
+    $operationError = $null
+    $cleanupErrors = [Collections.ArrayList]::new()
+    try {
+        $channel = New-AdminManagementDynamicSecretCollector
+        $missingPipeName =
+            "novagame-dynamic-secret-missing-$([Guid]::NewGuid().ToString('N'))"
+        $probeSource = @'
+import { Buffer } from 'node:buffer';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import process from 'node:process';
+import ts from 'typescript';
+
+let failed = false;
+try {
+  const sourcePath = process.env.NOVAGAME_PROBE_SOURCE;
+  const modulePath = process.env.NOVAGAME_PROBE_MODULE;
+  if (!sourcePath || !modulePath) {
+    throw new Error('configuration');
+  }
+  const source =
+    readFileSync(sourcePath, 'utf8') +
+    '\nexport { registerDynamicSecret as runDynamicSecretTransportProbe };\n';
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: sourcePath,
+    reportDiagnostics: true,
+  });
+  if (
+    transpiled.diagnostics?.some(
+      (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+    )
+  ) {
+    throw new Error('transpile');
+  }
+  writeFileSync(modulePath, transpiled.outputText, 'utf8');
+  const production = await import(
+    `${pathToFileURL(modulePath).href}?probe=${Date.now()}`
+  );
+  const registrations = Array.from({ length: 32 }, (_, index) => {
+    if (index % 2 === 0) {
+      return production.runDynamicSecretTransportProbe(
+        'access',
+        `eyJ${index.toString(36)}.cGF5bG9hZA.c2lnbmF0dXJl`,
+      );
+    }
+    return production.runDynamicSecretTransportProbe(
+      'refresh',
+      Buffer.alloc(32, index + 1).toString('base64url'),
+    );
+  });
+  const registrationResults = await Promise.allSettled(registrations);
+  if (
+    registrationResults.some((result) => result.status !== 'fulfilled')
+  ) {
+    throw new Error('concurrency');
+  }
+
+  process.env.NOVAGAME_E2E_DYNAMIC_SECRET_PIPE =
+    process.env.NOVAGAME_PROBE_MISSING_PIPE;
+  const missingStartedAt = Date.now();
+  let boundedFailure = false;
+  try {
+    await production.runDynamicSecretTransportProbe(
+      'access',
+      'eyJmissing.cGF5bG9hZA.c2lnbmF0dXJl',
+    );
+  } catch (error) {
+    const elapsed = Date.now() - missingStartedAt;
+    const ruleId =
+      error && typeof error === 'object' && 'ruleId' in error
+        ? error.ruleId
+        : undefined;
+    boundedFailure =
+      ruleId === 'dynamic-secret-pipe-timeout' &&
+      elapsed >= 4500 &&
+      elapsed <= 8000;
+  }
+  if (!boundedFailure) {
+    throw new Error('deadline');
+  }
+} catch {
+  failed = true;
+}
+if (failed) {
+  process.exitCode = 1;
+}
+'@
+
+        $nodeArguments = @(
+            "--no-warnings",
+            "--input-type=module",
+            "--eval",
+            $probeSource)
+        $commandPayload = [ordered]@{
+            FilePath = [string]$Toolchain.nodePath
+            Arguments = $nodeArguments
+        } | ConvertTo-Json -Compress
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = (Get-Command "pwsh" -ErrorAction Stop).Source
+        $startInfo.WorkingDirectory = [string]$Toolchain.adminRoot
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        foreach ($argument in @(
+                "-NoProfile",
+                "-Command",
+                '$payload = $env:NOVAGAME_PROBE_COMMAND_PAYLOAD | ConvertFrom-Json -AsHashtable; ' +
+                '$stdoutPath = $env:NOVAGAME_PROBE_STDOUT_PATH; ' +
+                '$stderrPath = $env:NOVAGAME_PROBE_STDERR_PATH; ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_PROBE_COMMAND_PAYLOAD", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_PROBE_STDOUT_PATH", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_PROBE_STDERR_PATH", $null, "Process"); ' +
+                '& ([string]$payload.FilePath) @([string[]]$payload.Arguments) ' +
+                '1> $stdoutPath 2> $stderrPath; exit $LASTEXITCODE'
+            )) {
+            $null = $startInfo.ArgumentList.Add([string]$argument)
+        }
+        $startInfo.Environment["NOVAGAME_E2E_DYNAMIC_SECRET_PIPE"] =
+            [string]$channel.PipeName
+        $startInfo.Environment["NOVAGAME_E2E_DYNAMIC_SECRET_PIPE_KEY"] =
+            [string]$channel.EncodedAuthenticationKey
+        $startInfo.Environment["NOVAGAME_PROBE_SOURCE"] = $sourcePath
+        $startInfo.Environment["NOVAGAME_PROBE_MODULE"] = $probeModulePath
+        $startInfo.Environment["NOVAGAME_PROBE_MISSING_PIPE"] =
+            $missingPipeName
+        $startInfo.Environment["NOVAGAME_PROBE_COMMAND_PAYLOAD"] =
+            $commandPayload
+        $startInfo.Environment["NOVAGAME_PROBE_STDOUT_PATH"] =
+            $probeStandardOutputPath
+        $startInfo.Environment["NOVAGAME_PROBE_STDERR_PATH"] =
+            $probeStandardErrorPath
+
+        $jobHandle = New-NovaGameProcessJob
+        $probeProcess = Start-NovaGameJobProcess `
+            -JobHandle $jobHandle `
+            -TargetStartInfo $startInfo
+        Assert-Condition `
+            $probeProcess.WaitForExit(15000) `
+            "The production dynamic-secret client probe exceeded its deadline."
+        $probeProcess.WaitForExit()
+        $probeProcess.Refresh()
+        Assert-Condition `
+            ((Test-Path -LiteralPath $probeStandardOutputPath -PathType Leaf) -and
+                (Test-Path -LiteralPath $probeStandardErrorPath -PathType Leaf)) `
+            "The production dynamic-secret client probe output files are missing."
+        $standardOutput = [IO.File]::ReadAllText($probeStandardOutputPath)
+        $standardError = [IO.File]::ReadAllText($probeStandardErrorPath)
+        Assert-Condition `
+            ([string]::IsNullOrEmpty($standardOutput) -and
+                [string]::IsNullOrEmpty($standardError)) `
+            "The production dynamic-secret client probe emitted output."
+        Assert-Condition `
+            ($probeProcess.ExitCode -eq 0) `
+            "The production dynamic-secret client probe failed."
+
+        $records = @(
+            $channel.Collector.StopAndSnapshot(
+                [TimeSpan]::FromSeconds(10)))
+        $channelStopped = $true
+        Assert-Condition `
+            ($records.Count -eq 32) `
+            "The production dynamic-secret client concurrency probe was incomplete."
+        $recordKinds = @(
+            $records |
+                ForEach-Object { [string][int]$_.Kind } |
+                Sort-Object -Unique)
+        Assert-StringSet `
+            -Expected @("1", "2") `
+            -Actual $recordKinds `
+            -Message "The production dynamic-secret client probe did not register both token kinds."
+    }
+    catch {
+        $operationError = $_.Exception.Message
+    }
+    finally {
+        if ($jobHandle -ne [IntPtr]::Zero) {
+            try {
+                Close-NovaGameProcessJob -JobHandle $jobHandle
+                $jobHandle = [IntPtr]::Zero
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to close the dynamic-secret client probe job.")
+            }
+        }
+        if ($null -ne $probeProcess) {
+            try {
+                $probeProcess.Dispose()
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to dispose the dynamic-secret client probe process.")
+            }
+        }
+        if ($null -ne $channel) {
+            if (-not $channelStopped) {
+                try {
+                    $null = $channel.Collector.StopAndSnapshot(
+                        [TimeSpan]::FromSeconds(10))
+                    $channelStopped = $true
+                }
+                catch {
+                    $null = $cleanupErrors.Add(
+                        "Failed to stop the dynamic-secret client probe collector.")
+                }
+            }
+            try {
+                $channel.Collector.Dispose()
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to dispose the dynamic-secret client probe collector.")
+            }
+        }
+        foreach ($probePath in @(
+                $probeModulePath,
+                $probeStandardOutputPath,
+                $probeStandardErrorPath
+            )) {
+            try {
+                Remove-Item `
+                    -LiteralPath $probePath `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $probePath) {
+                    throw "probe residue"
+                }
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to remove a dynamic-secret client probe path.")
+            }
+        }
+    }
+
+    if ($null -ne $operationError) {
+        if ($cleanupErrors.Count -gt 0) {
+            throw "$operationError Cleanup errors: $($cleanupErrors -join ' ')"
+        }
+        throw $operationError
+    }
+    if ($cleanupErrors.Count -gt 0) {
+        throw "Dynamic-secret client probe cleanup failed: $($cleanupErrors -join ' ')"
+    }
+}
+
 function Get-AvailableLoopbackPort {
     $listener = [System.Net.Sockets.TcpListener]::new(
         [System.Net.IPAddress]::Loopback,
@@ -728,6 +2736,770 @@ function Stop-ProcessTree {
     }
 }
 
+function Initialize-NovaGameProcessJobType {
+    if ("NovaGame.Verification.NativeJob" -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @"
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+namespace NovaGame.Verification
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BasicLimitInformation
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ExtendedLimitInformation
+    {
+        public BasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    public static class NativeJob
+    {
+        public const int JobObjectBasicProcessIdList = 3;
+        public const int JobObjectExtendedLimitInformation = 9;
+        public const uint JobObjectLimitKillOnJobClose = 0x00002000;
+        public const uint CreateSuspended = 0x00000004;
+        public const uint CreateNoWindow = 0x08000000;
+        public const uint CreateUnicodeEnvironment = 0x00000400;
+        public const uint WaitObject0 = 0x00000000;
+        public const uint WaitTimeout = 0x00000102;
+        public const uint WaitFailed = 0xFFFFFFFF;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct StartupInfo
+        {
+            public int Size;
+            public string Reserved;
+            public string Desktop;
+            public string Title;
+            public int X;
+            public int Y;
+            public int XSize;
+            public int YSize;
+            public int XCountChars;
+            public int YCountChars;
+            public int FillAttribute;
+            public int Flags;
+            public short ShowWindow;
+            public short Reserved2Count;
+            public IntPtr Reserved2;
+            public IntPtr StandardInput;
+            public IntPtr StandardOutput;
+            public IntPtr StandardError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct ProcessInformation
+        {
+            public IntPtr Process;
+            public IntPtr Thread;
+            public int ProcessId;
+            public int ThreadId;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr CreateJobObject(IntPtr jobAttributes, string name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetInformationJobObject(
+            IntPtr job,
+            int informationClass,
+            ref ExtendedLimitInformation information,
+            uint informationLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool QueryInformationJobObject(
+            IntPtr job,
+            int informationClass,
+            IntPtr information,
+            uint informationLength,
+            out uint returnLength);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CreateProcess(
+            string applicationName,
+            string commandLine,
+            IntPtr processAttributes,
+            IntPtr threadAttributes,
+            [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
+            uint creationFlags,
+            IntPtr environment,
+            string currentDirectory,
+            ref StartupInfo startupInfo,
+            out ProcessInformation processInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern uint ResumeThread(IntPtr thread);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern uint WaitForSingleObject(
+            IntPtr handle,
+            uint milliseconds);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CloseHandle(IntPtr handle);
+    }
+}
+"@
+}
+
+function New-NovaGameProcessJob {
+    param([switch]$InjectConfigurationFailure)
+
+    Initialize-NovaGameProcessJobType
+    $handle = [NovaGame.Verification.NativeJob]::CreateJobObject(
+        [IntPtr]::Zero,
+        $null)
+    if ($handle -eq [IntPtr]::Zero) {
+        throw [System.ComponentModel.Win32Exception]::new(
+            [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+            "Unable to create the Admin management process job.")
+    }
+
+    try {
+        $limits = [NovaGame.Verification.ExtendedLimitInformation]::new()
+        $basicLimits = [NovaGame.Verification.BasicLimitInformation]::new()
+        $basicLimits.LimitFlags =
+            [NovaGame.Verification.NativeJob]::JobObjectLimitKillOnJobClose
+        $limits.BasicLimitInformation = $basicLimits
+        $limitSize = [Runtime.InteropServices.Marshal]::SizeOf($limits)
+        if (-not [NovaGame.Verification.NativeJob]::SetInformationJobObject(
+                $handle,
+                [NovaGame.Verification.NativeJob]::JobObjectExtendedLimitInformation,
+                [ref]$limits,
+                [uint32]$limitSize)) {
+            throw [System.ComponentModel.Win32Exception]::new(
+                [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                "Unable to configure the Admin management process job.")
+        }
+        if ($InjectConfigurationFailure) {
+            throw [InvalidOperationException]::new(
+                "Injected Admin management process-job configuration failure.")
+        }
+    }
+    catch {
+        $configurationError = $_.Exception
+        try {
+            Close-NovaGameProcessJob -JobHandle $handle
+        }
+        catch {
+            throw "$($configurationError.Message) Failed to release the unconfigured Admin management process job: $($_.Exception.Message)"
+        }
+        throw $configurationError
+    }
+
+    return $handle
+}
+
+function Close-NovaGameNativeHandleVerified {
+    param(
+        [Parameter(Mandatory)][IntPtr]$Handle,
+        [Parameter(Mandatory)]
+        [ValidateSet("process", "thread")]
+        [string]$Kind,
+        [switch]$InjectFailure
+    )
+
+    if ($Handle -eq [IntPtr]::Zero) {
+        return
+    }
+    if (-not [NovaGame.Verification.NativeJob]::CloseHandle($Handle)) {
+        throw [System.ComponentModel.Win32Exception]::new(
+            [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+            "Unable to close the native Admin management $Kind handle.")
+    }
+    if ($InjectFailure) {
+        throw [InvalidOperationException]::new(
+            "Injected native Admin management $Kind-handle close failure.")
+    }
+}
+
+function Start-NovaGameJobProcess {
+    param(
+        [Parameter(Mandatory)][IntPtr]$JobHandle,
+        [Parameter(Mandatory)]
+        [System.Diagnostics.ProcessStartInfo]$TargetStartInfo,
+        [switch]$InjectThreadHandleCloseFailure,
+        [switch]$InjectProcessHandleCloseFailure
+    )
+
+    Assert-Condition `
+        (-not $TargetStartInfo.RedirectStandardOutput -and
+            -not $TargetStartInfo.RedirectStandardError) `
+        "Job-owned process output must be redirected by the target command."
+
+    function ConvertTo-WindowsCommandLineArgument {
+        param([AllowEmptyString()][string]$Value)
+
+        if ($Value -notmatch '[\s"]') {
+            return $Value
+        }
+        $builder = [System.Text.StringBuilder]::new()
+        $null = $builder.Append('"')
+        $backslashCount = 0
+        foreach ($character in $Value.ToCharArray()) {
+            if ($character -eq '\') {
+                $backslashCount++
+                continue
+            }
+            if ($character -eq '"') {
+                $null = $builder.Append(('\' * (($backslashCount * 2) + 1)))
+                $null = $builder.Append('"')
+                $backslashCount = 0
+                continue
+            }
+            if ($backslashCount -gt 0) {
+                $null = $builder.Append(('\' * $backslashCount))
+                $backslashCount = 0
+            }
+            $null = $builder.Append($character)
+        }
+        if ($backslashCount -gt 0) {
+            $null = $builder.Append(('\' * ($backslashCount * 2)))
+        }
+        $null = $builder.Append('"')
+        return $builder.ToString()
+    }
+
+    $applicationPath = [System.IO.Path]::GetFullPath(
+        [string]$TargetStartInfo.FileName)
+    $commandLine = @(
+        (ConvertTo-WindowsCommandLineArgument -Value $applicationPath)
+        $TargetStartInfo.ArgumentList |
+            ForEach-Object {
+                ConvertTo-WindowsCommandLineArgument -Value ([string]$_)
+            }
+    ) -join ' '
+    $environmentBlockBuilder = [System.Text.StringBuilder]::new()
+    foreach ($environmentEntry in @(
+            $TargetStartInfo.Environment.GetEnumerator() |
+                Sort-Object Key)) {
+        $null = $environmentBlockBuilder.Append(
+            "$($environmentEntry.Key)=$($environmentEntry.Value)")
+        $null = $environmentBlockBuilder.Append([char]0)
+    }
+    $null = $environmentBlockBuilder.Append([char]0)
+    $environmentPointer = [Runtime.InteropServices.Marshal]::StringToHGlobalUni(
+        $environmentBlockBuilder.ToString())
+    $startupInfo = [NovaGame.Verification.NativeJob+StartupInfo]::new()
+    $startupInfo.Size = [Runtime.InteropServices.Marshal]::SizeOf($startupInfo)
+    $processInformation = [NovaGame.Verification.NativeJob+ProcessInformation]::new()
+    $process = $null
+    $launchError = $null
+    $terminationError = $null
+    $launchCleanupErrors = [System.Collections.Generic.List[string]]::new()
+    try {
+        $creationFlags =
+            [NovaGame.Verification.NativeJob]::CreateSuspended -bor
+            [NovaGame.Verification.NativeJob]::CreateNoWindow -bor
+            [NovaGame.Verification.NativeJob]::CreateUnicodeEnvironment
+        if (-not [NovaGame.Verification.NativeJob]::CreateProcess(
+                $applicationPath,
+                $commandLine,
+                [IntPtr]::Zero,
+                [IntPtr]::Zero,
+                $false,
+                $creationFlags,
+                $environmentPointer,
+                [string]$TargetStartInfo.WorkingDirectory,
+                [ref]$startupInfo,
+                [ref]$processInformation)) {
+            throw [System.ComponentModel.Win32Exception]::new(
+                [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                "Unable to create a suspended Admin management process.")
+        }
+        if (-not [NovaGame.Verification.NativeJob]::AssignProcessToJobObject(
+                $JobHandle,
+                $processInformation.Process)) {
+            throw [System.ComponentModel.Win32Exception]::new(
+                [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                "Unable to assign suspended process '$($processInformation.ProcessId)' to the Admin management process job.")
+        }
+        $process = [System.Diagnostics.Process]::GetProcessById(
+            $processInformation.ProcessId)
+        # Cache a queryable handle before a fast child can exit.
+        $null = $process.SafeHandle
+        if ([NovaGame.Verification.NativeJob]::ResumeThread(
+                $processInformation.Thread) -eq [uint32]::MaxValue) {
+            throw [System.ComponentModel.Win32Exception]::new(
+                [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                "Unable to resume Admin management process '$($processInformation.ProcessId)'.")
+        }
+    }
+    catch {
+        $launchError = $_
+        try {
+            if ($processInformation.Process -ne [IntPtr]::Zero) {
+                $waitResult = [NovaGame.Verification.NativeJob]::WaitForSingleObject(
+                    $processInformation.Process,
+                    0)
+                if ($waitResult -ne
+                        [NovaGame.Verification.NativeJob]::WaitObject0) {
+                    if ($waitResult -eq
+                            [NovaGame.Verification.NativeJob]::WaitFailed) {
+                        throw [System.ComponentModel.Win32Exception]::new(
+                            [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                            "Unable to inspect the failed suspended Admin management process.")
+                    }
+                    if (-not [NovaGame.Verification.NativeJob]::TerminateProcess(
+                            $processInformation.Process,
+                            1)) {
+                        throw [System.ComponentModel.Win32Exception]::new(
+                            [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                            "Unable to terminate the failed suspended Admin management process.")
+                    }
+                    $waitResult =
+                        [NovaGame.Verification.NativeJob]::WaitForSingleObject(
+                            $processInformation.Process,
+                            10000)
+                    if ($waitResult -ne
+                            [NovaGame.Verification.NativeJob]::WaitObject0) {
+                        if ($waitResult -eq
+                                [NovaGame.Verification.NativeJob]::WaitFailed) {
+                            throw [System.ComponentModel.Win32Exception]::new(
+                                [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                                "Unable to inspect termination of the failed suspended Admin management process.")
+                        }
+                        throw "The failed suspended Admin management process did not terminate within 10 seconds."
+                    }
+                }
+            }
+        }
+        catch {
+            $terminationError = $_
+        }
+        finally {
+            if ($null -ne $process) {
+                try {
+                    $process.Dispose()
+                }
+                catch {
+                    $null = $launchCleanupErrors.Add(
+                        "Managed process handle disposal failed: $($_.Exception.Message)")
+                }
+                $process = $null
+            }
+        }
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::FreeHGlobal($environmentPointer)
+        if ($processInformation.Thread -ne [IntPtr]::Zero) {
+            try {
+                Close-NovaGameNativeHandleVerified `
+                    -Handle $processInformation.Thread `
+                    -Kind "thread" `
+                    -InjectFailure:$InjectThreadHandleCloseFailure
+            }
+            catch {
+                $null = $launchCleanupErrors.Add($_.Exception.Message)
+            }
+        }
+        if ($processInformation.Process -ne [IntPtr]::Zero) {
+            try {
+                Close-NovaGameNativeHandleVerified `
+                    -Handle $processInformation.Process `
+                    -Kind "process" `
+                    -InjectFailure:$InjectProcessHandleCloseFailure
+            }
+            catch {
+                $null = $launchCleanupErrors.Add($_.Exception.Message)
+            }
+        }
+    }
+
+    if ($launchCleanupErrors.Count -gt 0) {
+        if ($null -ne $process) {
+            try {
+                $process.Dispose()
+            }
+            catch {
+                $null = $launchCleanupErrors.Add(
+                    "Managed process handle disposal failed: $($_.Exception.Message)")
+            }
+            $process = $null
+        }
+        $launchContext = if ($null -ne $launchError) {
+            "Launch error: $($launchError.Exception.Message)"
+        }
+        else {
+            "Launch reached native-handle cleanup."
+        }
+        $terminationContext = if ($null -ne $terminationError) {
+            " Native termination error: $($terminationError.Exception.Message)"
+        }
+        else {
+            ""
+        }
+        throw "$launchContext$terminationContext Native handle cleanup errors: $($launchCleanupErrors -join ' ')"
+    }
+    if ($null -ne $terminationError) {
+        throw "Admin management process launch failed: $($launchError.Exception.Message) Native termination could not be verified: $($terminationError.Exception.Message)"
+    }
+    if ($null -ne $launchError) {
+        throw $launchError
+    }
+
+    return $process
+}
+
+function Get-NovaGameJobProcessIds {
+    param([Parameter(Mandatory)][IntPtr]$JobHandle)
+
+    $capacity = 4096
+    $bufferLength = 8 + ([IntPtr]::Size * $capacity)
+    $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal($bufferLength)
+    try {
+        $returnLength = [uint32]0
+        if (-not [NovaGame.Verification.NativeJob]::QueryInformationJobObject(
+                $JobHandle,
+                [NovaGame.Verification.NativeJob]::JobObjectBasicProcessIdList,
+                $buffer,
+                [uint32]$bufferLength,
+                [ref]$returnLength)) {
+            throw [System.ComponentModel.Win32Exception]::new(
+                [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+                "Unable to query the Admin management process job.")
+        }
+        $assignedProcessCount = [Runtime.InteropServices.Marshal]::ReadInt32(
+            $buffer,
+            0)
+        $listedProcessCount = [Runtime.InteropServices.Marshal]::ReadInt32(
+            $buffer,
+            4)
+        Assert-Condition `
+            ($assignedProcessCount -eq $listedProcessCount -and
+                $listedProcessCount -le $capacity) `
+            "Admin management process job exceeded its bounded identity snapshot."
+        return @(
+            for ($index = 0; $index -lt $listedProcessCount; $index++) {
+                $offset = 8 + ([IntPtr]::Size * $index)
+                if ([IntPtr]::Size -eq 8) {
+                    [int][Runtime.InteropServices.Marshal]::ReadInt64(
+                        $buffer,
+                        $offset)
+                }
+                else {
+                    [Runtime.InteropServices.Marshal]::ReadInt32(
+                        $buffer,
+                        $offset)
+                }
+            })
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::FreeHGlobal($buffer)
+    }
+}
+
+function Get-NovaGameJobProcessIdentities {
+    param([Parameter(Mandatory)][IntPtr]$JobHandle)
+
+    $processIds = @(Get-NovaGameJobProcessIds -JobHandle $JobHandle)
+    $processRows = @(
+        Get-CimInstance Win32_Process -ErrorAction Stop |
+            Where-Object { [int]$_.ProcessId -in $processIds })
+    Assert-Condition `
+        ($processRows.Count -eq $processIds.Count) `
+        "Admin management process job identity snapshot was incomplete."
+    return @(
+        foreach ($processId in $processIds) {
+            $processRow = $processRows |
+                Where-Object { [int]$_.ProcessId -eq $processId } |
+                Select-Object -First 1
+            [pscustomobject]@{
+                Id = [int]$processRow.ProcessId
+                CreationDate = ([DateTime]$processRow.CreationDate).ToUniversalTime()
+            }
+        })
+}
+
+function Close-NovaGameProcessJob {
+    param(
+        [Parameter(Mandatory)][IntPtr]$JobHandle,
+        [switch]$InjectPrimaryCloseFailure
+    )
+
+    $primaryCloseError = $null
+    if (-not $InjectPrimaryCloseFailure) {
+        if ([NovaGame.Verification.NativeJob]::CloseHandle($JobHandle)) {
+            return
+        }
+        $primaryCloseError = [System.ComponentModel.Win32Exception]::new(
+            [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+            "Unable to close the Admin management process job.")
+    }
+    else {
+        $primaryCloseError = [InvalidOperationException]::new(
+            "Injected Admin management process-job close failure.")
+    }
+
+    if (-not [NovaGame.Verification.NativeJob]::TerminateJobObject(
+            $JobHandle,
+            1)) {
+        $terminationError = [System.ComponentModel.Win32Exception]::new(
+            [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+            "Unable to terminate the Admin management process job after close failure.")
+        throw "$($primaryCloseError.Message) $($terminationError.Message)"
+    }
+
+    $terminationDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $remainingProcessIds = @(
+            Get-NovaGameJobProcessIds -JobHandle $JobHandle)
+        if ($remainingProcessIds.Count -gt 0 -and
+            [DateTime]::UtcNow -lt $terminationDeadline) {
+            Start-Sleep -Milliseconds 100
+        }
+    } while ($remainingProcessIds.Count -gt 0 -and
+        [DateTime]::UtcNow -lt $terminationDeadline)
+    Assert-Condition `
+        ($remainingProcessIds.Count -eq 0) `
+        "Admin management process-job fallback did not reach zero owned processes."
+
+    if (-not [NovaGame.Verification.NativeJob]::CloseHandle($JobHandle)) {
+        $fallbackCloseError = [System.ComponentModel.Win32Exception]::new(
+            [Runtime.InteropServices.Marshal]::GetLastWin32Error(),
+            "Unable to close the terminated Admin management process job.")
+        throw "$($primaryCloseError.Message) $($fallbackCloseError.Message)"
+    }
+}
+
+function Test-NovaGameProcessJobLifecycle {
+    $jobHandle = [IntPtr]::Zero
+    $probeProcess = $null
+    $probeIdentities = @()
+    $fallbackJobHandle = [IntPtr]::Zero
+    $fallbackProbeProcess = $null
+    try {
+        $configurationFailureRejected = $false
+        try {
+            $null = New-NovaGameProcessJob -InjectConfigurationFailure
+        }
+        catch {
+            $configurationFailureRejected = $_.Exception.Message.Equals(
+                "Injected Admin management process-job configuration failure.",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $configurationFailureRejected `
+            "Admin management process-job configuration failure did not complete verified handle closure."
+
+        $jobHandle = New-NovaGameProcessJob
+        $probeStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $probeStartInfo.FileName = (Get-Command "pwsh" -ErrorAction Stop).Source
+        $probeStartInfo.WorkingDirectory = $repositoryRoot
+        $probeStartInfo.UseShellExecute = $false
+        $probeStartInfo.CreateNoWindow = $true
+        $null = $probeStartInfo.ArgumentList.Add("-NoProfile")
+        $null = $probeStartInfo.ArgumentList.Add("-Command")
+        $null = $probeStartInfo.ArgumentList.Add(
+            '$child = Start-Process -FilePath pwsh -ArgumentList @(' +
+            "'-NoProfile', '-Command', 'Start-Sleep -Seconds 30') " +
+            '-WindowStyle Hidden -PassThru; ' +
+            'while ($null -eq (Get-Process -Id $child.Id ' +
+            '-ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 10 }; ' +
+            'exit 7')
+        $probeProcess = Start-NovaGameJobProcess `
+            -JobHandle $jobHandle `
+            -TargetStartInfo $probeStartInfo
+        Assert-Condition `
+            $probeProcess.WaitForExit(10000) `
+            "Admin management process-job launcher did not exit."
+        $probeProcess.Refresh()
+        Assert-Condition `
+            ($probeProcess.ExitCode -eq 7) `
+            "Admin management process-job launcher did not preserve its exit code."
+        $probeIdentities = @(
+            Get-NovaGameJobProcessIdentities -JobHandle $jobHandle)
+        Assert-Condition `
+            ($probeIdentities.Count -gt 0 -and
+                $probeIdentities.Id -notcontains $probeProcess.Id) `
+            "Admin management process-job descendant did not remain owned after its launcher exited."
+        Close-NovaGameProcessJob -JobHandle $jobHandle
+        $jobHandle = [IntPtr]::Zero
+        $probeExitDeadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $remainingProbeIdentities = @(
+                foreach ($probeIdentity in $probeIdentities) {
+                    $probeRow = Get-CimInstance `
+                        Win32_Process `
+                        -Filter "ProcessId = $([int]$probeIdentity.Id)" `
+                        -ErrorAction SilentlyContinue
+                    if ($null -ne $probeRow -and
+                        ([DateTime]$probeRow.CreationDate).ToUniversalTime() -eq
+                            [DateTime]$probeIdentity.CreationDate) {
+                        $probeIdentity
+                    }
+                })
+            if ($remainingProbeIdentities.Count -gt 0 -and
+                [DateTime]::UtcNow -lt $probeExitDeadline) {
+                Start-Sleep -Milliseconds 100
+            }
+        } while ($remainingProbeIdentities.Count -gt 0 -and
+            [DateTime]::UtcNow -lt $probeExitDeadline)
+        Assert-Condition `
+            ($remainingProbeIdentities.Count -eq 0) `
+            "Admin management descendant process identity survived Job Object closure."
+
+        $fallbackJobHandle = New-NovaGameProcessJob
+        $fallbackStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $fallbackStartInfo.FileName =
+            (Get-Command "pwsh" -ErrorAction Stop).Source
+        $fallbackStartInfo.WorkingDirectory = $repositoryRoot
+        $fallbackStartInfo.UseShellExecute = $false
+        $fallbackStartInfo.CreateNoWindow = $true
+        $null = $fallbackStartInfo.ArgumentList.Add("-NoProfile")
+        $null = $fallbackStartInfo.ArgumentList.Add("-Command")
+        $null = $fallbackStartInfo.ArgumentList.Add("Start-Sleep -Seconds 30")
+        $fallbackProbeProcess = Start-NovaGameJobProcess `
+            -JobHandle $fallbackJobHandle `
+            -TargetStartInfo $fallbackStartInfo
+        Assert-Condition `
+            (@(Get-NovaGameJobProcessIds `
+                -JobHandle $fallbackJobHandle).Count -eq 1) `
+            "The process-job fallback probe did not own its live child."
+        Close-NovaGameProcessJob `
+            -JobHandle $fallbackJobHandle `
+            -InjectPrimaryCloseFailure
+        $fallbackJobHandle = [IntPtr]::Zero
+        Assert-Condition `
+            $fallbackProbeProcess.WaitForExit(10000) `
+            "The process-job fallback did not terminate its live child."
+
+        $assignmentFailureMarker =
+            "novagame-job-assignment-$([Guid]::NewGuid().ToString('N'))"
+        $assignmentFailureStartInfo =
+            [System.Diagnostics.ProcessStartInfo]::new()
+        $assignmentFailureStartInfo.FileName =
+            (Get-Command "pwsh" -ErrorAction Stop).Source
+        $assignmentFailureStartInfo.WorkingDirectory = $repositoryRoot
+        $assignmentFailureStartInfo.UseShellExecute = $false
+        $assignmentFailureStartInfo.CreateNoWindow = $true
+        $null = $assignmentFailureStartInfo.ArgumentList.Add("-NoProfile")
+        $null = $assignmentFailureStartInfo.ArgumentList.Add("-Command")
+        $null = $assignmentFailureStartInfo.ArgumentList.Add(
+            "Start-Sleep -Seconds 30 # $assignmentFailureMarker")
+        $assignmentFailureRejected = $false
+        try {
+            $null = Start-NovaGameJobProcess `
+                -JobHandle ([IntPtr](-1)) `
+                -TargetStartInfo $assignmentFailureStartInfo `
+                -InjectThreadHandleCloseFailure `
+                -InjectProcessHandleCloseFailure
+        }
+        catch {
+            $assignmentFailureMessage = $_.Exception.Message
+            $assignmentFailureRejected =
+                $assignmentFailureMessage.Contains(
+                    "Unable to assign suspended process",
+                    [StringComparison]::Ordinal) -and
+                $assignmentFailureMessage.Contains(
+                    "Injected native Admin management thread-handle close failure.",
+                    [StringComparison]::Ordinal) -and
+                $assignmentFailureMessage.Contains(
+                    "Injected native Admin management process-handle close failure.",
+                    [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $assignmentFailureRejected `
+            "Admin management process-job launcher lost launch or native-handle cleanup context."
+        $assignmentFailureDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $orphanedAssignmentProcesses = @(
+                Get-CimInstance Win32_Process -ErrorAction Stop |
+                    Where-Object {
+                        ([string]$_.CommandLine).Contains(
+                            $assignmentFailureMarker,
+                            [StringComparison]::Ordinal)
+                    })
+            if ($orphanedAssignmentProcesses.Count -gt 0 -and
+                [DateTime]::UtcNow -lt $assignmentFailureDeadline) {
+                Start-Sleep -Milliseconds 100
+            }
+        } while ($orphanedAssignmentProcesses.Count -gt 0 -and
+            [DateTime]::UtcNow -lt $assignmentFailureDeadline)
+        Assert-Condition `
+            ($orphanedAssignmentProcesses.Count -eq 0) `
+            "A suspended Admin management process survived Job assignment failure."
+    }
+    finally {
+        if ($jobHandle -ne [IntPtr]::Zero) {
+            Close-NovaGameProcessJob -JobHandle $jobHandle
+            $jobHandle = [IntPtr]::Zero
+        }
+        if ($fallbackJobHandle -ne [IntPtr]::Zero) {
+            Close-NovaGameProcessJob -JobHandle $fallbackJobHandle
+            $fallbackJobHandle = [IntPtr]::Zero
+        }
+        if ($null -ne $probeProcess) {
+            try {
+                if (-not $probeProcess.HasExited) {
+                    $probeProcess.Kill($true)
+                }
+            }
+            catch {
+            }
+            $probeProcess.Dispose()
+        }
+        if ($null -ne $fallbackProbeProcess) {
+            try {
+                if (-not $fallbackProbeProcess.HasExited) {
+                    $fallbackProbeProcess.Kill($true)
+                }
+            }
+            catch {
+            }
+            $fallbackProbeProcess.Dispose()
+        }
+    }
+}
+
 function Resolve-E2EBrowserChannel {
     $configuredChannel = [Environment]::GetEnvironmentVariable(
         "NOVAGAME_E2E_BROWSER_CHANNEL",
@@ -778,6 +3550,7 @@ function Test-Documentation {
         "docs/goals/m1.md",
         "docs/goals/m2.md",
         "docs/goals/m3.md",
+        "docs/goals/m3.5.md",
         "samples/SwordMaster/docs/equipment-attribute-effect.md",
         "samples/SwordMaster/docs/player-equipment-grant.md",
         "samples/SwordMaster/docs/player-assets-m1-06-evidence.md",
@@ -880,6 +3653,18 @@ function Test-Documentation {
             ExpectedStageCount = 8
             ExitSection = "## M3 Exit Criteria"
             RequiredDependency = "novagame-m2-complete"
+        },
+        [pscustomobject]@{
+            Milestone = "M3.5"
+            Path = "docs/goals/m3.5.md"
+            ExpectedId = "novagame-m3.5"
+            StageIdPrefix = "M35"
+            FirstStageNumber = 1
+            FinalStageId = "M35-08"
+            StagePattern = '^## M35-\d{2} - '
+            ExpectedStageCount = 8
+            ExitSection = "## M3.5 Exit Criteria"
+            RequiredDependency = "novagame-m3-complete"
         }
     )
     $allowedGoalStatuses = @(
@@ -1237,6 +4022,861 @@ function Test-Documentation {
     $m1Goal = $goalRecords["M1"]
     $m2Goal = $goalRecords["M2"]
     $m3Goal = $goalRecords["M3"]
+    $m35Goal = $goalRecords["M3.5"]
+
+    foreach ($requiredM35Metadata in @(
+        'capability: administrator-management',
+        'capability_owner: novagame',
+        'owning_domain: Operations/AdminAccess',
+        'authorization_reference: user-request-2026-08-13-start-admin-management',
+        'baseline_commit: 42d1ffe83770571d8f48cdb58f35bfc591a4bd1c',
+        'extraction_authorized: false',
+        'novacore_changes_authorized: false'
+    )) {
+        Assert-Condition `
+            $m35Goal.Metadata.Contains($requiredM35Metadata) `
+            "M3.5 goal metadata is missing '$requiredM35Metadata'."
+    }
+    Assert-Condition `
+        ($m3Goal.Status -eq "complete") `
+        "M3.5 requires the completed M3 baseline."
+
+    $m35TaskRegisterMatches = [regex]::Matches(
+        $m35Goal.Content,
+        '(?ms)^## Active Task Register\r?\n(?<body>.*?)(?=^##\s+|\z)')
+    Assert-Condition `
+        ($m35TaskRegisterMatches.Count -eq 1) `
+        "M3.5 must contain exactly one Active Task Register."
+    $m35TaskRegister =
+        $m35TaskRegisterMatches[0].Groups["body"].Value
+    $m35TaskRows = [regex]::Matches(
+        $m35TaskRegister,
+        '(?m)^\|[ \t]*(?<id>M35-\d{2}-T\d{2})[ \t]*\|[ \t]*(?<stage>M35-\d{2})[ \t]*\|[^\r\n]*\|[ \t]*(?<status>pending|in_progress|blocked|complete)[ \t]*\|[ \t]*$')
+    Assert-Condition `
+        ($m35TaskRows.Count -gt 0) `
+        "M3.5 Active Task Register must contain executable tasks."
+    $duplicateM35TaskIds = @(
+        $m35TaskRows |
+            Group-Object { $_.Groups["id"].Value } |
+            Where-Object Count -gt 1)
+    Assert-Condition `
+        ($duplicateM35TaskIds.Count -eq 0) `
+        "M3.5 Active Task Register contains duplicate task identifiers."
+
+    $expectedM35TaskIds = @(
+        "M35-01-T01", "M35-01-T02", "M35-01-T03", "M35-01-T04",
+        "M35-02-T01", "M35-02-T02", "M35-02-T03", "M35-02-T04",
+        "M35-02-T05", "M35-02-T06",
+        "M35-03-T01", "M35-03-T02", "M35-03-T03", "M35-03-T04",
+        "M35-04-T01", "M35-04-T02", "M35-04-T03", "M35-04-T04",
+        "M35-04-T05", "M35-04-T06",
+        "M35-05-T01", "M35-05-T02", "M35-05-T03", "M35-05-T04",
+        "M35-05-T05", "M35-05-T06",
+        "M35-06-T01", "M35-06-T02", "M35-06-T03", "M35-06-T04",
+        "M35-07-T01", "M35-07-T02", "M35-07-T03", "M35-07-T04",
+        "M35-08-T01", "M35-08-T02", "M35-08-T03"
+    )
+    $actualM35TaskIds = @(
+        $m35TaskRows | ForEach-Object { $_.Groups["id"].Value })
+    Assert-Condition `
+        ($actualM35TaskIds.Count -eq 37) `
+        "M3.5 Active Task Register must contain exactly 37 tasks."
+    for ($m35TaskIndex = 0;
+        $m35TaskIndex -lt $expectedM35TaskIds.Count;
+        $m35TaskIndex++) {
+        Assert-Condition `
+            ($actualM35TaskIds[$m35TaskIndex] -eq
+                $expectedM35TaskIds[$m35TaskIndex]) `
+            "M3.5 task order differs at index $m35TaskIndex."
+    }
+
+    $m35TaskStatuses = @{}
+    foreach ($m35TaskRow in $m35TaskRows) {
+        $m35TaskStatuses[$m35TaskRow.Groups["id"].Value] =
+            $m35TaskRow.Groups["status"].Value
+    }
+    Assert-Condition `
+        ([regex]::IsMatch(
+            $m35Goal.Content,
+            '(?m)^\|[ \t]*M35-02-T03[ \t]*\|[ \t]*M35-02[ \t]*\|[ \t]*Persistence[ \t]*\|[^\r\n]*\|[ \t]*M35-02-T02[ \t]*\|')) `
+        "M35-02-T03 must retain M35-02-T02 as its prerequisite."
+    Assert-Condition `
+        ([regex]::IsMatch(
+            $m35Goal.Content,
+            '(?m)^\|[ \t]*M35-04-T01[ \t]*\|[ \t]*M35-04[ \t]*\|[ \t]*Persistence[ \t]*\|[^\r\n]*all three frozen receipt kinds[^\r\n]*\|')) `
+        "M35-04-T01 must implement all three frozen receipt kinds."
+
+    $expectedM35ContractHeadings = @(
+        "## M35-02 Frozen Domain And Security Contract",
+        "## M35-02 Frozen Application And HTTP Contract",
+        "## M35-02 Frozen MySQL Contract",
+        "## M35-02 Frozen Vben And Browser Contract",
+        "## M35-02 Frozen Verification Contract"
+    )
+    $actualM35ContractHeadings = @(
+        [regex]::Matches(
+            $m35Goal.Content,
+            '(?m)^## M35-02 Frozen [^\r\n]+ Contract$') |
+            ForEach-Object { $_.Value })
+    Assert-Condition `
+        ($actualM35ContractHeadings.Count -eq
+            $expectedM35ContractHeadings.Count) `
+        "M35-02 must contain exactly five frozen contract sections."
+    for ($m35ContractIndex = 0;
+        $m35ContractIndex -lt $expectedM35ContractHeadings.Count;
+        $m35ContractIndex++) {
+        Assert-Condition `
+            ($actualM35ContractHeadings[$m35ContractIndex] -eq
+                $expectedM35ContractHeadings[$m35ContractIndex]) `
+            "M35-02 frozen contract headings must remain exact and ordered."
+    }
+    Assert-Condition `
+        (-not [regex]::IsMatch(
+            $m35Goal.Content,
+            '(?im)\b(?:TODO|TBD|FIXME)\b|to be decided|<placeholder>')) `
+        "M3.5 goal contains an unresolved design marker."
+    Assert-Condition `
+        (-not $m35Goal.Content.Contains(
+            "generate or mechanically verify",
+            [StringComparison]::OrdinalIgnoreCase)) `
+        "M3.5 must retain the single frozen TypeScript contract-generation workflow."
+
+    if ($m35TaskStatuses["M35-02-T05"] -in @(
+            "in_progress", "blocked", "complete")) {
+        $m35VerificationContractMatches = [regex]::Matches(
+            $m35Goal.Content,
+            '(?ms)^## M35-02 Frozen Verification Contract\r?\n(?<body>.*?)(?=^##\s+|\z)')
+        Assert-Condition `
+            ($m35VerificationContractMatches.Count -eq 1) `
+            "M3.5 must contain one frozen verification contract."
+        $m35VerificationContract =
+            $m35VerificationContractMatches[0].Groups["body"].Value
+        $expectedM35VerificationHeadings = @(
+            "### Evidence Rules",
+            "### Requirement-To-Evidence Contract",
+            "### Focused Verification Commands",
+            "### Real Acceptance And Cleanup",
+            "### Ordered Cumulative Verification"
+        )
+        $actualM35VerificationHeadings = @(
+            [regex]::Matches(
+                $m35VerificationContract,
+                '(?m)^### [^\r\n]+$') |
+                ForEach-Object { $_.Value })
+        Assert-Condition `
+            ($actualM35VerificationHeadings.Count -eq
+                $expectedM35VerificationHeadings.Count) `
+            "M3.5 verification contract must contain exactly five subsections."
+        for ($m35HeadingIndex = 0;
+            $m35HeadingIndex -lt $expectedM35VerificationHeadings.Count;
+            $m35HeadingIndex++) {
+            Assert-Condition `
+                ($actualM35VerificationHeadings[$m35HeadingIndex] -eq
+                    $expectedM35VerificationHeadings[$m35HeadingIndex]) `
+                "M3.5 verification contract subsections must remain exact and ordered."
+        }
+
+        $m35EvidenceRows = [regex]::Matches(
+            $m35VerificationContract,
+            '(?m)^\|[ \t]*(?<id>M35-EV-\d{2})[ \t]*\|[ \t]*(?<requirement>[^|\r\n]+?)[ \t]*\|[ \t]*(?<evidence>[^|\r\n]+?)[ \t]*\|[ \t]*(?<command>[^|\r\n]+?)[ \t]*\|[ \t]*(?<owner>[^|\r\n]+?)[ \t]*\|[ \t]*$')
+        Assert-Condition `
+            ($m35EvidenceRows.Count -eq 12) `
+            "M3.5 requirement-to-evidence contract must contain exactly 12 rows."
+        for ($m35EvidenceIndex = 0;
+            $m35EvidenceIndex -lt 12;
+            $m35EvidenceIndex++) {
+            $expectedEvidenceId = "M35-EV-{0:D2}" -f ($m35EvidenceIndex + 1)
+            $m35EvidenceRow = $m35EvidenceRows[$m35EvidenceIndex]
+            Assert-Condition `
+                ($m35EvidenceRow.Groups["id"].Value -eq $expectedEvidenceId) `
+                "M3.5 evidence rows must remain M35-EV-01 through M35-EV-12 in order."
+            foreach ($m35EvidenceField in @(
+                "requirement", "evidence", "command", "owner")) {
+                Assert-Condition `
+                    (-not [string]::IsNullOrWhiteSpace(
+                        $m35EvidenceRow.Groups[$m35EvidenceField].Value)) `
+                    "M3.5 evidence '$expectedEvidenceId' has an empty '$m35EvidenceField' field."
+            }
+        }
+
+        $expectedM35EvidenceRowTokens = @(
+            [pscustomobject]@{ Tokens = @("M35-EV-01", "Administrator transitions", "Positive-count Domain tests", "AdminManagement", "M35-03-T01, M35-03-T03") },
+            [pscustomobject]@{ Tokens = @("M35-EV-02", "Custom-role", "Domain and policy tests", "AdminManagement", "M35-03-T01, M35-03-T03") },
+            [pscustomobject]@{ Tokens = @("M35-EV-03", "All nine permissions", "denial-order tests", "AdminManagement", "M35-03-T02, M35-03-T03, M35-04-T03") },
+            [pscustomobject]@{ Tokens = @("M35-EV-04", "Strong ETags", "audit-failure tests", "AdminManagement", "M35-03-T02, M35-03-T03, M35-04-T04") },
+            [pscustomobject]@{ Tokens = @("M35-EV-05", "Family projections", "session-projection tests", "AdminManagement", "M35-04-T01, M35-04-T04") },
+            [pscustomobject]@{ Tokens = @("M35-EV-06", "additive migration", "pending-model tests", "AdminManagement", "M35-04-T01, M35-04-T04") },
+            [pscustomobject]@{ Tokens = @("M35-EV-07", "DbMigrator synchronizes", "second-writer MySQL tests", "AdminManagement", "M35-04-T02, M35-04-T04") },
+            [pscustomobject]@{ Tokens = @("M35-EV-08", "count/page snapshot", "consistent-snapshot tests", "AdminManagement", "M35-04-T01, M35-04-T04") },
+            [pscustomobject]@{ Tokens = @("M35-EV-09", "All 17 routes", "artifact regeneration check", "update-admin-access-contract.ps1 -Check", "M35-04-T03, M35-04-T05") },
+            [pscustomobject]@{ Tokens = @("M35-EV-10", "Vben transport", "focused Vitest", "AdminManagementAdmin", "M35-05-T01, M35-05-T05") },
+            [pscustomobject]@{ Tokens = @("M35-EV-11", "All four workspaces", "component Vitest", "Scope Admin", "M35-05-T02, M35-05-T03, M35-05-T04, M35-05-T05") },
+            [pscustomobject]@{ Tokens = @("M35-EV-12", "real Vben/API/DbMigrator/MySQL workflow", "Playwright JSON", "Scope AdminE2E", "M35-06, M35-07, M35-08") }
+        )
+        for ($m35EvidenceIndex = 0;
+            $m35EvidenceIndex -lt $expectedM35EvidenceRowTokens.Count;
+            $m35EvidenceIndex++) {
+            $m35EvidenceRowText = $m35EvidenceRows[$m35EvidenceIndex].Value
+            foreach ($requiredM35EvidenceRowToken in
+                $expectedM35EvidenceRowTokens[$m35EvidenceIndex].Tokens) {
+                Assert-Condition `
+                    $m35EvidenceRowText.Contains($requiredM35EvidenceRowToken) `
+                    "M3.5 evidence row '$($m35EvidenceRows[$m35EvidenceIndex].Groups['id'].Value)' is missing '$requiredM35EvidenceRowToken'."
+            }
+        }
+
+        $m35FocusedCommandsMatch = [regex]::Match(
+            $m35VerificationContract,
+            '(?ms)^### Focused Verification Commands\r?\n(?<body>.*?)(?=^###\s+|\z)')
+        Assert-Condition `
+            $m35FocusedCommandsMatch.Success `
+            "M3.5 verification contract is missing focused commands."
+        $m35FilterTableMatches = [regex]::Matches(
+            $m35FocusedCommandsMatch.Groups["body"].Value,
+            '(?ms)^\| Activation task \| Exact filter \|\r?\n' +
+                '\| --- \| --- \|\r?\n' +
+                '(?<rows>(?:\|[^\r\n]+\|(?:\r?\n|\z))+)' )
+        Assert-Condition `
+            ($m35FilterTableMatches.Count -eq 1) `
+            "M3.5 focused commands must contain exactly one canonical filter table."
+        $m35FilterLines = @(
+            $m35FilterTableMatches[0].Groups["rows"].Value -split '\r?\n' |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $m35FilterRows = @(
+            foreach ($m35FilterLine in $m35FilterLines) {
+                $m35FilterRow = [regex]::Match(
+                    $m35FilterLine,
+                    '^\|[ \t]*(?<task>M35-\d{2}-T\d{2})[ \t]*\|[ \t]*(?:retained[ \t]+)?`(?<filter>FullyQualifiedName~[^`]+)`(?:[ \t]+regression)?[ \t]*\|[ \t]*$')
+                Assert-Condition `
+                    $m35FilterRow.Success `
+                    "M3.5 focused filter table contains a malformed row '$m35FilterLine'."
+                $m35FilterRow
+            })
+        $expectedM35FilterManifest = @(
+            [pscustomobject]@{ Task = "M35-03-T01"; Filter = "FullyQualifiedName~AdminAccessManagementAdministratorDomainTests" },
+            [pscustomobject]@{ Task = "M35-03-T01"; Filter = "FullyQualifiedName~AdminAccessManagementRoleDomainTests" },
+            [pscustomobject]@{ Task = "M35-03-T02"; Filter = "FullyQualifiedName~AdminAccessManagementAuthorizationTests" },
+            [pscustomobject]@{ Task = "M35-03-T02"; Filter = "FullyQualifiedName~AdminAccessManagementConcurrencyTests" },
+            [pscustomobject]@{ Task = "M35-04-T01"; Filter = "FullyQualifiedName~AdminAccessManagementSessionTests" },
+            [pscustomobject]@{ Task = "M35-04-T01"; Filter = "FullyQualifiedName~AdminAccessManagementMigrationTests" },
+            [pscustomobject]@{ Task = "M35-04-T01"; Filter = "FullyQualifiedName~AdminAccessManagementQueryTests" },
+            [pscustomobject]@{ Task = "M35-04-T02"; Filter = "FullyQualifiedName~AdminAccessManagementSeedTests" },
+            [pscustomobject]@{ Task = "M35-04-T03"; Filter = "FullyQualifiedName~AdminAccessManagementApiTests" },
+            [pscustomobject]@{ Task = "M35-04-T03"; Filter = "FullyQualifiedName~AdminAccessManagementOpenApiTests" },
+            [pscustomobject]@{ Task = "M35-06-T02"; Filter = "FullyQualifiedName~AdminAccessManagementComposedApiAcceptanceTests" },
+            [pscustomobject]@{ Task = "M35-03-T01"; Filter = "FullyQualifiedName~AdministratorAccessApiTests" }
+        )
+        Assert-Condition `
+            ($m35FilterRows.Count -eq $expectedM35FilterManifest.Count) `
+            "M3.5 focused filter manifest must contain exactly 12 rows."
+        for ($m35FilterIndex = 0;
+            $m35FilterIndex -lt $expectedM35FilterManifest.Count;
+            $m35FilterIndex++) {
+            Assert-Condition `
+                ($m35FilterRows[$m35FilterIndex].Groups["task"].Value -eq
+                    $expectedM35FilterManifest[$m35FilterIndex].Task -and
+                $m35FilterRows[$m35FilterIndex].Groups["filter"].Value -eq
+                    $expectedM35FilterManifest[$m35FilterIndex].Filter) `
+                "M3.5 focused filter manifest differs at index $m35FilterIndex."
+        }
+
+        if ($m35TaskStatuses["M35-03-T01"] -in @(
+                "in_progress", "blocked", "complete")) {
+            $verificationScript = Get-Content `
+                -LiteralPath "scripts/verify.ps1" `
+                -Raw
+            $adminManagementFunctionMatches = [regex]::Matches(
+                $verificationScript,
+                '(?ms)^function Test-AdminManagement \{\r?\n(?<body>.*?)(?=^function\s+|\z)')
+            Assert-Condition `
+                ($adminManagementFunctionMatches.Count -eq 1) `
+                "AdminManagement must have exactly one stage-aware verification function."
+            $adminManagementFunction =
+                $adminManagementFunctionMatches[0].Groups["body"].Value
+            $implementedFilterRows = @(
+                [regex]::Matches(
+                    $adminManagementFunction,
+                    '(?ms)Task = "(?<task>M35-\d{2}-T\d{2})"\s+Filter = "(?<filter>FullyQualifiedName~[^"]+)"'))
+            Assert-Condition `
+                ($implementedFilterRows.Count -eq
+                    $expectedM35FilterManifest.Count) `
+                "AdminManagement implementation must contain the exact frozen filter manifest."
+            for ($implementedFilterIndex = 0;
+                $implementedFilterIndex -lt $expectedM35FilterManifest.Count;
+                $implementedFilterIndex++) {
+                Assert-Condition `
+                    ($implementedFilterRows[$implementedFilterIndex].Groups["task"].Value -eq
+                        $expectedM35FilterManifest[$implementedFilterIndex].Task -and
+                    $implementedFilterRows[$implementedFilterIndex].Groups["filter"].Value -eq
+                        $expectedM35FilterManifest[$implementedFilterIndex].Filter) `
+                    "AdminManagement implementation manifest differs at index $implementedFilterIndex."
+            }
+            Assert-Condition `
+                ($adminManagementFunction.Contains(
+                        'Get-M35TaskStatus -TaskId $_.Task',
+                        [StringComparison]::Ordinal) -and
+                    $adminManagementFunction.Contains(
+                        '@("in_progress", "blocked", "complete")',
+                        [StringComparison]::Ordinal)) `
+                "AdminManagement must select focused families through current task status."
+            $focusedTestFunctionMatches = [regex]::Matches(
+                $verificationScript,
+                '(?ms)^function Invoke-DotNetFilteredTestWithExecutionCount \{\r?\n(?<body>.*?)(?=^function\s+|\z)')
+            Assert-Condition `
+                ($focusedTestFunctionMatches.Count -eq 1) `
+                "Focused .NET evidence must have exactly one positive-count helper."
+            $focusedTestFunction =
+                $focusedTestFunctionMatches[0].Groups["body"].Value
+            Assert-Condition `
+                ($verificationScript.Contains(
+                        '"AdminManagement" { Test-AdminManagement }',
+                        [StringComparison]::Ordinal) -and
+                    $focusedTestFunction.Contains(
+                        'test-results\focused-',
+                        [StringComparison]::Ordinal) -and
+                    -not $focusedTestFunction.Contains(
+                        'test-results\swordmaster-',
+                        [StringComparison]::Ordinal)) `
+                "AdminManagement must expose the frozen scope and use neutral focused-test evidence paths."
+        }
+
+        foreach ($requiredM35VerificationText in @(
+            'total > 0',
+            'executed > 0',
+            'passed = executed',
+            'failed = 0',
+            'notExecuted = 0',
+            'numTotalTests > 0',
+            'numPassedTests = numTotalTests',
+            'numFailedTests = 0',
+            'numPendingTests = 0',
+            'exactly five tests',
+            'FullyQualifiedName~AdminAccessManagementAdministratorDomainTests',
+            'FullyQualifiedName~AdminAccessManagementRoleDomainTests',
+            'FullyQualifiedName~AdminAccessManagementAuthorizationTests',
+            'FullyQualifiedName~AdminAccessManagementConcurrencyTests',
+            'FullyQualifiedName~AdminAccessManagementSessionTests',
+            'FullyQualifiedName~AdminAccessManagementQueryTests',
+            'FullyQualifiedName~AdminAccessManagementApiTests',
+            'FullyQualifiedName~AdminAccessManagementOpenApiTests',
+            'FullyQualifiedName~AdminAccessManagementMigrationTests',
+            'FullyQualifiedName~AdminAccessManagementSeedTests',
+            'FullyQualifiedName~AdminAccessManagementComposedApiAcceptanceTests',
+            'FullyQualifiedName~AdministratorAccessApiTests',
+            'pwsh -NoProfile -File scripts/verify.ps1 -Scope AdminManagement',
+            'pwsh -NoProfile -File scripts/verify.ps1 -Scope AdminManagementAdmin',
+            'pwsh -NoProfile -File scripts/verify.ps1 -Scope AdminE2E',
+            'pwsh -NoProfile -File scripts/update-admin-access-contract.ps1 -Check',
+            'novagame-test-[a-f0-9]{12}',
+            'docker compose down --volumes --remove-orphans',
+            '.local/admin-management/<run-id>',
+            'Windows Job Object',
+            'kill-on-close',
+            'PID plus creation time',
+            'Failure screenshots',
+            'remaining binary failed artifact',
+            'in-memory exact-secret registry',
+            'Windows named pipe',
+            'data.accessToken',
+            'duplicate keys',
+            'raw source span',
+            'response-audit JSON',
+            'audited wrapper',
+            'closes every registered browser context',
+            'M35-07-T01',
+            'strict UTF-8 body',
+            'pixel diversity',
+            'empty allowlist',
+            'NOVACORE_ROOT',
+            'D:\Programs\nova-core',
+            'ef8db55173ff8f0286bb06abe753861c8a7d2d80',
+            '222f5c59188d06098b677a7ff004c546871391ea',
+            'finally',
+            'Vben mock backend',
+            'sequentially, never concurrently'
+        )) {
+            Assert-Condition `
+                $m35VerificationContract.Contains($requiredM35VerificationText) `
+                "M3.5 verification contract is missing '$requiredM35VerificationText'."
+        }
+        Assert-Condition `
+            ([regex]::IsMatch(
+                $m35VerificationContract,
+                '(?s)Composed API and browser acceptance.*?direct MySQL\s+mutation to create management state')) `
+            "M3.5 real acceptance must prohibit direct MySQL management-state creation."
+
+        $m35VerificationLogMatches = [regex]::Matches(
+            $m35Goal.Content,
+            '(?ms)^## Verification Log\r?\n(?<body>.*?)(?=^##\s+|\z)')
+        Assert-Condition `
+            ($m35VerificationLogMatches.Count -eq 1) `
+            "M3.5 goal must contain exactly one Verification Log."
+        $m35VerificationLog =
+            $m35VerificationLogMatches[0].Groups["body"].Value
+        foreach ($completedM35TaskId in @(
+                $m35TaskRows |
+                    Where-Object {
+                        $_.Groups["status"].Value -eq "complete"
+                    } |
+                    ForEach-Object { $_.Groups["id"].Value })) {
+            $m35TaskLogPattern =
+                '(?m)^\|[ \t]*\d{4}-\d{2}-\d{2}[ \t]*\|[ \t]*' +
+                [regex]::Escape($completedM35TaskId) +
+                '[ \t]*\|[ \t]*(?<command>[^|\r\n]*)\|[ \t]*' +
+                '(?<result>[^|\r\n]*)\|[ \t]*$'
+            $m35TaskLogMatches = [regex]::Matches(
+                $m35VerificationLog,
+                $m35TaskLogPattern)
+            Assert-Condition `
+                ($m35TaskLogMatches.Count -eq 1) `
+                "Completed M3.5 task '$completedM35TaskId' needs exactly one canonical verification-log row."
+            Assert-Condition `
+                (-not [string]::IsNullOrWhiteSpace(
+                    $m35TaskLogMatches[0].Groups["command"].Value)) `
+                "Completed M3.5 task '$completedM35TaskId' has an empty verification command."
+            Assert-Condition `
+                ([regex]::IsMatch(
+                    $m35TaskLogMatches[0].Groups["result"].Value.Trim(),
+                    '^Passed(?:[:.].*)?$')) `
+                "Completed M3.5 task '$completedM35TaskId' must record a canonical Passed result."
+        }
+    }
+
+    $m35ImmutableConsumerPaths = @(
+        "clients/cocos",
+        "samples/SwordMaster",
+        "server/novacore.lock.json"
+    )
+    $m35ImmutableTrackedArguments = @(
+        "diff", "--name-only", "--no-ext-diff",
+        "42d1ffe83770571d8f48cdb58f35bfc591a4bd1c", "--"
+    ) + $m35ImmutableConsumerPaths
+    $m35ImmutableTrackedChanges = @(
+        & git @m35ImmutableTrackedArguments |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to audit M3.5 immutable consumer paths."
+    }
+    $m35ImmutableUntrackedArguments = @(
+        "ls-files", "--others", "--exclude-standard", "--"
+    ) + $m35ImmutableConsumerPaths
+    $m35ImmutableUntrackedChanges = @(
+        & git @m35ImmutableUntrackedArguments |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to audit M3.5 untracked immutable consumer paths."
+    }
+    $m35ImmutableConsumerChanges = @(
+        $m35ImmutableTrackedChanges
+        $m35ImmutableUntrackedChanges
+    )
+    Assert-Condition `
+        ($m35ImmutableConsumerChanges.Count -eq 0) `
+        "M3.5 must not change Cocos, SwordMaster, or the NovaCore lock:`n$($m35ImmutableConsumerChanges -join "`n")"
+
+    $m35VerificationOnlyAdminHashes = [ordered]@{
+        "admin/apps/web-ele/e2e/acceptance-evidence.ts" =
+            "01BC6040E5AAEE534D4B71EF13E53E3FA8DD6194469B245250BE52375399305E"
+        "admin/apps/web-ele/e2e/game-config.spec.ts" =
+            "2A9671EE7AF10D1A6335FB5E6F89481377F992B3014312F52D5C27A1B987770D"
+    }
+    $m35VerificationOnlyAdminPaths = @(
+        $m35VerificationOnlyAdminHashes.Keys)
+    foreach ($m35VerificationOnlyAdminPath in
+        $m35VerificationOnlyAdminPaths) {
+        $m35VerificationOnlyPathMustRemainProtected =
+            if ($m35VerificationOnlyAdminPath -eq
+                "admin/apps/web-ele/e2e/acceptance-evidence.ts") {
+                $m35Goal.Status -ne "complete"
+            }
+            else {
+                $m35TaskStatuses["M35-07-T01"] -eq "pending"
+            }
+        if ($m35VerificationOnlyPathMustRemainProtected) {
+            Assert-Condition `
+                (Test-Path `
+                    -LiteralPath $m35VerificationOnlyAdminPath `
+                    -PathType Leaf) `
+                "The protected Admin E2E evidence file '$m35VerificationOnlyAdminPath' is missing."
+            $m35VerificationOnlySource = Get-Content `
+                -LiteralPath $m35VerificationOnlyAdminPath `
+                -Raw
+            $m35NormalizedVerificationOnlySource =
+                $m35VerificationOnlySource.Replace("`r`n", "`n")
+            $m35VerificationOnlyHash = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData(
+                    [Text.UTF8Encoding]::new($false).GetBytes(
+                        $m35NormalizedVerificationOnlySource)))
+            Assert-Condition `
+                ($m35VerificationOnlyHash -eq
+                    $m35VerificationOnlyAdminHashes[
+                        $m35VerificationOnlyAdminPath]) `
+                "The protected evidence file '$m35VerificationOnlyAdminPath' differs before its release gate."
+        }
+    }
+
+    if ($m35TaskStatuses["M35-03-T01"] -eq "pending") {
+        $m35PrematureImplementationPaths = @(
+            "server/src",
+            "server/tests",
+            "admin/apps/web-ele",
+            "admin/package.json",
+            "admin/pnpm-lock.yaml",
+            "admin/playwright.config.ts",
+            "admin/tsconfig.e2e.json",
+            "scripts/update-admin-access-contract.ps1"
+        )
+        $m35TrackedImplementationArguments = @(
+            "diff", "--name-only", "--no-ext-diff",
+            "42d1ffe83770571d8f48cdb58f35bfc591a4bd1c", "--"
+        ) + $m35PrematureImplementationPaths
+        $m35TrackedImplementationChanges = @(
+            & git @m35TrackedImplementationArguments |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to audit M3.5 tracked implementation paths."
+        }
+        $m35UntrackedImplementationArguments = @(
+            "ls-files", "--others", "--exclude-standard", "--"
+        ) + $m35PrematureImplementationPaths
+        $m35UntrackedImplementationChanges = @(
+            & git @m35UntrackedImplementationArguments |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to audit M3.5 untracked implementation paths."
+        }
+        $m35ImplementationChanges = @(
+            $m35TrackedImplementationChanges
+            $m35UntrackedImplementationChanges
+        )
+        $m35VerificationOnlyAdminChanges = @(
+            $m35ImplementationChanges |
+                Where-Object {
+                    $m35VerificationOnlyAdminPaths -contains
+                        ([string]$_).Replace('\', '/')
+                })
+        if ($m35VerificationOnlyAdminChanges.Count -gt 0) {
+            Assert-Condition `
+                ($m35TaskStatuses["M35-02-T05"] -in @(
+                    "in_progress", "blocked", "complete")) `
+                "The Admin E2E evidence guard requires M35-02-T05 activation."
+            Assert-StringSet `
+                -Expected $m35VerificationOnlyAdminPaths `
+                -Actual @(
+                    $m35VerificationOnlyAdminChanges |
+                        ForEach-Object { ([string]$_).Replace('\', '/') }) `
+                -Message "The M35-02-T05 verification-only file set changed unexpectedly."
+        }
+        $m35PrematureImplementationChanges = @(
+            $m35ImplementationChanges |
+                Where-Object {
+                    $m35VerificationOnlyAdminPaths -notcontains
+                        ([string]$_).Replace('\', '/')
+                })
+        Assert-Condition `
+            ($m35PrematureImplementationChanges.Count -eq 0) `
+            "M3.5 implementation changed before M35-03-T01:`n$($m35PrematureImplementationChanges -join "`n")"
+    }
+
+    $m35StageProtectedPathSets = @(
+        [pscustomobject]@{
+            ActivationTask = "M35-03-T02"
+            Paths = @(
+                "server/src/NovaGame.Application.Contracts",
+                "server/src/NovaGame.Application",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementAuthorizationTests.cs",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementConcurrencyTests.cs"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-04-T01"
+            Paths = @(
+                "server/src/NovaGame.Host.EntityFrameworkCore",
+                "server/src/NovaGame.Application/Operations/AdminAccess/RefreshTokenService.cs",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementSessionTests.cs",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementMigrationTests.cs",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementQueryTests.cs"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-04-T02"
+            Paths = @(
+                "server/src/NovaGame.Domain.Shared/Operations/AdminAccess/AdminAccessPermissionDefinitionProvider.cs",
+                "server/src/NovaGame.Application/Operations/AdminAccess/AdministratorSeedContributor.cs",
+                "server/src/NovaGame.Application/Operations/AdminAccess/AdminAccessSeedOptions.cs",
+                "server/src/NovaGame.DbMigrator",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementSeedTests.cs"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-04-T03"
+            Paths = @(
+                "server/src/NovaGame.Api",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementApiTests.cs",
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementOpenApiTests.cs"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-06-T02"
+            Paths = @(
+                "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementComposedApiAcceptanceTests.cs"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-04-T05"
+            Paths = @(
+                "admin/package.json",
+                "admin/pnpm-lock.yaml",
+                "admin/apps/web-ele/package.json",
+                "admin/apps/web-ele/contracts/admin-access.openapi.json",
+                "admin/apps/web-ele/openapi-ts.config.mjs",
+                "admin/apps/web-ele/src/generated/admin-access",
+                "scripts/update-admin-access-contract.ps1"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-05-T01"
+            Paths = @(
+                "admin/apps/web-ele/src/api/admin-access",
+                "admin/apps/web-ele/src/router/routes/modules/admin-access.ts"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-05-T02"
+            Paths = @(
+                "admin/apps/web-ele/src/views/admin-access"
+            )
+        },
+        [pscustomobject]@{
+            ActivationTask = "M35-07-T01"
+            Paths = @(
+                "admin/playwright.config.ts",
+                "admin/tsconfig.e2e.json",
+                "admin/apps/web-ele/e2e/admin-access.spec.ts"
+            )
+        }
+    )
+    foreach ($m35ProtectedPathSet in $m35StageProtectedPathSets) {
+        if ($m35TaskStatuses[$m35ProtectedPathSet.ActivationTask] -ne "pending") {
+            continue
+        }
+        $m35ProtectedTrackedArguments = @(
+            "diff", "--name-only", "--no-ext-diff",
+            "42d1ffe83770571d8f48cdb58f35bfc591a4bd1c", "--"
+        ) + $m35ProtectedPathSet.Paths
+        $m35ProtectedTrackedChanges = @(
+            & git @m35ProtectedTrackedArguments |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to audit paths owned by '$($m35ProtectedPathSet.ActivationTask)'."
+        }
+        $m35ProtectedUntrackedArguments = @(
+            "ls-files", "--others", "--exclude-standard", "--"
+        ) + $m35ProtectedPathSet.Paths
+        $m35ProtectedUntrackedChanges = @(
+            & git @m35ProtectedUntrackedArguments |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to audit untracked paths owned by '$($m35ProtectedPathSet.ActivationTask)'."
+        }
+        $m35ProtectedChanges = @(
+            $m35ProtectedTrackedChanges
+            $m35ProtectedUntrackedChanges
+        )
+        Assert-Condition `
+            ($m35ProtectedChanges.Count -eq 0) `
+            "M3.5 paths changed before '$($m35ProtectedPathSet.ActivationTask)' activation:`n$($m35ProtectedChanges -join "`n")"
+    }
+
+    $m35UnownedWorkspaceTrackedChanges = @(
+        & git diff --name-only --no-ext-diff `
+            42d1ffe83770571d8f48cdb58f35bfc591a4bd1c -- `
+            admin/pnpm-workspace.yaml |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to audit tracked admin workspace metadata."
+    }
+    $m35UnownedWorkspaceUntrackedChanges = @(
+        & git ls-files --others --exclude-standard -- admin/pnpm-workspace.yaml |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to audit untracked admin workspace metadata."
+    }
+    $m35UnownedWorkspaceChanges = @(
+        $m35UnownedWorkspaceTrackedChanges
+        $m35UnownedWorkspaceUntrackedChanges
+    )
+    Assert-Condition `
+        ($m35UnownedWorkspaceChanges.Count -eq 0) `
+        "M3.5 has no task authorized to change admin/pnpm-workspace.yaml."
+
+    if ($m35TaskStatuses["M35-07-T01"] -in @(
+            "in_progress", "blocked", "complete")) {
+        $m35GameConfigBrowserSource = Get-Content `
+            -LiteralPath "admin/apps/web-ele/e2e/game-config.spec.ts" `
+            -Raw
+        foreach ($forbiddenM35GameConfigSqlFixture in @(
+            "DELETE FROM admin_role_permissions",
+            "INSERT INTO admin_role_permissions"
+        )) {
+            Assert-Condition `
+                (-not $m35GameConfigBrowserSource.Contains(
+                    $forbiddenM35GameConfigSqlFixture)) `
+                "M35-07 GameConfig regression must create permission state through management HTTP."
+        }
+    }
+
+    $activeM35TaskRows = @(
+        $m35TaskRows |
+            Where-Object {
+                $_.Groups["status"].Value -in @("in_progress", "blocked")
+            })
+    if ($m35Goal.Status -eq "in_progress") {
+        Assert-Condition `
+            ($activeM35TaskRows.Count -eq 1 -and
+                $activeM35TaskRows[0].Groups["status"].Value -eq
+                    "in_progress") `
+            "Active M3.5 must have exactly one in-progress task."
+        Assert-Condition `
+            ($activeM35TaskRows[0].Groups["stage"].Value -eq
+                $m35Goal.ActiveStage) `
+            "The active M3.5 task must belong to the active M3.5 stage."
+    }
+    elseif ($m35Goal.Status -eq "blocked") {
+        Assert-Condition `
+            ($activeM35TaskRows.Count -eq 1 -and
+                $activeM35TaskRows[0].Groups["status"].Value -eq "blocked") `
+            "Blocked M3.5 must have exactly one blocked task."
+        Assert-Condition `
+            ($activeM35TaskRows[0].Groups["stage"].Value -eq
+                $m35Goal.ActiveStage) `
+            "The blocked M3.5 task must belong to the active M3.5 stage."
+    }
+    elseif ($m35Goal.Status -eq "complete") {
+        $incompleteM35TaskRows = @(
+            $m35TaskRows |
+                Where-Object { $_.Groups["status"].Value -ne "complete" })
+        Assert-Condition `
+            ($incompleteM35TaskRows.Count -eq 0) `
+            "Completed M3.5 must mark every registered task complete."
+    }
+
+    foreach ($m35StageId in $m35Goal.StageStatuses.Keys) {
+        $m35StageTaskRows = @(
+            $m35TaskRows |
+                Where-Object {
+                    $_.Groups["stage"].Value -eq $m35StageId
+                })
+        Assert-Condition `
+            ($m35StageTaskRows.Count -gt 0) `
+            "M3.5 stage '$m35StageId' must contain at least one task."
+
+        $m35StageStatus = $m35Goal.StageStatuses[$m35StageId]
+        if ($m35StageStatus -eq "complete") {
+            foreach ($m35StageTaskRow in $m35StageTaskRows) {
+                Assert-Condition `
+                    ($m35StageTaskRow.Groups["status"].Value -eq "complete") `
+                    "Completed M3.5 stage '$m35StageId' requires every task to be complete."
+            }
+            continue
+        }
+
+        if ($m35StageStatus -eq "pending") {
+            foreach ($m35StageTaskRow in $m35StageTaskRows) {
+                Assert-Condition `
+                    ($m35StageTaskRow.Groups["status"].Value -eq "pending") `
+                    "Pending M3.5 stage '$m35StageId' requires every task to be pending."
+            }
+            continue
+        }
+
+        Assert-Condition `
+            ($m35StageId -eq $m35Goal.ActiveStage) `
+            "Only the active M3.5 stage may be in progress or blocked."
+        $activeM35StageTaskIndexes = @(
+            for ($taskIndex = 0;
+                $taskIndex -lt $m35StageTaskRows.Count;
+                $taskIndex++) {
+                if ($m35StageTaskRows[$taskIndex].Groups["status"].Value -in @(
+                        "in_progress", "blocked")) {
+                    $taskIndex
+                }
+            })
+        Assert-Condition `
+            ($activeM35StageTaskIndexes.Count -eq 1) `
+            "Active M3.5 stage '$m35StageId' must contain exactly one current task."
+        $activeM35StageTaskIndex = $activeM35StageTaskIndexes[0]
+        for ($taskIndex = 0;
+            $taskIndex -lt $m35StageTaskRows.Count;
+            $taskIndex++) {
+            $expectedM35TaskStatus = if ($taskIndex -lt $activeM35StageTaskIndex) {
+                "complete"
+            }
+            elseif ($taskIndex -eq $activeM35StageTaskIndex) {
+                $m35StageStatus
+            }
+            else {
+                "pending"
+            }
+            Assert-Condition `
+                ($m35StageTaskRows[$taskIndex].Groups["status"].Value -eq
+                    $expectedM35TaskStatus) `
+                "M3.5 stage '$m35StageId' tasks must advance in registered order."
+        }
+    }
+
+    if ($m35Goal.ExecutionAuthorized) {
+        $currentM35TaskId = $activeM35TaskRows[0].Groups["id"].Value
+        $m35ActivationGateMatch = [regex]::Match(
+            $m35Goal.Content,
+            '(?ms)^## Activation Gate\r?\n(?<body>.*?)(?=^##\s+|\z)')
+        Assert-Condition `
+            $m35ActivationGateMatch.Success `
+            "Active M3.5 is missing its Activation Gate section."
+        $m35ActivationGate = $m35ActivationGateMatch.Groups["body"].Value
+        foreach ($requiredM35ActivationText in @(
+            $m35Goal.ActiveStage,
+            $currentM35TaskId
+        )) {
+            Assert-Condition `
+                $m35ActivationGate.Contains($requiredM35ActivationText) `
+                "M3.5 Activation Gate is missing active state '$requiredM35ActivationText'."
+        }
+        foreach ($currentM35StatusPath in @(
+            "AGENTS.md",
+            "README.md",
+            "docs/README.md",
+            "docs/roadmap.md"
+        )) {
+            $currentM35StatusContent = Get-Content `
+                -LiteralPath $currentM35StatusPath `
+                -Raw
+            foreach ($requiredM35CurrentText in @(
+                "administrator-management",
+                $m35Goal.ActiveStage,
+                $currentM35TaskId
+            )) {
+                Assert-Condition `
+                    $currentM35StatusContent.Contains($requiredM35CurrentText) `
+                    "$currentM35StatusPath is missing active M3.5 state '$requiredM35CurrentText'."
+            }
+            Assert-Condition `
+                (-not $currentM35StatusContent.Contains(
+                    "No repository milestone is active.",
+                    [StringComparison]::OrdinalIgnoreCase)) `
+                "$currentM35StatusPath contains a stale no-active-milestone statement."
+        }
+
+        $m4SectionMatch = [regex]::Match(
+            $roadmap,
+            '(?ms)^##\s+M4\s+-[^\r\n]*\r?\n(?<body>.*?)(?=^##\s+|\z)')
+        Assert-Condition `
+            ($m4SectionMatch.Success -and
+                [regex]::IsMatch(
+                    $m4SectionMatch.Groups["body"].Value,
+                    '(?m)^\*\*Status:\*\*[ \t]*Unscheduled[ \t]*$')) `
+            "M4 must remain Unscheduled while M3.5 is active."
+    }
 
     $m1DecisionRecordMatch = [regex]::Match(
         $m1Goal.Content,
@@ -3173,33 +6813,35 @@ function Test-Documentation {
                 "M3-07-T04 candidate evidence source '$($m307CandidateSourceHash.Key)' changed after the frozen baseline."
         }
 
-        $m307T04FrameworkTracked = @(
-            & git diff --name-only `
-                "ba83e4af0d494da4176ee922c2caaf24f5fce905" `
-                -- `
-                "server/src" `
-                "server/tests" `
-                "clients/cocos" `
-                "admin/apps/web-ele")
-        Assert-Condition `
-            ($LASTEXITCODE -eq 0) `
-            "Unable to audit tracked M3-07-T04 framework paths."
-        $m307T04FrameworkUntracked = @(
-            & git ls-files `
-                --others `
-                --exclude-standard `
-                -- `
-                "server/src" `
-                "server/tests" `
-                "clients/cocos" `
-                "admin/apps/web-ele")
-        Assert-Condition `
-            ($LASTEXITCODE -eq 0) `
-            "Unable to audit untracked M3-07-T04 framework paths."
-        Assert-Condition `
-            ($m307T04FrameworkTracked.Count -eq 0 -and
-                $m307T04FrameworkUntracked.Count -eq 0) `
-            "M3-07-T04 requires framework tracked/untracked changes to remain 0/0."
+        if ($m35Goal.Status -notin @("in_progress", "blocked", "complete")) {
+            $m307T04FrameworkTracked = @(
+                & git diff --name-only `
+                    "ba83e4af0d494da4176ee922c2caaf24f5fce905" `
+                    -- `
+                    "server/src" `
+                    "server/tests" `
+                    "clients/cocos" `
+                    "admin/apps/web-ele")
+            Assert-Condition `
+                ($LASTEXITCODE -eq 0) `
+                "Unable to audit tracked M3-07-T04 framework paths."
+            $m307T04FrameworkUntracked = @(
+                & git ls-files `
+                    --others `
+                    --exclude-standard `
+                    -- `
+                    "server/src" `
+                    "server/tests" `
+                    "clients/cocos" `
+                    "admin/apps/web-ele")
+            Assert-Condition `
+                ($LASTEXITCODE -eq 0) `
+                "Unable to audit untracked M3-07-T04 framework paths."
+            Assert-Condition `
+                ($m307T04FrameworkTracked.Count -eq 0 -and
+                    $m307T04FrameworkUntracked.Count -eq 0) `
+                "M3-07-T04 requires framework tracked/untracked changes to remain 0/0 before a later framework milestone is active."
+        }
 
         $m307Architecture = Get-Content -LiteralPath "docs/architecture.md" -Raw
         foreach ($requiredM307ArchitectureText in @(
@@ -4606,7 +8248,8 @@ function Test-Documentation {
             "SwordMaster admin production source exceeds the active M3-05 task boundary (T03=$($m3TaskStatuses['M3-05-T03']), T04=$($m3TaskStatuses['M3-05-T04'])):`n$($unexpectedSwordMasterAdminProductionPaths -join "`n")"
     }
 
-    if ($m3Goal.ExecutionAuthorized) {
+    if ($m3Goal.ExecutionAuthorized -and
+        $m35Goal.Status -notin @("in_progress", "blocked", "complete")) {
         $currentM3TaskId = $activeM3TaskRows[0].Groups["id"].Value
         foreach ($currentStatusPath in @(
             "AGENTS.md",
@@ -4739,6 +8382,9 @@ function Test-Repository {
 
     Assert-Condition (Test-Path -LiteralPath ".git" -PathType Container) "Git metadata directory '.git' is missing."
     Invoke-CheckedCommand "git" @("rev-parse", "--is-inside-work-tree")
+    Test-M35ExternalNovaCoreCheckout
+    Test-NovaGameProcessJobLifecycle
+    Test-AdminManagementArtifactPolicy
     Assert-Condition (Test-Path -LiteralPath "NovaGame.sln" -PathType Leaf) "Root solution 'NovaGame.sln' is missing."
 
     foreach ($script in @(
@@ -5372,7 +9018,11 @@ function Test-NoActiveSqliteRuntime {
 }
 
 function Test-Database {
-    param([switch]$RunDbMigratorSeed)
+    param(
+        [switch]$RunDbMigratorSeed,
+        [scriptblock]$AdditionalVerification,
+        [switch]$SkipSolutionTests
+    )
 
     Test-Server
     Test-NoActiveSqliteRuntime
@@ -5517,14 +9167,19 @@ function Test-Database {
             }
         }
 
-        Invoke-CheckedCommand "dotnet" @(
-            "test",
-            "server/NovaGame.sln",
-            "--no-build",
-            "--no-restore",
-            "--verbosity", "minimal",
-            "-p:NuGetAudit=false"
-        )
+        if ($null -ne $AdditionalVerification) {
+            & $AdditionalVerification
+        }
+        if (-not $SkipSolutionTests) {
+            Invoke-CheckedCommand "dotnet" @(
+                "test",
+                "server/NovaGame.sln",
+                "--no-build",
+                "--no-restore",
+                "--verbosity", "minimal",
+                "-p:NuGetAudit=false"
+            )
+        }
     }
     catch {
         $operationError = $_
@@ -5566,6 +9221,107 @@ function Test-Database {
     }
 
     Write-Output "Database verification passed."
+}
+
+function Test-AdminManagement {
+    $testProject =
+        "server/tests/NovaGame.EntityFrameworkCore.Tests/NovaGame.EntityFrameworkCore.Tests.csproj"
+    $manifest = @(
+        [pscustomobject]@{
+            Task = "M35-03-T01"
+            Filter = "FullyQualifiedName~AdminAccessManagementAdministratorDomainTests"
+            ResultName = "admin-management-administrator-domain.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-03-T01"
+            Filter = "FullyQualifiedName~AdminAccessManagementRoleDomainTests"
+            ResultName = "admin-management-role-domain.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-03-T02"
+            Filter = "FullyQualifiedName~AdminAccessManagementAuthorizationTests"
+            ResultName = "admin-management-authorization.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-03-T02"
+            Filter = "FullyQualifiedName~AdminAccessManagementConcurrencyTests"
+            ResultName = "admin-management-concurrency.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-04-T01"
+            Filter = "FullyQualifiedName~AdminAccessManagementSessionTests"
+            ResultName = "admin-management-session.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-04-T01"
+            Filter = "FullyQualifiedName~AdminAccessManagementMigrationTests"
+            ResultName = "admin-management-migration.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-04-T01"
+            Filter = "FullyQualifiedName~AdminAccessManagementQueryTests"
+            ResultName = "admin-management-query.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-04-T02"
+            Filter = "FullyQualifiedName~AdminAccessManagementSeedTests"
+            ResultName = "admin-management-seed.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-04-T03"
+            Filter = "FullyQualifiedName~AdminAccessManagementApiTests"
+            ResultName = "admin-management-api.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-04-T03"
+            Filter = "FullyQualifiedName~AdminAccessManagementOpenApiTests"
+            ResultName = "admin-management-openapi.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-06-T02"
+            Filter = "FullyQualifiedName~AdminAccessManagementComposedApiAcceptanceTests"
+            ResultName = "admin-management-composed-api.trx"
+        },
+        [pscustomobject]@{
+            Task = "M35-03-T01"
+            Filter = "FullyQualifiedName~AdministratorAccessApiTests"
+            ResultName = "admin-management-authentication-regression.trx"
+        }
+    )
+    $enabledStatuses = @("in_progress", "blocked", "complete")
+    $selectedManifest = @(
+        $manifest | Where-Object {
+            (Get-M35TaskStatus -TaskId $_.Task) -in $enabledStatuses
+        })
+    Assert-Condition `
+        ($selectedManifest.Count -gt 0) `
+        "AdminManagement has no active focused test family."
+
+    $focusedVerification = {
+        Invoke-CheckedCommand "dotnet" @(
+            "build",
+            "server/NovaGame.sln",
+            "--configuration", "Release",
+            "--no-restore",
+            "--disable-build-servers",
+            "--verbosity", "minimal",
+            "-warnaserror",
+            "-p:NuGetAudit=false"
+        )
+        foreach ($entry in $selectedManifest) {
+            Invoke-DotNetFilteredTestWithExecutionCount `
+                -ProjectPath $testProject `
+                -Filter $entry.Filter `
+                -ResultName $entry.ResultName
+        }
+    }.GetNewClosure()
+
+    Test-Database `
+        -RunDbMigratorSeed `
+        -AdditionalVerification $focusedVerification `
+        -SkipSolutionTests
+    Write-Output `
+        "AdminManagement verification passed for $($selectedManifest.Count) focused test families."
 }
 
 function Test-Authentication {
@@ -5820,28 +9576,3597 @@ function Invoke-SwordMasterRealApiAcceptance {
     Write-Output "Real API to SwordMaster snapshot acceptance passed."
 }
 
+function Get-AdminManagementRetainableTextExtensions {
+    return @(
+        ".cjs", ".css", ".htm", ".html", ".js", ".json", ".log",
+        ".map", ".md", ".mjs", ".trx", ".txt", ".xml", ".yaml", ".yml")
+}
+
+function Resolve-AdminManagementRunRoot {
+    param([Parameter(Mandatory)][string]$RunRoot)
+
+    $resolvedAllowedRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path $repositoryRoot ".local\admin-management"))
+    $resolvedRunRoot = [System.IO.Path]::GetFullPath($RunRoot)
+    Assert-Condition `
+        ([System.IO.Path]::GetDirectoryName($resolvedRunRoot).Equals(
+            $resolvedAllowedRoot,
+            [StringComparison]::OrdinalIgnoreCase)) `
+        "Admin management run roots must be direct children of '$resolvedAllowedRoot'."
+    Assert-Condition `
+        ([System.IO.Path]::GetFileName($resolvedRunRoot) -match
+            '^novagame-test-[a-f0-9]{12}$') `
+        "Admin management run root '$resolvedRunRoot' has an invalid run ID."
+
+    return $resolvedRunRoot
+}
+
+function Assert-AdminManagementTreeHasNoReparsePoints {
+    param([Parameter(Mandatory)][string]$RootPath)
+
+    if (-not (Test-Path -LiteralPath $RootPath)) {
+        return
+    }
+    $reparsePoints = @(
+        Get-Item -LiteralPath $RootPath -Force -ErrorAction Stop
+        if (Test-Path -LiteralPath $RootPath -PathType Container) {
+            Get-ChildItem `
+                -LiteralPath $RootPath `
+                -Recurse `
+                -Force `
+                -ErrorAction Stop
+        }
+    ) | Where-Object {
+        $_.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)
+    }
+    $reparsePointNames = @(
+        $reparsePoints | ForEach-Object { $_.FullName })
+    Assert-Condition `
+        (@($reparsePoints).Count -eq 0) `
+        "Admin management artifact tree contains a reparse point: $($reparsePointNames -join ', ')."
+}
+
+function Remove-AdminManagementRunRoot {
+    param([Parameter(Mandatory)][string]$RunRoot)
+
+    $resolvedRunRoot = Resolve-AdminManagementRunRoot -RunRoot $RunRoot
+    if (-not (Test-Path -LiteralPath $resolvedRunRoot)) {
+        return
+    }
+    Assert-Condition `
+        (Test-Path -LiteralPath $resolvedRunRoot -PathType Container) `
+        "Admin management run root '$resolvedRunRoot' is not a directory."
+    Assert-AdminManagementTreeHasNoReparsePoints -RootPath $resolvedRunRoot
+    Remove-Item `
+        -LiteralPath $resolvedRunRoot `
+        -Recurse `
+        -Force `
+        -ErrorAction Stop
+}
+
+function Remove-AdminManagementRunRootVerified {
+    param(
+        [Parameter(Mandatory)][string]$RunRoot,
+        [ValidateRange(1, 10)][int]$MaximumAttempts = 3
+    )
+
+    $resolvedRunRoot = Resolve-AdminManagementRunRoot -RunRoot $RunRoot
+    for ($attempt = 1; $attempt -le $MaximumAttempts; $attempt++) {
+        try {
+            Remove-AdminManagementRunRoot -RunRoot $resolvedRunRoot
+            if (-not (Test-Path -LiteralPath $resolvedRunRoot)) {
+                return
+            }
+        }
+        catch {
+            # Retry only the already validated disposable run root.
+        }
+        if ($attempt -lt $MaximumAttempts) {
+            Start-Sleep -Milliseconds 200
+        }
+    }
+
+    throw "Admin management run-root removal could not be verified after $MaximumAttempts attempts."
+}
+
+function Test-AdminManagementRunRootRemovalRequired {
+    param(
+        [Parameter(Mandatory)][bool]$OperationFailed,
+        [Parameter(Mandatory)]
+        [ValidateRange(0, 2147483647)]
+        [int]$CleanupErrorCount,
+        [Parameter(Mandatory)][bool]$DynamicSecretRegistryComplete,
+        [Parameter(Mandatory)][bool]$ArtifactSecretScanPassed
+    )
+
+    return $OperationFailed -or
+        $CleanupErrorCount -gt 0 -or
+        -not $DynamicSecretRegistryComplete -or
+        -not $ArtifactSecretScanPassed
+}
+
+function Test-AdminManagementRunRootRemovalPolicy {
+    $adminManagementRoot = Join-Path `
+        $repositoryRoot `
+        ".local\admin-management"
+    $transientRunRoot = Join-Path `
+        $adminManagementRoot `
+        "novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $permanentRunRoot = Join-Path `
+        $adminManagementRoot `
+        "novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $boundaryRunRoot = Join-Path `
+        $adminManagementRoot `
+        "novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $lockProcess = $null
+    $permanentLock = $null
+    try {
+        Assert-Condition `
+            (Test-AdminManagementRunRootRemovalRequired `
+                -OperationFailed $false `
+                -CleanupErrorCount 1 `
+                -DynamicSecretRegistryComplete $true `
+                -ArtifactSecretScanPassed $true) `
+            "A cleanup failure must force whole-run-root removal."
+        Assert-Condition `
+            (-not (Test-AdminManagementRunRootRemovalRequired `
+                    -OperationFailed $false `
+                    -CleanupErrorCount 0 `
+                    -DynamicSecretRegistryComplete $true `
+                    -ArtifactSecretScanPassed $true)) `
+            "Verified clean evidence must remain eligible for its normal retention policy."
+
+        New-Item -ItemType Directory -Path $transientRunRoot -Force |
+            Out-Null
+        $transientLockPath = Join-Path $transientRunRoot "transient.lock"
+        $transientReadyPath = Join-Path $transientRunRoot "transient.ready"
+        [System.IO.File]::WriteAllText($transientLockPath, "locked")
+        $lockScript = @'
+$stream = [System.IO.File]::Open(
+    $env:NOVAGAME_REMOVAL_PROBE_LOCK,
+    [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::ReadWrite,
+    [System.IO.FileShare]::None)
+try {
+    [System.IO.File]::WriteAllText(
+        $env:NOVAGAME_REMOVAL_PROBE_READY,
+        "ready")
+    Start-Sleep -Milliseconds 650
+}
+finally {
+    $stream.Dispose()
+}
+'@
+        $lockStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $lockStartInfo.FileName = (Get-Command "pwsh" -ErrorAction Stop).Source
+        $lockStartInfo.WorkingDirectory = $repositoryRoot
+        $lockStartInfo.UseShellExecute = $false
+        $lockStartInfo.CreateNoWindow = $true
+        $lockStartInfo.Environment["NOVAGAME_REMOVAL_PROBE_LOCK"] =
+            $transientLockPath
+        $lockStartInfo.Environment["NOVAGAME_REMOVAL_PROBE_READY"] =
+            $transientReadyPath
+        $encodedLockScript = [Convert]::ToBase64String(
+            [Text.Encoding]::Unicode.GetBytes($lockScript))
+        $null = $lockStartInfo.ArgumentList.Add("-NoProfile")
+        $null = $lockStartInfo.ArgumentList.Add("-EncodedCommand")
+        $null = $lockStartInfo.ArgumentList.Add($encodedLockScript)
+        $lockProcess = [System.Diagnostics.Process]::Start($lockStartInfo)
+
+        $readyDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not (Test-Path -LiteralPath $transientReadyPath -PathType Leaf) -and
+            -not $lockProcess.HasExited -and
+            [DateTime]::UtcNow -lt $readyDeadline) {
+            Start-Sleep -Milliseconds 25
+        }
+        Assert-Condition `
+            ((Test-Path -LiteralPath $transientReadyPath -PathType Leaf) -and
+                -not $lockProcess.HasExited) `
+            "The transient run-root lock probe did not become ready."
+        Remove-AdminManagementRunRootVerified `
+            -RunRoot $transientRunRoot `
+            -MaximumAttempts 6
+        Assert-Condition `
+            (-not (Test-Path -LiteralPath $transientRunRoot)) `
+            "The transient run-root lock survived bounded deletion retries."
+        Assert-Condition `
+            $lockProcess.WaitForExit(5000) `
+            "The transient run-root lock process did not exit."
+        Assert-Condition `
+            ($lockProcess.ExitCode -eq 0) `
+            "The transient run-root lock process failed."
+
+        New-Item -ItemType Directory -Path $permanentRunRoot -Force |
+            Out-Null
+        $permanentLockPath = Join-Path $permanentRunRoot "permanent.lock"
+        $permanentLock = [System.IO.File]::Open(
+            $permanentLockPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::ReadWrite,
+            [System.IO.FileShare]::None)
+        $permanentRemovalRejected = $false
+        try {
+            Remove-AdminManagementRunRootVerified `
+                -RunRoot $permanentRunRoot `
+                -MaximumAttempts 2
+        }
+        catch {
+            $permanentRemovalRejected = $_.Exception.Message.Contains(
+                "could not be verified after 2 attempts",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            ($permanentRemovalRejected -and
+                (Test-Path -LiteralPath $permanentRunRoot -PathType Container)) `
+            "Permanent run-root deletion failure was not bounded and preserved."
+        $permanentLock.Dispose()
+        $permanentLock = $null
+        Remove-AdminManagementRunRootVerified -RunRoot $permanentRunRoot
+
+        New-Item -ItemType Directory -Path $boundaryRunRoot -Force |
+            Out-Null
+        $nestedRunRoot = Join-Path `
+            $boundaryRunRoot `
+            "novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+        New-Item -ItemType Directory -Path $nestedRunRoot -Force |
+            Out-Null
+        $boundarySentinel = Join-Path $nestedRunRoot "sentinel.txt"
+        [System.IO.File]::WriteAllText($boundarySentinel, "preserve")
+        $boundaryRemovalRejected = $false
+        try {
+            Remove-AdminManagementRunRootVerified -RunRoot $nestedRunRoot
+        }
+        catch {
+            $boundaryRemovalRejected = $_.Exception.Message.Contains(
+                "must be direct children",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            ($boundaryRemovalRejected -and
+                (Test-Path -LiteralPath $boundarySentinel -PathType Leaf)) `
+            "Run-root deletion crossed or weakened its validated boundary."
+        Remove-AdminManagementRunRootVerified -RunRoot $boundaryRunRoot
+    }
+    finally {
+        if ($null -ne $permanentLock) {
+            $permanentLock.Dispose()
+        }
+        if ($null -ne $lockProcess) {
+            try {
+                if (-not $lockProcess.HasExited) {
+                    $lockProcess.Kill($true)
+                    $null = $lockProcess.WaitForExit(5000)
+                }
+            }
+            catch {
+            }
+            $lockProcess.Dispose()
+        }
+        foreach ($probeRoot in @(
+                $transientRunRoot,
+                $permanentRunRoot,
+                $boundaryRunRoot)) {
+            if (Test-Path -LiteralPath $probeRoot) {
+                Remove-AdminManagementRunRootVerified `
+                    -RunRoot $probeRoot `
+                    -MaximumAttempts 6
+            }
+        }
+    }
+}
+
+function Get-AdminManagementAllowedScreenshotPolicy {
+    param(
+        [Parameter(Mandatory)][string]$ArtifactRoot,
+        [string[]]$AllowedScreenshotRelativePaths = @()
+    )
+
+    $resolvedArtifactRoot = Resolve-AdminManagementRunRoot `
+        -RunRoot $ArtifactRoot
+    $allowedPaths = [System.Collections.Generic.Dictionary[string, string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    $rootPrefix = $resolvedArtifactRoot.TrimEnd('\') + '\'
+    foreach ($relativePath in $AllowedScreenshotRelativePaths) {
+        Assert-Condition `
+            (-not [string]::IsNullOrWhiteSpace($relativePath)) `
+            "Admin management screenshot allowlist contains an empty path."
+        $normalizedRelativePath = $relativePath.Replace('\', '/')
+        Assert-Condition `
+            (-not [System.IO.Path]::IsPathRooted($relativePath) -and
+                $normalizedRelativePath -notmatch '^[A-Za-z]:' -and
+                $normalizedRelativePath -notmatch '(^|/)\.\.?(/|$)' -and
+                $normalizedRelativePath -notmatch '//') `
+            "Admin management screenshot allowlist path '$relativePath' is unsafe."
+        Assert-Condition `
+            ([System.IO.Path]::GetExtension($normalizedRelativePath).Equals(
+                ".png",
+                [StringComparison]::OrdinalIgnoreCase)) `
+            "Admin management screenshot allowlist path '$relativePath' is not a PNG."
+        $resolvedScreenshotPath = [System.IO.Path]::GetFullPath(
+            (Join-Path `
+                $resolvedArtifactRoot `
+                $normalizedRelativePath.Replace('/', '\')))
+        Assert-Condition `
+            $resolvedScreenshotPath.StartsWith(
+                $rootPrefix,
+                [StringComparison]::OrdinalIgnoreCase) `
+            "Admin management screenshot '$relativePath' escapes '$resolvedArtifactRoot'."
+        $canonicalRelativePath = [System.IO.Path]::GetRelativePath(
+            $resolvedArtifactRoot,
+            $resolvedScreenshotPath).Replace('\', '/')
+        Assert-Condition `
+            $canonicalRelativePath.Equals(
+                $normalizedRelativePath,
+                [StringComparison]::Ordinal) `
+            "Admin management screenshot allowlist path '$relativePath' is not canonical."
+        Assert-Condition `
+            (-not $allowedPaths.ContainsKey($canonicalRelativePath)) `
+            "Admin management screenshot allowlist repeats '$canonicalRelativePath'."
+        $allowedPaths.Add($canonicalRelativePath, $resolvedScreenshotPath)
+    }
+
+    return [pscustomobject]@{
+        RootPath = $resolvedArtifactRoot
+        Paths = $allowedPaths
+    }
+}
+
+function Remove-AdminManagementNonRetainableArtifacts {
+    param(
+        [Parameter(Mandatory)][string]$ArtifactRoot,
+        [string[]]$AllowedScreenshotRelativePaths = @()
+    )
+
+    $screenshotPolicy = Get-AdminManagementAllowedScreenshotPolicy `
+        -ArtifactRoot $ArtifactRoot `
+        -AllowedScreenshotRelativePaths $AllowedScreenshotRelativePaths
+    $resolvedArtifactRoot = [string]$screenshotPolicy.RootPath
+    if (-not (Test-Path -LiteralPath $resolvedArtifactRoot -PathType Container)) {
+        return
+    }
+    Assert-AdminManagementTreeHasNoReparsePoints -RootPath $resolvedArtifactRoot
+    $retainableExtensions = [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in Get-AdminManagementRetainableTextExtensions) {
+        $null = $retainableExtensions.Add($extension)
+    }
+    foreach ($artifactFile in Get-ChildItem `
+        -LiteralPath $resolvedArtifactRoot `
+        -Recurse `
+            -File `
+            -Force `
+            -ErrorAction Stop) {
+        $relativePath = [System.IO.Path]::GetRelativePath(
+            $resolvedArtifactRoot,
+            $artifactFile.FullName).Replace('\', '/')
+        $isAllowedScreenshot =
+            $artifactFile.Extension.Equals(
+                ".png",
+                [StringComparison]::OrdinalIgnoreCase) -and
+            $screenshotPolicy.Paths.ContainsKey($relativePath)
+        $isRawProcessTranscript = $relativePath -cmatch
+            '^(?:api|dbmigrator|playwright)\.(?:stdout|stderr)\.log$'
+        if (($isRawProcessTranscript -or
+                -not $retainableExtensions.Contains($artifactFile.Extension)) -and
+            -not $isAllowedScreenshot) {
+            Remove-Item -LiteralPath $artifactFile.FullName -Force
+        }
+    }
+}
+
+function Read-AdminManagementPngStructure {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    Assert-Condition `
+        ($bytes.Length -ge 45 -and $bytes.Length -le 20MB) `
+        "Admin management screenshot has an invalid PNG byte length."
+    $expectedSignature = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
+    Assert-Condition `
+        ([Linq.Enumerable]::SequenceEqual(
+                [byte[]]$bytes[0..7],
+                $expectedSignature)) `
+        "Admin management screenshot does not have a canonical PNG signature."
+    $allowedChunkTypes = [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::Ordinal)
+    foreach ($chunkType in @(
+            "IHDR", "PLTE", "IDAT", "IEND", "cHRM", "gAMA", "sBIT",
+            "sRGB", "bKGD", "tRNS", "pHYs")) {
+        $null = $allowedChunkTypes.Add($chunkType)
+    }
+    $offset = 8
+    $chunkIndex = 0
+    $idatCount = 0
+    $iendCount = 0
+    while ($offset -lt $bytes.Length) {
+        Assert-Condition `
+            (($bytes.Length - $offset) -ge 12) `
+            "Admin management screenshot has a truncated PNG chunk."
+        $chunkLength =
+            ([uint64]$bytes[$offset] -shl 24) -bor
+            ([uint64]$bytes[$offset + 1] -shl 16) -bor
+            ([uint64]$bytes[$offset + 2] -shl 8) -bor
+            [uint64]$bytes[$offset + 3]
+        $chunkType = [Text.Encoding]::ASCII.GetString($bytes, $offset + 4, 4)
+        $chunkEnd = [uint64]$offset + 12 + $chunkLength
+        Assert-Condition `
+            ($chunkType -cmatch '^[A-Za-z]{4}$' -and
+                $chunkEnd -le [uint64]$bytes.Length) `
+            "Admin management screenshot has an invalid PNG chunk boundary."
+        Assert-Condition `
+            $allowedChunkTypes.Contains($chunkType) `
+            "Admin management screenshot contains an unsafe PNG chunk '$chunkType'."
+        if ($chunkIndex -eq 0) {
+            Assert-Condition `
+                ($chunkType -ceq "IHDR" -and $chunkLength -eq 13) `
+                "Admin management screenshot does not have a canonical PNG IHDR header."
+        }
+        elseif ($chunkType -ceq "IHDR") {
+            throw "Admin management screenshot contains more than one PNG IHDR chunk."
+        }
+        if ($chunkType -ceq "IDAT") {
+            $idatCount++
+        }
+        if ($chunkType -ceq "IEND") {
+            $iendCount++
+            Assert-Condition `
+                ($chunkLength -eq 0 -and
+                    $iendCount -eq 1 -and
+                    $chunkEnd -eq [uint64]$bytes.Length) `
+                "Admin management screenshot must end at one terminal PNG IEND chunk."
+        }
+        $offset = [int]$chunkEnd
+        $chunkIndex++
+    }
+    Assert-Condition `
+        ($offset -eq $bytes.Length -and $idatCount -gt 0 -and $iendCount -eq 1) `
+        "Admin management screenshot must contain image data and one terminal PNG IEND chunk."
+    $width =
+        ([uint64]$bytes[16] -shl 24) -bor
+        ([uint64]$bytes[17] -shl 16) -bor
+        ([uint64]$bytes[18] -shl 8) -bor
+        [uint64]$bytes[19]
+    $height =
+        ([uint64]$bytes[20] -shl 24) -bor
+        ([uint64]$bytes[21] -shl 16) -bor
+        ([uint64]$bytes[22] -shl 8) -bor
+        [uint64]$bytes[23]
+    return [pscustomobject]@{
+        Width = $width
+        Height = $height
+    }
+}
+
+function Read-AdminManagementPngHeader {
+    param([Parameter(Mandatory)][string]$Path)
+
+    return Read-AdminManagementPngStructure -Path $Path
+}
+
+function Initialize-AdminManagementScreenshotPixelInspectorType {
+    if ("NovaGame.Verification.ScreenshotPixelInspector" -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @'
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.Text;
+
+namespace NovaGame.Verification
+{
+    public sealed class ScreenshotPixelStatistics
+    {
+        public long OpaquePixels { get; internal set; }
+        public long NonDominantVisiblePixels { get; internal set; }
+        public int VisibleColorCount { get; internal set; }
+    }
+
+    public static class ScreenshotPixelInspector
+    {
+        public static bool ContainsSequence(byte[] value, byte[] candidate)
+        {
+            if (value == null || candidate == null || candidate.Length == 0)
+            {
+                return false;
+            }
+            return value.AsSpan().IndexOf(candidate) >= 0;
+        }
+
+        public static byte[] InsertChunkBeforeIend(
+            byte[] png,
+            string chunkType,
+            byte[] data)
+        {
+            if (png == null || png.Length < 12 || data == null ||
+                string.IsNullOrWhiteSpace(chunkType) || chunkType.Length != 4)
+            {
+                throw new ArgumentException("invalid-png-probe-chunk");
+            }
+            var typeBytes = Encoding.ASCII.GetBytes(chunkType);
+            var iendOffset = png.Length - 12;
+            if (Encoding.ASCII.GetString(png, iendOffset + 4, 4) != "IEND")
+            {
+                throw new ArgumentException("missing-terminal-iend");
+            }
+            var chunk = new byte[checked(data.Length + 12)];
+            BinaryPrimitives.WriteUInt32BigEndian(
+                chunk.AsSpan(0, 4),
+                checked((uint)data.Length));
+            typeBytes.CopyTo(chunk, 4);
+            data.CopyTo(chunk, 8);
+            var crc = ComputePngCrc(chunk.AsSpan(4, data.Length + 4));
+            BinaryPrimitives.WriteUInt32BigEndian(
+                chunk.AsSpan(data.Length + 8, 4),
+                crc);
+            var output = new byte[checked(png.Length + chunk.Length)];
+            Buffer.BlockCopy(png, 0, output, 0, iendOffset);
+            Buffer.BlockCopy(chunk, 0, output, iendOffset, chunk.Length);
+            Buffer.BlockCopy(
+                png,
+                iendOffset,
+                output,
+                iendOffset + chunk.Length,
+                12);
+            return output;
+        }
+
+        private static uint ComputePngCrc(ReadOnlySpan<byte> value)
+        {
+            var crc = uint.MaxValue;
+            foreach (var current in value)
+            {
+                crc ^= current;
+                for (var bit = 0; bit < 8; bit++)
+                {
+                    crc = (crc >> 1) ^
+                        ((crc & 1) == 0 ? 0u : 0xedb88320u);
+                }
+            }
+            return ~crc;
+        }
+
+        public static ScreenshotPixelStatistics Inspect(byte[] bgraPixels)
+        {
+            if (bgraPixels == null || bgraPixels.Length == 0 ||
+                bgraPixels.Length % 4 != 0)
+            {
+                throw new ArgumentException("invalid-bgra-pixel-buffer");
+            }
+
+            long opaquePixels = 0;
+            uint majorityCandidate = 0;
+            long majorityBalance = 0;
+            var visibleColors = new HashSet<uint>();
+            for (var offset = 0; offset < bgraPixels.Length; offset += 4)
+            {
+                if (bgraPixels[offset + 3] < 250)
+                {
+                    continue;
+                }
+
+                opaquePixels++;
+                var color =
+                    (uint)bgraPixels[offset] |
+                    ((uint)bgraPixels[offset + 1] << 8) |
+                    ((uint)bgraPixels[offset + 2] << 16) |
+                    ((uint)bgraPixels[offset + 3] << 24);
+                if (visibleColors.Count < 16)
+                {
+                    visibleColors.Add(color);
+                }
+                if (majorityBalance == 0)
+                {
+                    majorityCandidate = color;
+                    majorityBalance = 1;
+                }
+                else if (majorityCandidate == color)
+                {
+                    majorityBalance++;
+                }
+                else
+                {
+                    majorityBalance--;
+                }
+            }
+
+            long majorityCandidatePixels = 0;
+            if (opaquePixels > 0)
+            {
+                for (var offset = 0; offset < bgraPixels.Length; offset += 4)
+                {
+                    if (bgraPixels[offset + 3] < 250)
+                    {
+                        continue;
+                    }
+                    var color =
+                        (uint)bgraPixels[offset] |
+                        ((uint)bgraPixels[offset + 1] << 8) |
+                        ((uint)bgraPixels[offset + 2] << 16) |
+                        ((uint)bgraPixels[offset + 3] << 24);
+                    if (color == majorityCandidate)
+                    {
+                        majorityCandidatePixels++;
+                    }
+                }
+            }
+
+            return new ScreenshotPixelStatistics
+            {
+                OpaquePixels = opaquePixels,
+                NonDominantVisiblePixels = opaquePixels - majorityCandidatePixels,
+                VisibleColorCount = visibleColors.Count
+            };
+        }
+
+        public static byte[] CreateStrideAlignedProbe(
+            int width,
+            int height,
+            bool transparentBackground)
+        {
+            if (width <= 0 || height <= 0)
+            {
+                throw new ArgumentOutOfRangeException("invalid-probe-dimensions");
+            }
+            var pixelCount = checked(width * height);
+            var pixels = new byte[checked(pixelCount * 4)];
+            for (var pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++)
+            {
+                var offset = pixelIndex * 4;
+                pixels[offset] = 240;
+                pixels[offset + 1] = 240;
+                pixels[offset + 2] = 240;
+                pixels[offset + 3] = transparentBackground ? (byte)0 : (byte)255;
+            }
+
+            var oldSampleStep = Math.Max(1, pixelCount / 50000);
+            var oldSampleCount =
+                (pixelCount + oldSampleStep - 1) / oldSampleStep;
+            var changedSampleCount = transparentBackground
+                ? oldSampleCount
+                : Math.Max(17, (int)Math.Ceiling(oldSampleCount * 0.02));
+            var sampleOrdinal = 0;
+            for (var pixelIndex = 0;
+                pixelIndex < pixelCount && sampleOrdinal < changedSampleCount;
+                pixelIndex += oldSampleStep)
+            {
+                var offset = pixelIndex * 4;
+                pixels[offset] = (byte)((sampleOrdinal * 17 + 1) % 239);
+                pixels[offset + 1] = (byte)((sampleOrdinal * 29 + 2) % 239);
+                pixels[offset + 2] = (byte)((sampleOrdinal * 43 + 3) % 239);
+                pixels[offset + 3] = 255;
+                sampleOrdinal++;
+            }
+            return pixels;
+        }
+    }
+}
+'@
+}
+
+function Assert-AdminManagementSuccessfulScreenshots {
+    param(
+        [Parameter(Mandatory)][string]$RunRoot,
+        [Parameter(Mandatory)][object[]]$ScreenshotSpecifications
+    )
+
+    $expectedPaths = @(
+        $ScreenshotSpecifications |
+            ForEach-Object { [string]$_.RelativePath })
+    $screenshotPolicy = Get-AdminManagementAllowedScreenshotPolicy `
+        -ArtifactRoot $RunRoot `
+        -AllowedScreenshotRelativePaths $expectedPaths
+    Assert-Condition `
+        (Test-Path -LiteralPath $screenshotPolicy.RootPath -PathType Container) `
+        "Admin management successful screenshot root is missing."
+    Assert-AdminManagementTreeHasNoReparsePoints `
+        -RootPath $screenshotPolicy.RootPath
+    $actualPaths = @(
+        Get-ChildItem `
+            -LiteralPath $screenshotPolicy.RootPath `
+            -Recurse `
+            -File `
+            -Filter "*.png" `
+            -Force `
+            -ErrorAction Stop |
+            ForEach-Object {
+                [System.IO.Path]::GetRelativePath(
+                    $screenshotPolicy.RootPath,
+                    $_.FullName).Replace('\', '/')
+            })
+    Assert-StringSet `
+        -Expected $expectedPaths `
+        -Actual $actualPaths `
+        -Message "Admin management successful screenshots differ from the exact allowlist."
+
+    Add-Type -AssemblyName PresentationCore -ErrorAction Stop
+    $inspectionResults = [System.Collections.Generic.List[object]]::new()
+    foreach ($specification in $ScreenshotSpecifications) {
+        $relativePath = [string]$specification.RelativePath
+        Assert-Condition `
+            ($null -ne $specification.PSObject.Properties["Width"] -and
+                $null -ne $specification.PSObject.Properties["MinimumHeight"] -and
+                $null -ne $specification.PSObject.Properties["MaximumHeight"]) `
+            "Admin management screenshot '$relativePath' has an incomplete dimension contract."
+        $expectedWidth = [int]$specification.Width
+        $minimumHeight = [int]$specification.MinimumHeight
+        $maximumHeight = [int]$specification.MaximumHeight
+        Assert-Condition `
+            ($expectedWidth -gt 0 -and
+                $minimumHeight -gt 0 -and
+                $maximumHeight -ge $minimumHeight) `
+            "Admin management screenshot '$relativePath' has invalid dimension bounds."
+        $screenshotPath = [string]$screenshotPolicy.Paths[$relativePath]
+        Assert-Condition `
+            (Test-Path -LiteralPath $screenshotPath -PathType Leaf) `
+            "Admin management screenshot '$relativePath' is missing."
+        $screenshotFile = Get-Item -LiteralPath $screenshotPath -Force
+        Assert-Condition `
+            ($screenshotFile.Length -gt 0 -and $screenshotFile.Length -le 20MB) `
+            "Admin management screenshot '$relativePath' has an invalid file size."
+        $pngHeader = Read-AdminManagementPngHeader -Path $screenshotPath
+        Assert-Condition `
+            ($pngHeader.Width -eq $expectedWidth -and
+                $pngHeader.Height -ge $minimumHeight -and
+                $pngHeader.Height -le $maximumHeight) `
+            "Admin management screenshot '$relativePath' declares dimensions $($pngHeader.Width)x$($pngHeader.Height), expected width $expectedWidth and height $minimumHeight..$maximumHeight."
+        $declaredPixelCount = [uint64]$pngHeader.Width *
+            [uint64]$pngHeader.Height
+        Assert-Condition `
+            ($declaredPixelCount -gt 0 -and
+                $declaredPixelCount -le 20000000) `
+            "Admin management screenshot '$relativePath' exceeds the pre-decode pixel-inspection bound."
+
+        $stream = $null
+        try {
+            $stream = [System.IO.File]::Open(
+                $screenshotPath,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::Read)
+            $decoder = [System.Windows.Media.Imaging.PngBitmapDecoder]::new(
+                $stream,
+                [System.Windows.Media.Imaging.BitmapCreateOptions]::PreservePixelFormat,
+                [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+            Assert-Condition `
+                ($decoder.Frames.Count -eq 1) `
+                "Admin management screenshot '$relativePath' must contain exactly one PNG frame."
+            $frame = $decoder.Frames[0]
+        }
+        catch {
+            throw "Admin management screenshot '$relativePath' is not a valid PNG: $($_.Exception.Message)"
+        }
+        finally {
+            if ($null -ne $stream) {
+                $stream.Dispose()
+            }
+        }
+
+        Assert-Condition `
+            ($frame.PixelWidth -eq [int]$pngHeader.Width -and
+                $frame.PixelHeight -eq [int]$pngHeader.Height) `
+            "Admin management screenshot '$relativePath' decoded dimensions differ from its IHDR."
+        $pixelCount = [long]$frame.PixelWidth * [long]$frame.PixelHeight
+        Assert-Condition `
+            ($pixelCount -gt 0 -and $pixelCount -le 20000000) `
+            "Admin management screenshot '$relativePath' exceeds the pixel-inspection bound."
+        $bitmap = if ($frame.Format -eq
+            [System.Windows.Media.PixelFormats]::Bgra32) {
+            $frame
+        }
+        else {
+            [System.Windows.Media.Imaging.FormatConvertedBitmap]::new(
+                $frame,
+                [System.Windows.Media.PixelFormats]::Bgra32,
+                $null,
+                0)
+        }
+        $stride = [int]$frame.PixelWidth * 4
+        $pixels = [byte[]]::new($stride * [int]$frame.PixelHeight)
+        $bitmap.CopyPixels($pixels, $stride, 0)
+
+        Initialize-AdminManagementScreenshotPixelInspectorType
+        $pixelStatistics =
+            [NovaGame.Verification.ScreenshotPixelInspector]::Inspect($pixels)
+        $opaquePixelCount = [long]$pixelStatistics.OpaquePixels
+        $nonDominantVisiblePixelCount =
+            [long]$pixelStatistics.NonDominantVisiblePixels
+        $visibleColorCount = [int]$pixelStatistics.VisibleColorCount
+        $minimumOpaquePixels = [long][Math]::Ceiling($pixelCount * 0.95)
+        $minimumNonDominantPixels = [Math]::Max(
+            64,
+            [long][Math]::Ceiling($opaquePixelCount * 0.01))
+        Assert-Condition `
+            ($opaquePixelCount -ge $minimumOpaquePixels) `
+            "Admin management screenshot '$relativePath' is transparent or lacks an opaque surface."
+        Assert-Condition `
+            ($visibleColorCount -ge 16 -and
+                $nonDominantVisiblePixelCount -ge
+                    $minimumNonDominantPixels) `
+            "Admin management screenshot '$relativePath' is blank or lacks pixel diversity."
+
+        $null = $inspectionResults.Add([pscustomobject]@{
+                RelativePath = $relativePath
+                Sha256 = (Get-FileHash `
+                    -LiteralPath $screenshotPath `
+                    -Algorithm SHA256).Hash
+                Width = [int]$frame.PixelWidth
+                Height = [int]$frame.PixelHeight
+                VisibleColors = $visibleColorCount
+                OpaquePixels = $opaquePixelCount
+                NonDominantPixels = $nonDominantVisiblePixelCount
+            })
+    }
+
+    return $inspectionResults.ToArray()
+}
+
+function Assert-AdminManagementScreenshotIdentity {
+    param(
+        [Parameter(Mandatory)][string]$RunRoot,
+        [Parameter(Mandatory)][object[]]$InspectionRecords
+    )
+
+    $relativePaths = @(
+        $InspectionRecords | ForEach-Object { [string]$_.RelativePath })
+    $screenshotPolicy = Get-AdminManagementAllowedScreenshotPolicy `
+        -ArtifactRoot $RunRoot `
+        -AllowedScreenshotRelativePaths $relativePaths
+    foreach ($record in $InspectionRecords) {
+        $relativePath = [string]$record.RelativePath
+        $screenshotPath = [string]$screenshotPolicy.Paths[$relativePath]
+        Assert-Condition `
+            (Test-Path -LiteralPath $screenshotPath -PathType Leaf) `
+            "Validated Admin management screenshot '$relativePath' is missing."
+        $currentHash = (Get-FileHash `
+            -LiteralPath $screenshotPath `
+            -Algorithm SHA256).Hash
+        $header = Read-AdminManagementPngHeader -Path $screenshotPath
+        Assert-Condition `
+            ($currentHash -ceq [string]$record.Sha256 -and
+                $header.Width -eq [int]$record.Width -and
+                $header.Height -eq [int]$record.Height) `
+            "Validated Admin management screenshot '$relativePath' changed before retained-artifact scanning."
+    }
+}
+
+function Read-AdminManagementRetainedText {
+    param([Parameter(Mandatory)][System.IO.FileInfo]$ArtifactFile)
+
+    $retainableExtensions = [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in Get-AdminManagementRetainableTextExtensions) {
+        $null = $retainableExtensions.Add($extension)
+    }
+    Assert-Condition `
+        $retainableExtensions.Contains($ArtifactFile.Extension) `
+        "Admin management failed evidence must not retain non-text artifact '$($ArtifactFile.FullName)'."
+    if ($ArtifactFile.Length -gt 20MB) {
+        throw "Admin management artifact '$($ArtifactFile.FullName)' exceeds the bounded secret-scan size."
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($ArtifactFile.FullName)
+    try {
+        $content = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    }
+    catch [System.Text.DecoderFallbackException] {
+        throw "Admin management artifact '$($ArtifactFile.FullName)' is not strict UTF-8."
+    }
+    foreach ($character in $content.ToCharArray()) {
+        if ([char]::GetUnicodeCategory($character) -eq
+                [System.Globalization.UnicodeCategory]::Control -and
+            $character -notin @([char]9, [char]10, [char]13)) {
+            throw "Admin management artifact '$($ArtifactFile.FullName)' contains an unexpected control character."
+        }
+    }
+
+    return $content
+}
+
+function Assert-AdminManagementArtifactSecrets {
+    param(
+        [Parameter(Mandatory)][string]$ArtifactRoot,
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$SensitiveValues,
+        [string[]]$AllowedScreenshotRelativePaths = @(),
+        [object[]]$ScreenshotInspectionRecords = @()
+    )
+
+    $screenshotPolicy = Get-AdminManagementAllowedScreenshotPolicy `
+        -ArtifactRoot $ArtifactRoot `
+        -AllowedScreenshotRelativePaths $AllowedScreenshotRelativePaths
+    $resolvedArtifactRoot = [string]$screenshotPolicy.RootPath
+    if (-not (Test-Path -LiteralPath $resolvedArtifactRoot -PathType Container)) {
+        return
+    }
+    if ($AllowedScreenshotRelativePaths.Count -gt 0) {
+        Assert-StringSet `
+            -Expected $AllowedScreenshotRelativePaths `
+            -Actual @(
+                $ScreenshotInspectionRecords |
+                    ForEach-Object { [string]$_.RelativePath }) `
+            -Message "Admin management screenshot inspection records differ from the retained allowlist."
+        Assert-AdminManagementScreenshotIdentity `
+            -RunRoot $resolvedArtifactRoot `
+            -InspectionRecords $ScreenshotInspectionRecords
+    }
+    else {
+        Assert-Condition `
+            ($ScreenshotInspectionRecords.Count -eq 0) `
+            "Admin management failure evidence must not retain screenshot inspection records."
+    }
+    Assert-AdminManagementTreeHasNoReparsePoints -RootPath $resolvedArtifactRoot
+    $sensitiveRepresentations =
+        [System.Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::Ordinal)
+    foreach ($sensitiveValue in $SensitiveValues) {
+        if ([string]::IsNullOrWhiteSpace($sensitiveValue)) {
+            continue
+        }
+        $null = $sensitiveRepresentations.Add($sensitiveValue)
+        $secretHash = [Security.Cryptography.SHA256]::HashData(
+            [Text.UTF8Encoding]::new($false).GetBytes($sensitiveValue))
+        $secretHashHex = [Convert]::ToHexString($secretHash)
+        $null = $sensitiveRepresentations.Add($secretHashHex)
+        $null = $sensitiveRepresentations.Add(
+            $secretHashHex.ToLowerInvariant())
+        $null = $sensitiveRepresentations.Add(
+            [Convert]::ToBase64String($secretHash))
+        $null = $sensitiveRepresentations.Add(
+            [Convert]::ToBase64String($secretHash).
+                TrimEnd('=').
+                Replace('+', '-').
+                Replace('/', '_'))
+        if ($sensitiveValue -cmatch '^[A-Za-z0-9_-]{43}$') {
+            $decodedSecret = $null
+            try {
+                $decodedSecret = [Convert]::FromBase64String(
+                    $sensitiveValue.Replace('-', '+').Replace('_', '/') + '=')
+                if ($decodedSecret.Length -eq 32) {
+                    $decodedSecretHash =
+                        [Security.Cryptography.SHA256]::HashData(
+                            $decodedSecret)
+                    $decodedSecretHashHex =
+                        [Convert]::ToHexString($decodedSecretHash)
+                    $null = $sensitiveRepresentations.Add(
+                        $decodedSecretHashHex)
+                    $null = $sensitiveRepresentations.Add(
+                        $decodedSecretHashHex.ToLowerInvariant())
+                    $null = $sensitiveRepresentations.Add(
+                        [Convert]::ToBase64String($decodedSecretHash))
+                    $null = $sensitiveRepresentations.Add(
+                        [Convert]::ToBase64String($decodedSecretHash).
+                            TrimEnd('=').
+                            Replace('+', '-').
+                            Replace('/', '_'))
+                }
+            }
+            catch [FormatException] {
+                # The structured retained-secret patterns reject malformed values.
+            }
+            finally {
+                if ($null -ne $decodedSecret) {
+                    [Security.Cryptography.CryptographicOperations]::ZeroMemory(
+                        $decodedSecret)
+                }
+            }
+        }
+    }
+    $forbiddenPatterns = @(
+        '(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])',
+        '(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])',
+        '(?im)\bAuthorization\s*:\s*Bearer\s+\S+',
+        '(?im)\bSet-Cookie\s*:[^\r\n]*(?:refresh|token)[^\r\n]*',
+        '(?im)"(?:password|connection[\s_-]*string|access[\s_-]*token|refresh[\s_-]*token|signing[\s_-]*key|token[\s_-]*hash)"\s*:\s*"(?!\[REDACTED\])[^"\r\n]+"',
+        '(?im)\b(?:password|connection[\s_-]*string|access[\s_-]*token|refresh[\s_-]*token|signing[\s_-]*key|token[\s_-]*hash)\b\s*=\s*(?!\[REDACTED\])[^;\s"''<>]+',
+        '(?im)\b(?:server|host)\s*=\s*[^;\s]+;[^\r\n]{0,512}\bpassword\s*=',
+        '(?im)\bmysql(?:\+[A-Za-z0-9._-]+)?://[^\s"''<>]+',
+        '(?<![A-Za-z0-9+/])AQAAAA[A-Za-z0-9+/]{48,}={0,2}(?![A-Za-z0-9+/=])'
+    )
+    foreach ($artifactFile in Get-ChildItem `
+        -LiteralPath $resolvedArtifactRoot `
+        -Recurse `
+            -File `
+            -Force `
+            -ErrorAction Stop) {
+        $relativePath = [System.IO.Path]::GetRelativePath(
+            $resolvedArtifactRoot,
+            $artifactFile.FullName).Replace('\', '/')
+        if ($artifactFile.Extension.Equals(
+                ".png",
+                [StringComparison]::OrdinalIgnoreCase) -and
+            $screenshotPolicy.Paths.ContainsKey($relativePath)) {
+            $pngBytes = [System.IO.File]::ReadAllBytes($artifactFile.FullName)
+            Initialize-AdminManagementScreenshotPixelInspectorType
+            foreach ($sensitiveRepresentation in $sensitiveRepresentations) {
+                $representationBytes =
+                    [Text.UTF8Encoding]::new($false).GetBytes(
+                        $sensitiveRepresentation)
+                try {
+                    if ([NovaGame.Verification.ScreenshotPixelInspector]::
+                            ContainsSequence($pngBytes, $representationBytes)) {
+                        throw "Admin management artifact '$($artifactFile.FullName)' contains an exact sensitive value."
+                    }
+                }
+                finally {
+                    [Security.Cryptography.CryptographicOperations]::ZeroMemory(
+                        $representationBytes)
+                }
+            }
+            continue
+        }
+        $content = Read-AdminManagementRetainedText -ArtifactFile $artifactFile
+        foreach ($sensitiveRepresentation in $sensitiveRepresentations) {
+            if ($content.Contains(
+                    $sensitiveRepresentation,
+                    [StringComparison]::Ordinal)) {
+                throw "Admin management artifact '$($artifactFile.FullName)' contains an exact sensitive value."
+            }
+        }
+        foreach ($forbiddenPattern in $forbiddenPatterns) {
+            if ([regex]::IsMatch($content, $forbiddenPattern)) {
+                throw "Admin management artifact '$($artifactFile.FullName)' violates a retained-secret pattern."
+            }
+        }
+    }
+}
+
+function Get-AdminManagementArtifactSnapshot {
+    param([Parameter(Mandatory)][string]$ArtifactRoot)
+
+    $resolvedArtifactRoot = [System.IO.Path]::GetFullPath($ArtifactRoot)
+    $entries = [System.Collections.Generic.Dictionary[string, object]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    if (-not (Test-Path -LiteralPath $resolvedArtifactRoot)) {
+        return [pscustomobject]@{
+            RootPath = $resolvedArtifactRoot
+            RootExists = $false
+            Entries = $entries
+        }
+    }
+    Assert-Condition `
+        (Test-Path -LiteralPath $resolvedArtifactRoot -PathType Container) `
+        "Artifact snapshot root '$resolvedArtifactRoot' is not a directory."
+    Assert-AdminManagementTreeHasNoReparsePoints -RootPath $resolvedArtifactRoot
+    foreach ($artifactItem in Get-ChildItem `
+        -LiteralPath $resolvedArtifactRoot `
+        -Recurse `
+        -Force `
+        -ErrorAction Stop) {
+        $relativePath = [System.IO.Path]::GetRelativePath(
+            $resolvedArtifactRoot,
+            $artifactItem.FullName).Replace('\', '/')
+        $isDirectory = $artifactItem.PSIsContainer
+        $entries.Add($relativePath, [pscustomobject]@{
+                Kind = if ($isDirectory) { "Directory" } else { "File" }
+                Length = if ($isDirectory) { 0L } else { $artifactItem.Length }
+                Sha256 = if ($isDirectory) {
+                    $null
+                }
+                else {
+                    (Get-FileHash `
+                        -LiteralPath $artifactItem.FullName `
+                        -Algorithm SHA256).Hash
+                }
+            })
+    }
+
+    return [pscustomobject]@{
+        RootPath = $resolvedArtifactRoot
+        RootExists = $true
+        Entries = $entries
+    }
+}
+
+function Compare-AdminManagementArtifactSnapshots {
+    param(
+        [Parameter(Mandatory)]$Before,
+        [Parameter(Mandatory)]$After
+    )
+
+    Assert-Condition `
+        ([string]$Before.RootPath).Equals(
+            [string]$After.RootPath,
+            [StringComparison]::OrdinalIgnoreCase) `
+        "Admin management artifact snapshots target different roots."
+    $changes = [System.Collections.Generic.List[string]]::new()
+    if ([bool]$Before.RootExists -ne [bool]$After.RootExists) {
+        $null = $changes.Add(
+            $(if ($After.RootExists) { "Added root" } else { "Removed root" }))
+    }
+    $paths = [System.Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in @($Before.Entries.Keys) + @($After.Entries.Keys)) {
+        $null = $paths.Add([string]$path)
+    }
+    foreach ($path in @($paths | Sort-Object)) {
+        $beforeContains = $Before.Entries.ContainsKey($path)
+        $afterContains = $After.Entries.ContainsKey($path)
+        if (-not $beforeContains) {
+            $null = $changes.Add("Added '$path'")
+            continue
+        }
+        if (-not $afterContains) {
+            $null = $changes.Add("Removed '$path'")
+            continue
+        }
+        $beforeEntry = $Before.Entries[$path]
+        $afterEntry = $After.Entries[$path]
+        if ($beforeEntry.Kind -ne $afterEntry.Kind -or
+            $beforeEntry.Length -ne $afterEntry.Length -or
+            $beforeEntry.Sha256 -ne $afterEntry.Sha256) {
+            $null = $changes.Add("Modified '$path'")
+        }
+    }
+
+    return $changes.ToArray()
+}
+
+function Get-AdminManagementScreenshotSpecifications {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("LegacyGameConfig", "M35Management")]
+        [string]$Mode
+    )
+
+    Assert-Condition `
+        ($Mode -eq "LegacyGameConfig") `
+        "AdminE2E is unavailable until M35-07-T01 registers the exact management screenshot manifest."
+    return @(
+        [pscustomobject]@{
+            RelativePath =
+                "output/playwright/visual/game-config-mobile-390x844.png"
+            Width = 390
+            MinimumHeight = 844
+            MaximumHeight = 10000
+        },
+        [pscustomobject]@{
+            RelativePath =
+                "output/playwright/visual/game-config-desktop-1440x900.png"
+            Width = 1440
+            MinimumHeight = 900
+            MaximumHeight = 10000
+        }
+    )
+}
+
+function Get-AdminManagementResponseAuditManifest {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("LegacyGameConfig", "M35Management")]
+        [string]$Mode
+    )
+
+    $manifest = [System.Collections.Generic.List[object]]::new()
+    $null = $manifest.Add([pscustomobject]@{
+            ExactContextCount = 1
+            ExactDirectRequestCount = 6
+            ExpectedNetworkFailureCount = 0
+            ExpectedNetworkFailureMethod = $null
+            ExpectedNetworkFailurePathAndQuery = $null
+            FileName = "game-config-response-audit.json"
+            SourceFile = "game-config.spec.ts"
+            TestTitle =
+                "operator completes the GameConfig lifecycle against the real API"
+            ExactScreenshotSurfaceScanCount = 2
+            MinimumScreenshotSurfaceScanCount = 2
+        })
+    if ($Mode -eq "M35Management") {
+        foreach ($entry in @(
+                [pscustomobject]@{
+                    ExactContextCount = 2
+                    ExactDirectRequestCount = $null
+                    ExpectedNetworkFailureCount = 0
+                    ExpectedNetworkFailureMethod = $null
+                    ExpectedNetworkFailurePathAndQuery = $null
+                    FileName =
+                        "admin-access-administrator-lifecycle-response-audit.json"
+                    TestTitle = "administrator lifecycle and concurrency"
+                    MinimumScreenshotSurfaceScanCount = 0
+                },
+                [pscustomobject]@{
+                    ExactContextCount = 1
+                    ExactDirectRequestCount = $null
+                    ExpectedNetworkFailureCount = 0
+                    ExpectedNetworkFailureMethod = $null
+                    ExpectedNetworkFailurePathAndQuery = $null
+                    FileName =
+                        "admin-access-roles-permissions-response-audit.json"
+                    TestTitle = "roles, permissions, and authorization"
+                    MinimumScreenshotSurfaceScanCount = 0
+                },
+                [pscustomobject]@{
+                    ExactContextCount = 1
+                    ExactDirectRequestCount = $null
+                    ExpectedNetworkFailureCount = 0
+                    ExpectedNetworkFailureMethod = $null
+                    ExpectedNetworkFailurePathAndQuery = $null
+                    FileName =
+                        "admin-access-sessions-audit-response-audit.json"
+                    TestTitle = "sessions and audit"
+                    MinimumScreenshotSurfaceScanCount = 0
+                },
+                [pscustomobject]@{
+                    ExactContextCount = 1
+                    ExactDirectRequestCount = $null
+                    ExpectedNetworkFailureCount = 1
+                    ExpectedNetworkFailureMethod = "GET"
+                    ExpectedNetworkFailurePathAndQuery =
+                        "/api/admin-access/administrators?page=1&pageSize=20"
+                    FileName =
+                        "admin-access-responsive-failures-response-audit.json"
+                    TestTitle = "responsive and failure states"
+                    MinimumScreenshotSurfaceScanCount = 1
+                })) {
+            $entry | Add-Member `
+                -NotePropertyName SourceFile `
+                -NotePropertyValue "admin-access.spec.ts"
+            $entry | Add-Member `
+                -NotePropertyName ExactScreenshotSurfaceScanCount `
+                -NotePropertyValue $null
+            $null = $manifest.Add($entry)
+        }
+    }
+    return $manifest.ToArray()
+}
+
+function Assert-AdminManagementJsonObjectProperties {
+    param(
+        [Parameter(Mandatory)]$Value,
+        [Parameter(Mandatory)][string[]]$Expected,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    Assert-Condition `
+        ($Value -is [pscustomobject]) `
+        "$Description must be a JSON object."
+    $expectedProperties = @($Expected | Sort-Object -CaseSensitive)
+    $actualProperties = @(
+        $Value.PSObject.Properties.Name | Sort-Object -CaseSensitive)
+    Assert-Condition `
+        (($actualProperties -join "`n") -ceq
+            ($expectedProperties -join "`n")) `
+        "$Description properties differ from the exact case-sensitive schema."
+}
+
+function Test-AdminManagementJsonInteger {
+    param($Value)
+
+    return $Value -is [byte] -or
+        $Value -is [sbyte] -or
+        $Value -is [int16] -or
+        $Value -is [uint16] -or
+        $Value -is [int32] -or
+        $Value -is [uint32] -or
+        $Value -is [int64]
+}
+
+function Assert-AdminManagementExpectedNetworkFailures {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Records,
+        [Parameter(Mandatory)]$ExpectedReport,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    Assert-Condition `
+        ($Records.Count -eq
+            [int]$ExpectedReport.ExpectedNetworkFailureCount) `
+        "$Description has an unexpected network-failure count."
+    if ($Records.Count -eq 0) {
+        Assert-Condition `
+            ($null -eq $ExpectedReport.ExpectedNetworkFailureMethod -and
+                $null -eq
+                    $ExpectedReport.ExpectedNetworkFailurePathAndQuery) `
+            "$Description has an unexpected empty network-failure contract."
+        return
+    }
+
+    Assert-Condition `
+        ($Records.Count -eq 1 -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$ExpectedReport.ExpectedNetworkFailureMethod) -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$ExpectedReport.ExpectedNetworkFailurePathAndQuery)) `
+        "$Description has an incomplete exact network-failure contract."
+    $record = $Records[0]
+    Assert-AdminManagementJsonObjectProperties `
+        -Value $record `
+        -Expected @("count", "method", "pathAndQuery") `
+        -Description "$Description expected network failure"
+    Assert-Condition `
+        ((Test-AdminManagementJsonInteger $record.count) -and
+            [int64]$record.count -eq 1 -and
+            $record.method -is [string] -and
+            $record.method -ceq
+                [string]$ExpectedReport.ExpectedNetworkFailureMethod -and
+            $record.pathAndQuery -is [string] -and
+            $record.pathAndQuery -ceq
+                [string]$ExpectedReport.ExpectedNetworkFailurePathAndQuery -and
+            $record.pathAndQuery -cmatch '^/api/[^#\s]+(?:\?[^#\s]+)?$') `
+        "$Description differs from the exact expected network failure."
+}
+
+function Assert-AdminManagementResponseAuditRawJson {
+    param(
+        [Parameter(Mandatory)][string]$Content,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    $document = $null
+    try {
+        $document = [System.Text.Json.JsonDocument]::Parse(
+            $Content,
+            [System.Text.Json.JsonDocumentOptions]@{
+                AllowTrailingCommas = $false
+                CommentHandling =
+                    [System.Text.Json.JsonCommentHandling]::Disallow
+                MaxDepth = 64
+            })
+        Assert-Condition `
+            ($document.RootElement.ValueKind -eq
+                [System.Text.Json.JsonValueKind]::Object) `
+            "$Description root must be a JSON object."
+        $visitJsonElement = {
+            param(
+                [System.Text.Json.JsonElement]$Element,
+                [string]$Path
+            )
+
+            if ($Element.ValueKind -eq
+                [System.Text.Json.JsonValueKind]::Object) {
+                $propertyNames =
+                    [System.Collections.Generic.HashSet[string]]::new(
+                        [StringComparer]::Ordinal)
+                foreach ($property in $Element.EnumerateObject()) {
+                    Assert-Condition `
+                        $propertyNames.Add($property.Name) `
+                        "$Description contains duplicate JSON property '$($property.Name)' at '$Path'."
+                    & $visitJsonElement `
+                        -Element $property.Value `
+                        -Path "$Path.$($property.Name)"
+                }
+            }
+            elseif ($Element.ValueKind -eq
+                [System.Text.Json.JsonValueKind]::Array) {
+                $itemIndex = 0
+                foreach ($item in $Element.EnumerateArray()) {
+                    & $visitJsonElement `
+                        -Element $item `
+                        -Path "$Path[$itemIndex]"
+                    $itemIndex++
+                }
+            }
+        }
+        & $visitJsonElement -Element $document.RootElement -Path '$'
+        foreach ($arrayPropertyName in @(
+                "expectedNetworkFailures", "responseBodies", "violations")) {
+            $arrayProperty = $document.RootElement.GetProperty(
+                $arrayPropertyName)
+            Assert-Condition `
+                ($arrayProperty.ValueKind -eq
+                    [System.Text.Json.JsonValueKind]::Array) `
+                "$Description property '$arrayPropertyName' must be a JSON array."
+        }
+    }
+    catch [System.Text.Json.JsonException] {
+        throw "$Description is not strict JSON."
+    }
+    finally {
+        if ($null -ne $document) {
+            $document.Dispose()
+        }
+    }
+}
+
+function Assert-AdminManagementResponseAuditReports {
+    param(
+        [Parameter(Mandatory)][string]$RunRoot,
+        [Parameter(Mandatory)]
+        [ValidateSet("LegacyGameConfig", "M35Management")]
+        [string]$Mode
+    )
+
+    $resolvedRunRoot = Resolve-AdminManagementRunRoot -RunRoot $RunRoot
+    $evidenceRoot = Join-Path `
+        $resolvedRunRoot `
+        "output\playwright\evidence"
+    Assert-Condition `
+        (Test-Path -LiteralPath $evidenceRoot -PathType Container) `
+        "Admin Playwright response-audit directory is missing."
+    Assert-AdminManagementTreeHasNoReparsePoints -RootPath $evidenceRoot
+    $manifest = @(Get-AdminManagementResponseAuditManifest -Mode $Mode)
+    $expectedFileNames = @($manifest | ForEach-Object { $_.FileName })
+    $actualFileNames = @(
+        Get-ChildItem `
+            -LiteralPath $evidenceRoot `
+            -File `
+            -Filter "*-response-audit.json" `
+            -Force `
+            -ErrorAction Stop |
+            ForEach-Object { $_.Name })
+    Assert-StringSet `
+        -Expected $expectedFileNames `
+        -Actual $actualFileNames `
+        -Message "Admin Playwright response-audit reports differ from the exact manifest."
+
+    $validatedReports = [System.Collections.Generic.List[object]]::new()
+    foreach ($expectedReport in $manifest) {
+        $reportPath = Join-Path $evidenceRoot $expectedReport.FileName
+        $reportFile = Get-Item -LiteralPath $reportPath -Force
+        $reportContent = Read-AdminManagementRetainedText `
+            -ArtifactFile $reportFile
+        Assert-AdminManagementResponseAuditRawJson `
+            -Content $reportContent `
+            -Description "Admin Playwright response-audit '$($expectedReport.FileName)'"
+        try {
+            $report = $reportContent | ConvertFrom-Json
+        }
+        catch {
+            throw "Admin Playwright response-audit '$($expectedReport.FileName)' is not valid JSON."
+        }
+        Assert-AdminManagementJsonObjectProperties `
+            -Value $report `
+            -Expected @(
+                "contextLedger", "directRequestLedger",
+                "expectedNetworkFailures", "requestLedger", "responseBodies",
+                "responseBodyCount", "schemaVersion", "screenshotSurfaceScanCount",
+                "sourceFile", "testStatus", "testTitle", "violations") `
+            -Description "Admin Playwright response-audit '$($expectedReport.FileName)'"
+        $responses = @($report.responseBodies)
+        Assert-Condition `
+            ((Test-AdminManagementJsonInteger $report.schemaVersion) -and
+                [int64]$report.schemaVersion -eq 1 -and
+                $report.sourceFile -is [string] -and
+                $report.sourceFile -ceq $expectedReport.SourceFile -and
+                $report.testTitle -is [string] -and
+                $report.testTitle -ceq $expectedReport.TestTitle -and
+                $report.testStatus -is [string] -and
+                $report.testStatus -ceq "passed" -and
+                (Test-AdminManagementJsonInteger $report.responseBodyCount) -and
+                [int64]$report.responseBodyCount -gt 0 -and
+                [int64]$report.responseBodyCount -eq $responses.Count -and
+                @($report.violations).Count -eq 0) `
+            "Admin Playwright response-audit '$($expectedReport.FileName)' has invalid summary metadata."
+        Assert-Condition `
+            (Test-AdminManagementJsonInteger `
+                $report.screenshotSurfaceScanCount) `
+            "Admin Playwright response-audit '$($expectedReport.FileName)' has a non-integer screenshot scan count."
+        $screenshotScanCount = [int64]$report.screenshotSurfaceScanCount
+        Assert-Condition `
+            ($screenshotScanCount -ge
+                [int]$expectedReport.MinimumScreenshotSurfaceScanCount) `
+            "Admin Playwright response-audit '$($expectedReport.FileName)' has too few screenshot-surface scans."
+        if ($null -ne $expectedReport.ExactScreenshotSurfaceScanCount) {
+            Assert-Condition `
+                ($screenshotScanCount -eq
+                    [int]$expectedReport.ExactScreenshotSurfaceScanCount) `
+                "Admin Playwright response-audit '$($expectedReport.FileName)' changed its exact screenshot-surface scan count."
+        }
+
+        $expectedNetworkFailures = @($report.expectedNetworkFailures)
+        Assert-AdminManagementExpectedNetworkFailures `
+            -Records $expectedNetworkFailures `
+            -ExpectedReport $expectedReport `
+            -Description "Admin Playwright response-audit '$($expectedReport.FileName)'"
+
+        $contextLedger = $report.contextLedger
+        Assert-AdminManagementJsonObjectProperties `
+            -Value $contextLedger `
+            -Expected @("closedBeforeListenerDetach", "observed") `
+            -Description "Admin Playwright context ledger"
+        Assert-Condition `
+            ((Test-AdminManagementJsonInteger $contextLedger.observed) -and
+                (Test-AdminManagementJsonInteger `
+                    $contextLedger.closedBeforeListenerDetach) -and
+                [int64]$contextLedger.observed -eq
+                    [int]$expectedReport.ExactContextCount -and
+                [int64]$contextLedger.closedBeforeListenerDetach -eq
+                    [int64]$contextLedger.observed) `
+            "Admin Playwright response-audit '$($expectedReport.FileName)' has an incomplete context ledger."
+
+        $directLedger = $report.directRequestLedger
+        Assert-AdminManagementJsonObjectProperties `
+            -Value $directLedger `
+            -Expected @(
+                "directApiRequestsCompleted", "directApiRequestsFailed",
+                "directApiRequestsObserved") `
+            -Description "Admin Playwright direct-request ledger"
+        foreach ($directLedgerProperty in @(
+                "directApiRequestsCompleted", "directApiRequestsFailed",
+                "directApiRequestsObserved")) {
+            Assert-Condition `
+                (Test-AdminManagementJsonInteger `
+                    $directLedger.$directLedgerProperty) `
+                "Admin Playwright response-audit '$($expectedReport.FileName)' has a non-integer direct-request ledger."
+        }
+        Assert-Condition `
+            ([int64]$directLedger.directApiRequestsFailed -eq 0 -and
+                [int64]$directLedger.directApiRequestsCompleted -eq
+                    [int64]$directLedger.directApiRequestsObserved -and
+                ($null -eq $expectedReport.ExactDirectRequestCount -or
+                    [int64]$directLedger.directApiRequestsObserved -eq
+                        [int]$expectedReport.ExactDirectRequestCount)) `
+            "Admin Playwright response-audit '$($expectedReport.FileName)' has an incomplete direct-request ledger."
+
+        $ledger = $report.requestLedger
+        Assert-AdminManagementJsonObjectProperties `
+            -Value $ledger `
+            -Expected @(
+                "browserRequestFailuresExpected", "browserRequestsCompleted",
+                "browserRequestsFailed", "browserRequestsObserved",
+                "browserResponsesObserved") `
+            -Description "Admin Playwright browser-request ledger"
+        foreach ($ledgerProperty in @(
+                "browserRequestFailuresExpected", "browserRequestsCompleted",
+                "browserRequestsFailed", "browserRequestsObserved",
+                "browserResponsesObserved")) {
+            Assert-Condition `
+                (Test-AdminManagementJsonInteger $ledger.$ledgerProperty) `
+                "Admin Playwright response-audit '$($expectedReport.FileName)' has a non-integer browser-request ledger."
+        }
+        Assert-Condition `
+            ([int64]$ledger.browserRequestsObserved -gt 0 -and
+                [int64]$ledger.browserRequestFailuresExpected -eq
+                    [int]$expectedReport.ExpectedNetworkFailureCount -and
+                [int64]$ledger.browserRequestsFailed -eq
+                    [int64]$ledger.browserRequestFailuresExpected -and
+                [int64]$ledger.browserRequestsObserved -eq
+                    [int64]$ledger.browserRequestsCompleted +
+                        [int64]$ledger.browserRequestsFailed -and
+                [int64]$ledger.browserResponsesObserved -eq
+                    [int64]$ledger.browserRequestsCompleted) `
+            "Admin Playwright response-audit '$($expectedReport.FileName)' has an incomplete browser request ledger."
+        Assert-Condition `
+            ($responses.Count -eq
+                [int64]$ledger.browserResponsesObserved +
+                    [int64]$directLedger.directApiRequestsCompleted) `
+            "Admin Playwright response-audit '$($expectedReport.FileName)' response count does not match its request ledgers."
+
+        for ($responseIndex = 0;
+            $responseIndex -lt $responses.Count;
+            $responseIndex++) {
+            $response = $responses[$responseIndex]
+            Assert-AdminManagementJsonObjectProperties `
+                -Value $response `
+                -Expected @(
+                    "bodyBytes", "method", "route", "scanned", "sequence",
+                    "status") `
+                -Description "Admin Playwright response-audit response $responseIndex"
+            Assert-Condition `
+                ((Test-AdminManagementJsonInteger $response.sequence) -and
+                    [int64]$response.sequence -eq $responseIndex -and
+                    $response.method -is [string] -and
+                    $response.method -cmatch
+                        '^(?:DELETE|GET|PATCH|POST|PUT)$' -and
+                    $response.route -is [string] -and
+                    $response.route -cmatch '^/api/[^?#]*$' -and
+                    (Test-AdminManagementJsonInteger $response.status) -and
+                    [int64]$response.status -ge 100 -and
+                    [int64]$response.status -le 599 -and
+                    (Test-AdminManagementJsonInteger $response.bodyBytes) -and
+                    [int64]$response.bodyBytes -ge 0 -and
+                    [int64]$response.bodyBytes -le 20MB -and
+                    $response.scanned -is [bool] -and
+                    $response.scanned -eq $true) `
+                "Admin Playwright response-audit '$($expectedReport.FileName)' response $responseIndex is invalid or unscanned."
+        }
+        $null = $validatedReports.Add([pscustomobject]@{
+                FileName = [string]$expectedReport.FileName
+                ResponseCount = $responses.Count
+                ScreenshotSurfaceScanCount = $screenshotScanCount
+                Sha256 = (Get-FileHash `
+                    -LiteralPath $reportPath `
+                    -Algorithm SHA256).Hash
+            })
+    }
+
+    return $validatedReports.ToArray()
+}
+
+function Write-AdminManagementProbePng {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][int]$Width,
+        [Parameter(Mandatory)][int]$Height,
+        [switch]$NearBlank,
+        [switch]$Solid,
+        [switch]$Transparent
+    )
+
+    Add-Type -AssemblyName PresentationCore -ErrorAction Stop
+    $stride = $Width * 4
+    $pixels = [byte[]]::new($stride * $Height)
+    for ($y = 0; $y -lt $Height; $y++) {
+        for ($x = 0; $x -lt $Width; $x++) {
+            $offset = ($y * $stride) + ($x * 4)
+            $isNearBlankOutlier = $NearBlank -and
+                (($y * $Width) + $x) -lt 15
+            if ($Solid -or ($NearBlank -and -not $isNearBlankOutlier)) {
+                $pixels[$offset] = 240
+                $pixels[$offset + 1] = 240
+                $pixels[$offset + 2] = 240
+            }
+            else {
+                $pixels[$offset] = [byte](($x * 7 + $y * 3) % 256)
+                $pixels[$offset + 1] = [byte](($x * 5 + $y * 11) % 256)
+                $pixels[$offset + 2] = [byte](($x * 13 + $y * 2) % 256)
+            }
+            $pixels[$offset + 3] = if ($Transparent) { 0 } else { 255 }
+        }
+    }
+    $bitmap = [System.Windows.Media.Imaging.BitmapSource]::Create(
+        $Width,
+        $Height,
+        96,
+        96,
+        [System.Windows.Media.PixelFormats]::Bgra32,
+        $null,
+        $pixels,
+        $stride)
+    $encoder = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
+    $encoder.Frames.Add(
+        [System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::Create,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None)
+        $encoder.Save($stream)
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Write-AdminManagementStrideAlignedProbePng {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][int]$Width,
+        [Parameter(Mandatory)][int]$Height,
+        [switch]$TransparentBackground
+    )
+
+    Add-Type -AssemblyName PresentationCore -ErrorAction Stop
+    Initialize-AdminManagementScreenshotPixelInspectorType
+    $pixels = [NovaGame.Verification.ScreenshotPixelInspector]::
+        CreateStrideAlignedProbe(
+            $Width,
+            $Height,
+            $TransparentBackground.IsPresent)
+    $stride = $Width * 4
+    $bitmap = [System.Windows.Media.Imaging.BitmapSource]::Create(
+        $Width,
+        $Height,
+        96,
+        96,
+        [System.Windows.Media.PixelFormats]::Bgra32,
+        $null,
+        $pixels,
+        $stride)
+    $encoder = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
+    $encoder.Frames.Add(
+        [System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::Create,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None)
+        $encoder.Save($stream)
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Test-AdminManagementArtifactPolicy {
+    $probeRunRoot = Join-Path `
+        $repositoryRoot `
+        ".local\admin-management\novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $utf8 = [System.Text.UTF8Encoding]::new($false)
+    try {
+        $dynamicCollectorProbe = New-AdminManagementDynamicSecretCollector
+        try {
+            Assert-Condition `
+                (Send-AdminManagementDynamicSecretProbe `
+                    -Channel $dynamicCollectorProbe `
+                    -Kind 1 `
+                    -Value "eyJhbGciOiJIUzI1NiJ9.cGF5bG9hZA.c2lnbmF0dXJl") `
+                "The dynamic-secret collector rejected a valid access token."
+            Assert-Condition `
+                (Send-AdminManagementDynamicSecretProbe `
+                    -Channel $dynamicCollectorProbe `
+                    -Kind 2 `
+                    -Value ("A" * 43)) `
+                "The dynamic-secret collector rejected a valid refresh token."
+            Assert-Condition `
+                (Send-AdminManagementDynamicSecretProbe `
+                    -Channel $dynamicCollectorProbe `
+                    -Kind 2 `
+                    -Value ("A" * 43)) `
+                "The dynamic-secret collector rejected a duplicate registration."
+            $dynamicCollectorRecords = @(
+                $dynamicCollectorProbe.Collector.StopAndSnapshot(
+                    [TimeSpan]::FromSeconds(5)))
+            Assert-Condition `
+                ($dynamicCollectorRecords.Count -eq 2) `
+                "The dynamic-secret collector did not deduplicate probe records."
+        }
+        finally {
+            $dynamicCollectorProbe.Collector.Dispose()
+        }
+
+        $invalidDynamicCollectorProbe =
+            New-AdminManagementDynamicSecretCollector
+        try {
+            Assert-Condition `
+                (Send-AdminManagementDynamicSecretProbe `
+                    -Channel $invalidDynamicCollectorProbe `
+                    -Kind 1 `
+                    -Value "eyJhbGciOiJIUzI1NiJ9.cGF5bG9hZA.c2lnbmF0dXJl") `
+                "The faulted dynamic-secret probe rejected its valid access token."
+            Assert-Condition `
+                (Send-AdminManagementDynamicSecretProbe `
+                    -Channel $invalidDynamicCollectorProbe `
+                    -Kind 2 `
+                    -Value ("B" * 43)) `
+                "The faulted dynamic-secret probe rejected its valid refresh token."
+            Assert-Condition `
+                (-not (Send-AdminManagementDynamicSecretProbe `
+                    -Channel $invalidDynamicCollectorProbe `
+                    -Kind 1 `
+                    -Value "eyJhbGciOiJIUzI1NiJ9.cGF5bG9hZA.c2lnbmF0dXJl" `
+                    -InvalidAuthenticationCode)) `
+                "The dynamic-secret collector acknowledged an invalid HMAC."
+            $invalidDynamicCollectorRejected = $false
+            try {
+                $null = $invalidDynamicCollectorProbe.Collector.StopAndSnapshot(
+                    [TimeSpan]::FromSeconds(5))
+            }
+            catch {
+                $invalidDynamicCollectorRejected = $_.Exception.Message.Contains(
+                    "dynamic-secret-registry-protocol",
+                    [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                $invalidDynamicCollectorRejected `
+                "The dynamic-secret collector did not fail closed after an invalid HMAC."
+            $faultedDynamicCollectorRecords = @(
+                $invalidDynamicCollectorProbe.Collector.SnapshotForCleanup())
+            Assert-Condition `
+                ($faultedDynamicCollectorRecords.Count -eq 2) `
+                "The faulted dynamic-secret collector lost its cleanup-only snapshot."
+        }
+        finally {
+            $invalidDynamicCollectorProbe.Collector.Dispose()
+        }
+
+        $partialDynamicCollectorProbe =
+            New-AdminManagementDynamicSecretCollector
+        $partialDynamicCollectorClient = $null
+        try {
+            $partialDynamicCollectorClient =
+                [System.IO.Pipes.NamedPipeClientStream]::new(
+                    ".",
+                    [string]$partialDynamicCollectorProbe.PipeName,
+                    [System.IO.Pipes.PipeDirection]::InOut,
+                    [System.IO.Pipes.PipeOptions]::None)
+            $partialDynamicCollectorClient.Connect(5000)
+            $partialFrame = [Text.Encoding]::ASCII.GetBytes("NGDS")
+            $partialDynamicCollectorClient.Write(
+                $partialFrame,
+                0,
+                $partialFrame.Length)
+            $partialDynamicCollectorClient.Flush()
+            $partialDynamicCollectorStopTimedOut = $false
+            try {
+                $null = $partialDynamicCollectorProbe.Collector.StopAndSnapshot(
+                    [TimeSpan]::FromMilliseconds(250))
+            }
+            catch {
+                $partialDynamicCollectorStopTimedOut = $_.Exception.Message.Contains(
+                    "dynamic-secret-registry-stop-timeout",
+                    [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                ($partialDynamicCollectorStopTimedOut -and
+                    $partialDynamicCollectorClient.IsConnected) `
+                "Stopping the dynamic-secret collector canceled an accepted partial frame."
+
+            $partialDynamicCollectorDisposeTimedOut = $false
+            try {
+                $partialDynamicCollectorProbe.Collector.Dispose(
+                    [TimeSpan]::FromMilliseconds(250))
+            }
+            catch {
+                $partialDynamicCollectorDisposeTimedOut = $_.Exception.Message.Contains(
+                    "dynamic-secret-registry-stop-timeout",
+                    [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                ($partialDynamicCollectorDisposeTimedOut -and
+                    $partialDynamicCollectorClient.IsConnected) `
+                "The dynamic-secret collector released worker-owned state before joining."
+
+            $prematureDynamicCollectorSnapshotRejected = $false
+            try {
+                $null = $partialDynamicCollectorProbe.Collector.SnapshotForCleanup()
+            }
+            catch {
+                $prematureDynamicCollectorSnapshotRejected =
+                    $_.Exception.Message.Contains(
+                        "dynamic-secret-registry-cleanup-snapshot-before-join",
+                        [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                $prematureDynamicCollectorSnapshotRejected `
+                "The dynamic-secret collector exposed worker-owned state before joining."
+
+            $partialDynamicCollectorClient.Dispose()
+            $partialDynamicCollectorClient = $null
+            $partialDynamicCollectorRejected = $false
+            try {
+                $null = $partialDynamicCollectorProbe.Collector.StopAndSnapshot(
+                    [TimeSpan]::FromSeconds(5))
+            }
+            catch {
+                $partialDynamicCollectorRejected = $_.Exception.Message.Contains(
+                    "dynamic-secret-registry-protocol",
+                    [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                $partialDynamicCollectorRejected `
+                "The dynamic-secret collector did not drain and fault the closed partial frame."
+            Assert-Condition `
+                (@($partialDynamicCollectorProbe.Collector.SnapshotForCleanup()).Count -eq 0) `
+                "The faulted partial-frame collector exposed an unexpected record."
+        }
+        finally {
+            if ($null -ne $partialDynamicCollectorClient) {
+                $partialDynamicCollectorClient.Dispose()
+            }
+            $partialDynamicCollectorProbe.Collector.Dispose()
+        }
+
+        New-Item `
+            -ItemType Directory `
+            -Path $probeRunRoot `
+            -Force | Out-Null
+        $preservedHashes = @{}
+        foreach ($extension in Get-AdminManagementRetainableTextExtensions) {
+            $path = Join-Path `
+                $probeRunRoot `
+                "valid$($extension.ToLowerInvariant())"
+            $nonAsciiProbe = "Unicode: $([char]0x00E9)"
+            [System.IO.File]::WriteAllText(
+                $path,
+                "NovaGame retained evidence`r`n`t$nonAsciiProbe`n",
+                $utf8)
+            $preservedHashes[[System.IO.Path]::GetFileName($path)] =
+                (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        }
+        foreach ($fileName in @(
+            "binary.har", "binary.mp4", "binary.trace", "binary.tar",
+            "binary.gz", "binary.tgz", "binary.7z", "binary.pdf",
+            "binary.dmp", "binary.png", "binary.zip", "database.env",
+            "pnpm.cmd", "extensionless", "api.stdout.log",
+            "api.stderr.log", "dbmigrator.stdout.log",
+            "dbmigrator.stderr.log", "playwright.stdout.log",
+            "playwright.stderr.log")) {
+            [System.IO.File]::WriteAllBytes(
+                (Join-Path $probeRunRoot $fileName),
+                [byte[]](0, 1, 2, 255))
+        }
+
+        $probeScreenshotRelativePath =
+            "output/playwright/visual/probe.png"
+        $probeScreenshotPath = Join-Path `
+            $probeRunRoot `
+            $probeScreenshotRelativePath.Replace('/', '\')
+        New-Item `
+            -ItemType Directory `
+            -Path (Split-Path -Parent $probeScreenshotPath) `
+            -Force | Out-Null
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64
+        $probeScreenshotSpecification = [pscustomobject]@{
+            RelativePath = $probeScreenshotRelativePath
+            Width = 64
+            MinimumHeight = 64
+            MaximumHeight = 64
+        }
+
+        Remove-AdminManagementNonRetainableArtifacts `
+            -ArtifactRoot $probeRunRoot `
+            -AllowedScreenshotRelativePaths @($probeScreenshotRelativePath)
+        $remainingFiles = @(
+            Get-ChildItem `
+                -LiteralPath $probeRunRoot `
+                -File `
+                -Force |
+                ForEach-Object { $_.Name } |
+                Sort-Object)
+        $expectedRemainingFiles = @($preservedHashes.Keys | Sort-Object)
+        Assert-Condition `
+            (($remainingFiles -join "`n") -ceq
+                ($expectedRemainingFiles -join "`n")) `
+            "Admin management retainable-text policy kept an unexpected artifact."
+        foreach ($fileName in $expectedRemainingFiles) {
+            Assert-Condition `
+                ((Get-FileHash `
+                    -LiteralPath (Join-Path $probeRunRoot $fileName) `
+                    -Algorithm SHA256).Hash -eq $preservedHashes[$fileName]) `
+                "Admin management retainable-text cleanup modified '$fileName'."
+        }
+        Assert-Condition `
+            (Test-Path -LiteralPath $probeScreenshotPath -PathType Leaf) `
+            "Admin management successful cleanup removed an allowlisted screenshot."
+        $probeScreenshotInspectionRecords = @(
+            Assert-AdminManagementSuccessfulScreenshots `
+            -RunRoot $probeRunRoot `
+            -ScreenshotSpecifications @($probeScreenshotSpecification))
+        Assert-AdminManagementScreenshotIdentity `
+            -RunRoot $probeRunRoot `
+            -InspectionRecords $probeScreenshotInspectionRecords
+
+        $validProbePngBytes = [System.IO.File]::ReadAllBytes(
+            $probeScreenshotPath)
+        $trailingBytes = [Text.Encoding]::ASCII.GetBytes("trailing-data")
+        [System.IO.File]::WriteAllBytes(
+            $probeScreenshotPath,
+            [byte[]]@($validProbePngBytes + $trailingBytes))
+        $trailingPngRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $trailingPngRejected = $_.Exception.Message.Contains(
+                "terminal PNG IEND",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $trailingPngRejected `
+            "Admin management evidence must reject bytes after terminal PNG IEND."
+
+        Initialize-AdminManagementScreenshotPixelInspectorType
+        $textChunkPng = [NovaGame.Verification.ScreenshotPixelInspector]::
+            InsertChunkBeforeIend(
+                $validProbePngBytes,
+                "tEXt",
+                [Text.Encoding]::ASCII.GetBytes("Comment`0carrier"))
+        [System.IO.File]::WriteAllBytes($probeScreenshotPath, $textChunkPng)
+        $textChunkRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $textChunkRejected = $_.Exception.Message.Contains(
+                "unsafe PNG chunk 'tEXt'",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $textChunkRejected `
+            "Admin management evidence must reject PNG text carrier chunks."
+
+        $unknownChunkPng = [NovaGame.Verification.ScreenshotPixelInspector]::
+            InsertChunkBeforeIend(
+                $validProbePngBytes,
+                "ruSt",
+                [byte[]](1, 2, 3, 4))
+        [System.IO.File]::WriteAllBytes($probeScreenshotPath, $unknownChunkPng)
+        $unknownChunkRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $unknownChunkRejected = $_.Exception.Message.Contains(
+                "unsafe PNG chunk 'ruSt'",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $unknownChunkRejected `
+            "Admin management evidence must reject unknown PNG carrier chunks."
+
+        $pngSecret = "ABCDEFGH"
+        $pngSecretBytes = [Text.Encoding]::ASCII.GetBytes($pngSecret)
+        $physicalChunkData = [byte[]]::new(9)
+        $pngSecretBytes.CopyTo($physicalChunkData, 0)
+        $secretCarrierPng = [NovaGame.Verification.ScreenshotPixelInspector]::
+            InsertChunkBeforeIend(
+                $validProbePngBytes,
+                "pHYs",
+                $physicalChunkData)
+        [System.IO.File]::WriteAllBytes($probeScreenshotPath, $secretCarrierPng)
+        $secretCarrierInspectionRecords = @(
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification))
+        $pngSecretRejected = $false
+        try {
+            Assert-AdminManagementArtifactSecrets `
+                -ArtifactRoot $probeRunRoot `
+                -SensitiveValues @($pngSecret) `
+                -AllowedScreenshotRelativePaths @(
+                    $probeScreenshotRelativePath) `
+                -ScreenshotInspectionRecords $secretCarrierInspectionRecords
+        }
+        catch {
+            $pngSecretRejected = $_.Exception.Message.Contains(
+                "exact sensitive value",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $pngSecretRejected `
+            "Admin management evidence must byte-scan exact secrets inside allowlisted PNGs."
+        [System.IO.File]::WriteAllBytes(
+            $probeScreenshotPath,
+            $validProbePngBytes)
+
+        $extraScreenshotPath = Join-Path `
+            (Split-Path -Parent $probeScreenshotPath) `
+            "extra.png"
+        Write-AdminManagementProbePng `
+            -Path $extraScreenshotPath `
+            -Width 64 `
+            -Height 64
+        $extraScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $extraScreenshotRejected = $_.Exception.Message.Contains(
+                "exact allowlist",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $extraScreenshotRejected `
+            "Admin management evidence must reject an extra successful PNG."
+        Remove-Item -LiteralPath $extraScreenshotPath -Force
+
+        [System.IO.File]::WriteAllBytes(
+            $probeScreenshotPath,
+            [byte[]](0, 1, 2, 255))
+        $corruptScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $corruptScreenshotRejected = $_.Exception.Message.Contains(
+                "invalid PNG byte length",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $corruptScreenshotRejected `
+            "Admin management evidence must reject a corrupt successful PNG."
+
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64 `
+            -Solid
+        $blankScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $blankScreenshotRejected = $_.Exception.Message.Contains(
+                "pixel diversity",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $blankScreenshotRejected `
+            "Admin management evidence must reject a blank successful PNG."
+
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64 `
+            -Transparent
+        $transparentScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $transparentScreenshotRejected = $_.Exception.Message.Contains(
+                "transparent or lacks an opaque surface",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $transparentScreenshotRejected `
+            "Admin management evidence must reject a transparent PNG with hidden RGB diversity."
+
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64 `
+            -NearBlank
+        $nearBlankScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $nearBlankScreenshotRejected = $_.Exception.Message.Contains(
+                "pixel diversity",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $nearBlankScreenshotRejected `
+            "Admin management evidence must reject a near-blank PNG with sparse outliers."
+
+        Write-AdminManagementStrideAlignedProbePng `
+            -Path $probeScreenshotPath `
+            -Width 1440 `
+            -Height 900 `
+            -TransparentBackground
+        $alignedTransparentSpecification = [pscustomobject]@{
+            RelativePath = $probeScreenshotRelativePath
+            Width = 1440
+            MinimumHeight = 900
+            MaximumHeight = 900
+        }
+        $alignedTransparentScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @(
+                    $alignedTransparentSpecification) |
+                Out-Null
+        }
+        catch {
+            $alignedTransparentScreenshotRejected = $_.Exception.Message.Contains(
+                "transparent or lacks an opaque surface",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $alignedTransparentScreenshotRejected `
+            "Admin management evidence must inspect every pixel of a sample-aligned transparent PNG."
+
+        Write-AdminManagementStrideAlignedProbePng `
+            -Path $probeScreenshotPath `
+            -Width 1440 `
+            -Height 900
+        $alignedDesktopNearBlankSpecification = [pscustomobject]@{
+            RelativePath = $probeScreenshotRelativePath
+            Width = 1440
+            MinimumHeight = 900
+            MaximumHeight = 900
+        }
+        $alignedDesktopNearBlankScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @(
+                    $alignedDesktopNearBlankSpecification) |
+                Out-Null
+        }
+        catch {
+            $alignedDesktopNearBlankScreenshotRejected =
+                $_.Exception.Message.Contains(
+                    "pixel diversity",
+                    [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $alignedDesktopNearBlankScreenshotRejected `
+            "Admin management evidence must inspect every pixel of a desktop sample-aligned near-blank PNG."
+
+        Write-AdminManagementStrideAlignedProbePng `
+            -Path $probeScreenshotPath `
+            -Width 1440 `
+            -Height 3600
+        $alignedNearBlankSpecification = [pscustomobject]@{
+            RelativePath = $probeScreenshotRelativePath
+            Width = 1440
+            MinimumHeight = 3600
+            MaximumHeight = 3600
+        }
+        $alignedNearBlankScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($alignedNearBlankSpecification) |
+                Out-Null
+        }
+        catch {
+            $alignedNearBlankScreenshotRejected = $_.Exception.Message.Contains(
+                "pixel diversity",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $alignedNearBlankScreenshotRejected `
+            "Admin management evidence must inspect every pixel of a tall sample-aligned near-blank PNG."
+
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64
+        $wrongSizeSpecification = [pscustomobject]@{
+            RelativePath = $probeScreenshotRelativePath
+            Width = 63
+            MinimumHeight = 64
+            MaximumHeight = 64
+        }
+        $wrongSizeScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($wrongSizeSpecification) |
+                Out-Null
+        }
+        catch {
+            $wrongSizeScreenshotRejected = $_.Exception.Message.Contains(
+                "declares dimensions",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $wrongSizeScreenshotRejected `
+            "Admin management evidence must reject a wrong-size PNG."
+
+        Remove-Item -LiteralPath $probeScreenshotPath -Force
+        $missingScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification) |
+                Out-Null
+        }
+        catch {
+            $missingScreenshotRejected = $_.Exception.Message.Contains(
+                "exact allowlist",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $missingScreenshotRejected `
+            "Admin management evidence must reject a missing PNG."
+
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64
+        $oversizedHeaderBytes = [System.IO.File]::ReadAllBytes(
+            $probeScreenshotPath)
+        foreach ($headerOffset in @(16, 20)) {
+            $oversizedHeaderBytes[$headerOffset] = 0
+            $oversizedHeaderBytes[$headerOffset + 1] = 0
+            $oversizedHeaderBytes[$headerOffset + 2] = 19
+            $oversizedHeaderBytes[$headerOffset + 3] = 136
+        }
+        [System.IO.File]::WriteAllBytes(
+            $probeScreenshotPath,
+            $oversizedHeaderBytes)
+        $oversizedSpecification = [pscustomobject]@{
+            RelativePath = $probeScreenshotRelativePath
+            Width = 5000
+            MinimumHeight = 5000
+            MaximumHeight = 5000
+        }
+        $oversizedScreenshotRejected = $false
+        try {
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($oversizedSpecification) |
+                Out-Null
+        }
+        catch {
+            $oversizedScreenshotRejected = $_.Exception.Message.Contains(
+                "pre-decode pixel-inspection bound",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $oversizedScreenshotRejected `
+            "Admin management evidence must reject oversized IHDR dimensions before decode."
+
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64
+        $identityProbeRecords = @(
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification))
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64 `
+            -Solid
+        $mutatedScreenshotRejected = $false
+        try {
+            Assert-AdminManagementScreenshotIdentity `
+                -RunRoot $probeRunRoot `
+                -InspectionRecords $identityProbeRecords
+        }
+        catch {
+            $mutatedScreenshotRejected = $_.Exception.Message.Contains(
+                "changed before retained-artifact scanning",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $mutatedScreenshotRejected `
+            "Admin management evidence must reject a post-validation PNG mutation."
+
+        Write-AdminManagementProbePng `
+            -Path $probeScreenshotPath `
+            -Width 64 `
+            -Height 64
+        $probeScreenshotInspectionRecords = @(
+            Assert-AdminManagementSuccessfulScreenshots `
+                -RunRoot $probeRunRoot `
+                -ScreenshotSpecifications @($probeScreenshotSpecification))
+        Assert-AdminManagementArtifactSecrets `
+            -ArtifactRoot $probeRunRoot `
+            -SensitiveValues @("not-present") `
+            -AllowedScreenshotRelativePaths @($probeScreenshotRelativePath) `
+            -ScreenshotInspectionRecords $probeScreenshotInspectionRecords
+        Remove-AdminManagementNonRetainableArtifacts `
+            -ArtifactRoot $probeRunRoot
+        Assert-Condition `
+            (@(Get-ChildItem `
+                    -LiteralPath $probeRunRoot `
+                    -Recurse `
+                    -File `
+                    -Filter "*.png" `
+                    -Force).Count -eq 0) `
+            "Admin management failed cleanup must remove every PNG."
+        Assert-AdminManagementArtifactSecrets `
+            -ArtifactRoot $probeRunRoot `
+            -SensitiveValues @("not-present")
+
+        $invalidUtf8Path = Join-Path $probeRunRoot "invalid-utf8.log"
+        [System.IO.File]::WriteAllBytes(
+            $invalidUtf8Path,
+            [byte[]](0xC3, 0x28))
+        $invalidUtf8Rejected = $false
+        try {
+            Assert-AdminManagementArtifactSecrets `
+                -ArtifactRoot $probeRunRoot `
+                -SensitiveValues @("not-present")
+        }
+        catch {
+            $invalidUtf8Rejected = $_.Exception.Message.Contains(
+                "not strict UTF-8",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $invalidUtf8Rejected `
+            "Admin management evidence must reject invalid UTF-8."
+        Remove-Item -LiteralPath $invalidUtf8Path -Force
+
+        foreach ($controlCase in @(
+                [pscustomobject]@{ Name = "nul"; Bytes = [byte[]](65, 0, 66) },
+                [pscustomobject]@{ Name = "c0"; Bytes = [byte[]](65, 1, 66) },
+                [pscustomobject]@{ Name = "del"; Bytes = [byte[]](65, 127, 66) },
+                [pscustomobject]@{ Name = "c1"; Bytes = [byte[]](65, 0xC2, 0x80, 66) })) {
+            $controlPath = Join-Path `
+                $probeRunRoot `
+                "$($controlCase.Name).log"
+            [System.IO.File]::WriteAllBytes(
+                $controlPath,
+                $controlCase.Bytes)
+            $controlRejected = $false
+            try {
+                Assert-AdminManagementArtifactSecrets `
+                    -ArtifactRoot $probeRunRoot `
+                    -SensitiveValues @("not-present")
+            }
+            catch {
+                $controlRejected = $_.Exception.Message.Contains(
+                    "unexpected control character",
+                    [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                $controlRejected `
+                "Admin management evidence must reject '$($controlCase.Name)' controls."
+            Remove-Item -LiteralPath $controlPath -Force
+        }
+
+        $secretPath = Join-Path $probeRunRoot "secret.log"
+        [System.IO.File]::WriteAllText(
+            $secretPath,
+            "exact-probe-secret",
+            $utf8)
+        $exactSecretRejected = $false
+        try {
+            Assert-AdminManagementArtifactSecrets `
+                -ArtifactRoot $probeRunRoot `
+                -SensitiveValues @("exact-probe-secret")
+        }
+        catch {
+            $exactSecretRejected = $_.Exception.Message.Contains(
+                "exact sensitive value",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $exactSecretRejected `
+            "Admin management evidence must reject exact sensitive values."
+        $exactSecretHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData(
+                [Text.UTF8Encoding]::new($false).GetBytes(
+                    "exact-probe-secret")))
+        [System.IO.File]::WriteAllText(
+            $secretPath,
+            $exactSecretHash,
+            $utf8)
+        $derivedSecretRejected = $false
+        try {
+            Assert-AdminManagementArtifactSecrets `
+                -ArtifactRoot $probeRunRoot `
+                -SensitiveValues @("exact-probe-secret")
+        }
+        catch {
+            $derivedSecretRejected = $_.Exception.Message.Contains(
+                "exact sensitive value",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $derivedSecretRejected `
+            "Admin management evidence must reject derived sensitive hashes."
+        $opaqueTokenProbe = "A" * 43
+        $decodedOpaqueToken = [Convert]::FromBase64String(
+            $opaqueTokenProbe.Replace('-', '+').Replace('_', '/') + '=')
+        try {
+            $decodedOpaqueHash = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData(
+                    $decodedOpaqueToken))
+        }
+        finally {
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory(
+                $decodedOpaqueToken)
+        }
+        [System.IO.File]::WriteAllText(
+            $secretPath,
+            $decodedOpaqueHash,
+            $utf8)
+        $decodedOpaqueHashRejected = $false
+        try {
+            Assert-AdminManagementArtifactSecrets `
+                -ArtifactRoot $probeRunRoot `
+                -SensitiveValues @($opaqueTokenProbe)
+        }
+        catch {
+            $decodedOpaqueHashRejected = $_.Exception.Message.Contains(
+                "exact sensitive value",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $decodedOpaqueHashRejected `
+            "Admin management evidence must reject decoded-token hash representations."
+        [System.IO.File]::WriteAllText(
+            $secretPath,
+            "password: string",
+            $utf8)
+        Assert-AdminManagementArtifactSecrets `
+            -ArtifactRoot $probeRunRoot `
+            -SensitiveValues @("not-present")
+
+        foreach ($secretPatternProbe in @(
+                "eyJhbGciOiJIUzI1NiJ9.cGF5bG9hZA.c2lnbmF0dXJl",
+                "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde",
+                "AQAAAAEAACcQAAAAEDhQMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTA=")) {
+            [System.IO.File]::WriteAllText(
+                $secretPath,
+                $secretPatternProbe,
+                $utf8)
+            $patternSecretRejected = $false
+            try {
+                Assert-AdminManagementArtifactSecrets `
+                    -ArtifactRoot $probeRunRoot `
+                    -SensitiveValues @("not-present")
+            }
+            catch {
+                $patternSecretRejected = $_.Exception.Message.Contains(
+                    "retained-secret pattern",
+                    [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                $patternSecretRejected `
+                "Admin management evidence must reject structured secret patterns."
+        }
+        Remove-Item -LiteralPath $secretPath -Force
+
+        $playwrightFailureProbePath = Join-Path `
+            $probeRunRoot `
+            "playwright-failure-probe.json"
+        $playwrightFailureProbe = [ordered]@{
+            errors = @()
+            stats = [ordered]@{
+                expected = 0
+                flaky = 0
+                skipped = 0
+                unexpected = 1
+            }
+            suites = @(
+                [ordered]@{
+                    file = "game-config.spec.ts"
+                    specs = @(
+                        [ordered]@{
+                            file = "game-config.spec.ts"
+                            title =
+                                "operator completes the GameConfig lifecycle against the real API"
+                            tests = @(
+                                [ordered]@{
+                                    expectedStatus = "passed"
+                                    status = "unexpected"
+                                    results = @(
+                                        [ordered]@{
+                                            errors = @(
+                                                [ordered]@{
+                                                    location = [ordered]@{
+                                                        column = 17
+                                                        file =
+                                                            "D:\probe\game-config.spec.ts"
+                                                        line = 321
+                                                    }
+                                                    message =
+                                                        "exact-probe-secret Acceptance evidence rule 'opaque-base64url-32-byte' failed."
+                                                })
+                                            retry = 0
+                                            status = "failed"
+                                        })
+                                })
+                        })
+                })
+        }
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        $playwrightFailureDiagnostic =
+            Get-AdminPlaywrightFailureDiagnostic `
+                -ResultPath $playwrightFailureProbePath `
+                -Mode "LegacyGameConfig"
+        Assert-Condition `
+            ($playwrightFailureDiagnostic -ceq
+                "game-config-lifecycle-not-passed@game-config.spec.ts:321:17#opaque-base64url-32-byte") `
+            "Admin Playwright failure diagnostics did not return the validated source location."
+        Assert-Condition `
+            (-not $playwrightFailureDiagnostic.Contains(
+                "exact-probe-secret",
+                [StringComparison]::Ordinal)) `
+            "Admin Playwright failure diagnostics exposed an error message."
+        $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].message =
+            "exact-probe-secret Acceptance evidence failed rule 'dynamic-secret-pipe-timeout' for POST /api/auth/login (200)."
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "game-config-lifecycle-not-passed@game-config.spec.ts:321:17#dynamic-secret-pipe-timeout") `
+            "Admin Playwright failure diagnostics did not return an allowlisted aggregate evidence rule."
+        $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].message =
+            "exact-probe-secret Acceptance evidence rule 'opaque-base64url-32-byte' failed."
+        $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].location =
+            $null
+        $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0]["error"] =
+            [ordered]@{
+                stack =
+                    "exact-probe-secret at D:\probe\game-config.spec.ts:654:9"
+            }
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "game-config-lifecycle-not-passed@game-config.spec.ts:654:9#opaque-base64url-32-byte") `
+            "Admin Playwright failure diagnostics did not validate a stack source location."
+        $playwrightFailureProbe.suites[0].specs[0].title =
+            "exact-probe-secret"
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "result-manifest-invalid") `
+            "Admin Playwright failure diagnostics trusted an unknown test title."
+        Remove-Item -LiteralPath $playwrightFailureProbePath -Force
+
+        $responseAuditRoot = Join-Path `
+            $probeRunRoot `
+            "output\playwright\evidence"
+        New-Item `
+            -ItemType Directory `
+            -Path $responseAuditRoot `
+            -Force | Out-Null
+        $responseAuditProbe = [ordered]@{
+            schemaVersion = 1
+            sourceFile = "game-config.spec.ts"
+            testTitle =
+                "operator completes the GameConfig lifecycle against the real API"
+            testStatus = "passed"
+            responseBodies = @(
+                0..6 | ForEach-Object {
+                    [ordered]@{
+                        sequence = $_
+                        method = "GET"
+                        route = "/api/probe"
+                        status = 200
+                        bodyBytes = 2
+                        scanned = $true
+                    }
+                })
+            responseBodyCount = 7
+            contextLedger = [ordered]@{
+                closedBeforeListenerDetach = 1
+                observed = 1
+            }
+            directRequestLedger = [ordered]@{
+                directApiRequestsCompleted = 6
+                directApiRequestsFailed = 0
+                directApiRequestsObserved = 6
+            }
+            expectedNetworkFailures = @()
+            requestLedger = [ordered]@{
+                browserRequestFailuresExpected = 0
+                browserRequestsCompleted = 1
+                browserRequestsFailed = 0
+                browserRequestsObserved = 1
+                browserResponsesObserved = 1
+            }
+            screenshotSurfaceScanCount = 2
+            violations = @()
+        }
+        $responseAuditPath = Join-Path `
+            $responseAuditRoot `
+            "game-config-response-audit.json"
+        $writeResponseAuditProbe = {
+            [System.IO.File]::WriteAllText(
+                $responseAuditPath,
+                ($responseAuditProbe | ConvertTo-Json -Depth 8),
+                $utf8)
+        }
+        & $writeResponseAuditProbe
+        Assert-AdminManagementResponseAuditReports `
+            -RunRoot $probeRunRoot `
+            -Mode "LegacyGameConfig" |
+            Out-Null
+
+        $validResponseAuditJson =
+            $responseAuditProbe | ConvertTo-Json -Depth 8
+        $duplicatePropertyJson = $validResponseAuditJson.Replace(
+            '  "schemaVersion": 1,',
+            "  `"schemaVersion`": 1,`n  `"schemaVersion`": 1,")
+        Assert-Condition `
+            ($duplicatePropertyJson -cne $validResponseAuditJson) `
+            "Admin response-audit duplicate-property probe was not constructed."
+        [System.IO.File]::WriteAllText(
+            $responseAuditPath,
+            $duplicatePropertyJson,
+            $utf8)
+        $duplicatePropertyRejected = $false
+        try {
+            Assert-AdminManagementResponseAuditReports `
+                -RunRoot $probeRunRoot `
+                -Mode "LegacyGameConfig" |
+                Out-Null
+        }
+        catch {
+            $duplicatePropertyRejected = $_.Exception.Message.Contains(
+                "duplicate JSON property",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $duplicatePropertyRejected `
+            "Admin management evidence must reject duplicate raw JSON properties."
+
+        $caseShiftedPropertyJson = $validResponseAuditJson.Replace(
+            '  "schemaVersion": 1,',
+            '  "SchemaVersion": 1,')
+        Assert-Condition `
+            ($caseShiftedPropertyJson -cne $validResponseAuditJson) `
+            "Admin response-audit case-shift probe was not constructed."
+        [System.IO.File]::WriteAllText(
+            $responseAuditPath,
+            $caseShiftedPropertyJson,
+            $utf8)
+        $caseShiftedPropertyRejected = $false
+        try {
+            Assert-AdminManagementResponseAuditReports `
+                -RunRoot $probeRunRoot `
+                -Mode "LegacyGameConfig" |
+                Out-Null
+        }
+        catch {
+            $caseShiftedPropertyRejected =
+                $_.Exception.Message.Contains(
+                    "case-sensitive schema",
+                    [StringComparison]::Ordinal) -or
+                $_.Exception.Message.Contains(
+                    "not strict JSON",
+                    [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $caseShiftedPropertyRejected `
+            "Admin management evidence must reject case-shifted JSON properties."
+
+        foreach ($arrayShapeProbe in @(
+                [pscustomobject]@{
+                    Name = "expectedNetworkFailures"
+                    ObjectValue = [ordered]@{
+                        count = 1
+                        method = "GET"
+                        pathAndQuery = "/api/probe"
+                    }
+                    RestoreValue = @()
+                },
+                [pscustomobject]@{
+                    Name = "responseBodies"
+                    ObjectValue = $responseAuditProbe.responseBodies[0]
+                    RestoreValue = $responseAuditProbe.responseBodies
+                },
+                [pscustomobject]@{
+                    Name = "violations"
+                    ObjectValue = [ordered]@{
+                        method = "GET"
+                        route = "/api/probe"
+                        ruleId = "probe"
+                        status = 0
+                    }
+                    RestoreValue = @()
+                })) {
+            $responseAuditProbe[$arrayShapeProbe.Name] =
+                $arrayShapeProbe.ObjectValue
+            & $writeResponseAuditProbe
+            $objectInsteadOfArrayRejected = $false
+            try {
+                Assert-AdminManagementResponseAuditReports `
+                    -RunRoot $probeRunRoot `
+                    -Mode "LegacyGameConfig" |
+                    Out-Null
+            }
+            catch {
+                $objectInsteadOfArrayRejected = $_.Exception.Message.Contains(
+                    "must be a JSON array",
+                    [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                $objectInsteadOfArrayRejected `
+                "Admin management evidence must reject an object in place of '$($arrayShapeProbe.Name)'."
+            $responseAuditProbe[$arrayShapeProbe.Name] =
+                $arrayShapeProbe.RestoreValue
+        }
+        & $writeResponseAuditProbe
+
+        $responseAuditProbe["unexpectedField"] = "must-fail"
+        & $writeResponseAuditProbe
+        $extraReportFieldRejected = $false
+        try {
+            Assert-AdminManagementResponseAuditReports `
+                -RunRoot $probeRunRoot `
+                -Mode "LegacyGameConfig" |
+                Out-Null
+        }
+        catch {
+            $extraReportFieldRejected = $_.Exception.Message.Contains(
+                "case-sensitive schema",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $extraReportFieldRejected `
+            "Admin management evidence must reject extra response-report fields."
+        $null = $responseAuditProbe.Remove("unexpectedField")
+
+        $responseAuditProbe.responseBodies[0].scanned = "false"
+        & $writeResponseAuditProbe
+        $stringBooleanRejected = $false
+        try {
+            Assert-AdminManagementResponseAuditReports `
+                -RunRoot $probeRunRoot `
+                -Mode "LegacyGameConfig" |
+                Out-Null
+        }
+        catch {
+            $stringBooleanRejected = $_.Exception.Message.Contains(
+                "invalid or unscanned",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $stringBooleanRejected `
+            "Admin management evidence must reject a string-valued scan flag."
+        $responseAuditProbe.responseBodies[0].scanned = $true
+
+        $responseAuditProbe.responseBodies[0].route = "/api/probe?secret=no"
+        & $writeResponseAuditProbe
+        $queryRouteRejected = $false
+        try {
+            Assert-AdminManagementResponseAuditReports `
+                -RunRoot $probeRunRoot `
+                -Mode "LegacyGameConfig" |
+                Out-Null
+        }
+        catch {
+            $queryRouteRejected = $_.Exception.Message.Contains(
+                "invalid or unscanned",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $queryRouteRejected `
+            "Admin management evidence must reject response routes with a query."
+        $responseAuditProbe.responseBodies[0].route = "/api/probe"
+
+        $responseAuditProbe.expectedNetworkFailures = @(
+            [ordered]@{
+                count = 1
+                method = "GET"
+                pathAndQuery = "/api/probe"
+            })
+        $responseAuditProbe.requestLedger.browserRequestFailuresExpected = 1
+        $responseAuditProbe.requestLedger.browserRequestsCompleted = 0
+        $responseAuditProbe.requestLedger.browserRequestsFailed = 1
+        $responseAuditProbe.requestLedger.browserResponsesObserved = 0
+        $responseAuditProbe.responseBodies = @(
+            $responseAuditProbe.responseBodies | Select-Object -Skip 1)
+        $responseAuditProbe.responseBodyCount = 6
+        & $writeResponseAuditProbe
+        $unexpectedNetworkFailureRejected = $false
+        try {
+            Assert-AdminManagementResponseAuditReports `
+                -RunRoot $probeRunRoot `
+                -Mode "LegacyGameConfig" |
+                Out-Null
+        }
+        catch {
+            $unexpectedNetworkFailureRejected = $_.Exception.Message.Contains(
+                "unexpected network-failure count",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $unexpectedNetworkFailureRejected `
+            "Admin management evidence must reject a network failure in the GameConfig report."
+
+        $responsiveNetworkFailureContract = [pscustomobject]@{
+            ExpectedNetworkFailureCount = 1
+            ExpectedNetworkFailureMethod = "GET"
+            ExpectedNetworkFailurePathAndQuery =
+                "/api/admin-access/administrators?page=1&pageSize=20"
+        }
+        $correctNetworkFailureRecord = [pscustomobject]@{
+            count = 1
+            method = "GET"
+            pathAndQuery =
+                "/api/admin-access/administrators?page=1&pageSize=20"
+        }
+        Assert-AdminManagementExpectedNetworkFailures `
+            -Records @($correctNetworkFailureRecord) `
+            -ExpectedReport $responsiveNetworkFailureContract `
+            -Description "Admin network-failure policy probe"
+        foreach ($invalidNetworkFailureCase in @(
+                [pscustomobject]@{
+                    Name = "wrong method"
+                    Records = @([pscustomobject]@{
+                            count = 1
+                            method = "POST"
+                            pathAndQuery =
+                                "/api/admin-access/administrators?page=1&pageSize=20"
+                        })
+                },
+                [pscustomobject]@{
+                    Name = "wrong path"
+                    Records = @([pscustomobject]@{
+                            count = 1
+                            method = "GET"
+                            pathAndQuery =
+                                "/api/admin-access/roles?page=1&pageSize=20"
+                        })
+                },
+                [pscustomobject]@{
+                    Name = "wrong query"
+                    Records = @([pscustomobject]@{
+                            count = 1
+                            method = "GET"
+                            pathAndQuery =
+                                "/api/admin-access/administrators?page=2&pageSize=20"
+                        })
+                },
+                [pscustomobject]@{
+                    Name = "duplicate"
+                    Records = @(
+                        $correctNetworkFailureRecord,
+                        $correctNetworkFailureRecord)
+                })) {
+            $invalidNetworkFailureRejected = $false
+            try {
+                Assert-AdminManagementExpectedNetworkFailures `
+                    -Records @($invalidNetworkFailureCase.Records) `
+                    -ExpectedReport $responsiveNetworkFailureContract `
+                    -Description "Admin network-failure policy probe"
+            }
+            catch {
+                $invalidNetworkFailureRejected =
+                    $_.Exception.Message.Contains(
+                        "network-failure",
+                        [StringComparison]::Ordinal) -or
+                    $_.Exception.Message.Contains(
+                        "expected network failure",
+                        [StringComparison]::Ordinal)
+            }
+            Assert-Condition `
+                $invalidNetworkFailureRejected `
+                "Admin network-failure policy accepted the $($invalidNetworkFailureCase.Name) probe."
+        }
+
+        $responseAuditProbe.responseBodies = @(
+            0..6 | ForEach-Object {
+                [ordered]@{
+                    sequence = $_
+                    method = "GET"
+                    route = "/api/probe"
+                    status = 200
+                    bodyBytes = 2
+                    scanned = $true
+                }
+            })
+        $responseAuditProbe.responseBodyCount = 7
+        $responseAuditProbe.expectedNetworkFailures = @()
+        $responseAuditProbe.requestLedger.browserRequestFailuresExpected = 0
+        $responseAuditProbe.requestLedger.browserRequestsCompleted = 1
+        $responseAuditProbe.requestLedger.browserRequestsFailed = 0
+        $responseAuditProbe.requestLedger.browserResponsesObserved = 1
+        & $writeResponseAuditProbe
+        Assert-AdminManagementResponseAuditReports `
+            -RunRoot $probeRunRoot `
+            -Mode "LegacyGameConfig" |
+            Out-Null
+
+        $legacyRoot = Join-Path $probeRunRoot "legacy-output"
+        New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+        $legacyPath = Join-Path $legacyRoot "sentinel.log"
+        [System.IO.File]::WriteAllText($legacyPath, "alpha", $utf8)
+        $baselineSnapshot = Get-AdminManagementArtifactSnapshot `
+            -ArtifactRoot $legacyRoot
+        $unchangedSnapshot = Get-AdminManagementArtifactSnapshot `
+            -ArtifactRoot $legacyRoot
+        Assert-Condition `
+            (@(Compare-AdminManagementArtifactSnapshots `
+                -Before $baselineSnapshot `
+                -After $unchangedSnapshot).Count -eq 0) `
+            "Unchanged Admin management artifact snapshots must compare equal."
+
+        $originalWriteTime = (Get-Item -LiteralPath $legacyPath).LastWriteTimeUtc
+        [System.IO.File]::WriteAllText($legacyPath, "bravo", $utf8)
+        (Get-Item -LiteralPath $legacyPath).LastWriteTimeUtc =
+            $originalWriteTime
+        $modifiedChanges = @(
+            Compare-AdminManagementArtifactSnapshots `
+                -Before $baselineSnapshot `
+                -After (Get-AdminManagementArtifactSnapshot `
+                    -ArtifactRoot $legacyRoot))
+        Assert-Condition `
+            ($modifiedChanges.Count -eq 1 -and
+                $modifiedChanges[0] -eq "Modified 'sentinel.log'") `
+            "Admin management artifact snapshots must detect same-length rewrites."
+        [System.IO.File]::WriteAllText($legacyPath, "alpha", $utf8)
+
+        Remove-Item -LiteralPath $legacyPath -Force
+        $removedChanges = @(
+            Compare-AdminManagementArtifactSnapshots `
+                -Before $baselineSnapshot `
+                -After (Get-AdminManagementArtifactSnapshot `
+                    -ArtifactRoot $legacyRoot))
+        Assert-Condition `
+            ($removedChanges.Count -eq 1 -and
+                $removedChanges[0] -eq "Removed 'sentinel.log'") `
+            "Admin management artifact snapshots must detect deletions."
+        [System.IO.File]::WriteAllText($legacyPath, "alpha", $utf8)
+
+        $renamedPath = Join-Path $legacyRoot "renamed.log"
+        Move-Item -LiteralPath $legacyPath -Destination $renamedPath
+        $renamedChanges = @(
+            Compare-AdminManagementArtifactSnapshots `
+                -Before $baselineSnapshot `
+                -After (Get-AdminManagementArtifactSnapshot `
+                    -ArtifactRoot $legacyRoot))
+        Assert-Condition `
+            ($renamedChanges.Count -eq 2 -and
+                $renamedChanges -contains "Added 'renamed.log'" -and
+                $renamedChanges -contains "Removed 'sentinel.log'") `
+            "Admin management artifact snapshots must detect renames."
+        Move-Item -LiteralPath $renamedPath -Destination $legacyPath
+
+        $addedPath = Join-Path $legacyRoot "added.log"
+        [System.IO.File]::WriteAllText($addedPath, "added", $utf8)
+        $addedChanges = @(
+            Compare-AdminManagementArtifactSnapshots `
+                -Before $baselineSnapshot `
+                -After (Get-AdminManagementArtifactSnapshot `
+                    -ArtifactRoot $legacyRoot))
+        Assert-Condition `
+            ($addedChanges.Count -eq 1 -and
+                $addedChanges[0] -eq "Added 'added.log'") `
+            "Admin management artifact snapshots must detect additions."
+
+        Test-AdminManagementRunRootRemovalPolicy
+    }
+    finally {
+        if (Test-Path -LiteralPath $probeRunRoot) {
+            Remove-AdminManagementRunRootVerified -RunRoot $probeRunRoot
+        }
+    }
+}
+
+function Assert-AdminManagementCleanup {
+    param(
+        [Parameter(Mandatory)][string]$ProjectName,
+        [Parameter(Mandatory)][int[]]$Ports,
+        [object[]]$OwnedProcessIdentities = @(),
+        [string[]]$TemporarySecretPaths = @()
+    )
+
+    if ($ProjectName -notmatch '^novagame-test-[a-f0-9]{12}$') {
+        throw "Admin management cleanup requires a valid disposable project name."
+    }
+    foreach ($dockerQuery in @(
+        @("ps", "--all", "--quiet", "--filter", "label=com.docker.compose.project=$ProjectName"),
+        @("network", "ls", "--quiet", "--filter", "label=com.docker.compose.project=$ProjectName"),
+        @("volume", "ls", "--quiet", "--filter", "label=com.docker.compose.project=$ProjectName")
+    )) {
+        $dockerResources = @(
+            & docker @dockerQuery |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($LASTEXITCODE -ne 0) {
+            throw "Unable to audit Docker cleanup for '$ProjectName'."
+        }
+        Assert-Condition `
+            ($dockerResources.Count -eq 0) `
+            "Docker resources remain for '$ProjectName': $($dockerResources -join ', ')."
+    }
+
+    foreach ($port in @($Ports | Where-Object { $_ -gt 0 } | Sort-Object -Unique)) {
+        $listeners = @(
+            Get-NetTCPConnection `
+                -State Listen `
+                -LocalPort $port `
+                -ErrorAction SilentlyContinue)
+        Assert-Condition `
+            ($listeners.Count -eq 0) `
+            "Admin management port '$port' remains in use after cleanup."
+    }
+
+    $remainingOwnedProcessIds = @()
+    $processExitDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $remainingOwnedProcessIds = @(
+            foreach ($ownedProcessIdentity in $OwnedProcessIdentities) {
+                $processRow = Get-CimInstance `
+                    Win32_Process `
+                    -Filter "ProcessId = $([int]$ownedProcessIdentity.Id)" `
+                    -ErrorAction SilentlyContinue
+                if ($null -ne $processRow -and
+                    ([DateTime]$processRow.CreationDate).ToUniversalTime() -eq
+                        [DateTime]$ownedProcessIdentity.CreationDate) {
+                    [int]$ownedProcessIdentity.Id
+                }
+            })
+        if ($remainingOwnedProcessIds.Count -gt 0 -and
+            [DateTime]::UtcNow -lt $processExitDeadline) {
+            Start-Sleep -Milliseconds 100
+        }
+    } while ($remainingOwnedProcessIds.Count -gt 0 -and
+        [DateTime]::UtcNow -lt $processExitDeadline)
+    Assert-Condition `
+        ($remainingOwnedProcessIds.Count -eq 0) `
+        "Admin management API/Vite/Playwright/browser processes remain after cleanup: $($remainingOwnedProcessIds -join ', ')."
+    foreach ($temporarySecretPath in $TemporarySecretPaths) {
+        Assert-Condition `
+            (-not (Test-Path -LiteralPath $temporarySecretPath)) `
+            "Admin management temporary secret file remains after cleanup: '$temporarySecretPath'."
+    }
+}
+
+function Assert-AdminPlaywrightResult {
+    param(
+        [Parameter(Mandatory)][string]$ResultPath,
+        [Parameter(Mandatory)]
+        [ValidateSet("LegacyGameConfig", "M35Management")]
+        [string]$Mode
+    )
+
+    Assert-Condition `
+        (Test-Path -LiteralPath $ResultPath -PathType Leaf) `
+        "Admin Playwright did not produce '$ResultPath'."
+    $report = Get-Content -LiteralPath $ResultPath -Raw | ConvertFrom-Json
+    foreach ($requiredProperty in @("errors", "stats", "suites")) {
+        Assert-Condition `
+            ($null -ne $report.PSObject.Properties[$requiredProperty]) `
+            "Admin Playwright result '$ResultPath' is missing '$requiredProperty'."
+    }
+    Assert-Condition `
+        (@($report.errors).Count -eq 0) `
+        "Admin Playwright reported top-level errors."
+
+    $testRecords = [System.Collections.Generic.List[object]]::new()
+    function Add-AdminPlaywrightTests {
+        param(
+            [Parameter(Mandatory)]$Suite,
+            [string]$InheritedFile
+        )
+
+        $suiteFile = $InheritedFile
+        if ($null -ne $Suite.PSObject.Properties["file"] -and
+            -not [string]::IsNullOrWhiteSpace([string]$Suite.file)) {
+            $suiteFile = [string]$Suite.file
+        }
+        if ($null -ne $Suite.PSObject.Properties["specs"] -and
+            $null -ne $Suite.specs) {
+            foreach ($spec in @($Suite.specs)) {
+                $specFile = $suiteFile
+                if ($null -ne $spec.PSObject.Properties["file"] -and
+                    -not [string]::IsNullOrWhiteSpace([string]$spec.file)) {
+                    $specFile = [string]$spec.file
+                }
+                Assert-Condition `
+                    (-not [string]::IsNullOrWhiteSpace($specFile)) `
+                    "Admin Playwright specification '$($spec.title)' is missing its source file."
+                Assert-Condition `
+                    ($null -ne $spec.PSObject.Properties["tests"] -and
+                        $null -ne $spec.tests) `
+                    "Admin Playwright specification '$($spec.title)' is missing tests."
+                foreach ($test in @($spec.tests)) {
+                    $null = $testRecords.Add([pscustomobject]@{
+                            File = [System.IO.Path]::GetFileName($specFile)
+                            Title = [string]$spec.title
+                            Test = $test
+                        })
+                }
+            }
+        }
+        if ($null -ne $Suite.PSObject.Properties["suites"] -and
+            $null -ne $Suite.suites) {
+            foreach ($childSuite in @($Suite.suites)) {
+                Add-AdminPlaywrightTests `
+                    -Suite $childSuite `
+                    -InheritedFile $suiteFile
+            }
+        }
+    }
+    foreach ($suite in @($report.suites)) {
+        Add-AdminPlaywrightTests -Suite $suite
+    }
+
+    $expectedTitlesByFile = if ($Mode -eq "M35Management") {
+        [ordered]@{
+            "admin-access.spec.ts" = @(
+                "administrator lifecycle and concurrency",
+                "roles, permissions, and authorization",
+                "sessions and audit",
+                "responsive and failure states"
+            )
+            "game-config.spec.ts" = @(
+                "operator completes the GameConfig lifecycle against the real API")
+        }
+    }
+    else {
+        [ordered]@{
+            "game-config.spec.ts" = @(
+                "operator completes the GameConfig lifecycle against the real API")
+        }
+    }
+    $expectedTestCount = @(
+        $expectedTitlesByFile.Values | ForEach-Object { @($_) }).Count
+    Assert-Condition `
+        ($testRecords.Count -eq $expectedTestCount) `
+        "Admin Playwright '$Mode' must define exactly $expectedTestCount tests; found $($testRecords.Count)."
+    Assert-StringSet `
+        -Expected @($expectedTitlesByFile.Keys) `
+        -Actual @($testRecords | ForEach-Object { $_.File } | Sort-Object -Unique) `
+        -Message "Admin Playwright '$Mode' source files changed unexpectedly."
+    foreach ($expectedFile in $expectedTitlesByFile.Keys) {
+        Assert-StringSet `
+            -Expected @($expectedTitlesByFile[$expectedFile]) `
+            -Actual @(
+                $testRecords |
+                    Where-Object { $_.File -eq $expectedFile } |
+                    ForEach-Object { $_.Title }) `
+            -Message "Admin Playwright '$expectedFile' test titles changed unexpectedly."
+    }
+    foreach ($testRecord in $testRecords) {
+        if ($null -ne $testRecord.Test.PSObject.Properties["expectedStatus"]) {
+            Assert-Condition `
+                ([string]$testRecord.Test.expectedStatus -eq "passed") `
+                "Admin Playwright test '$($testRecord.Title)' must expect a passing outcome."
+        }
+        if ($null -ne $testRecord.Test.PSObject.Properties["status"]) {
+            Assert-Condition `
+                ([string]$testRecord.Test.status -eq "expected") `
+                "Admin Playwright test '$($testRecord.Title)' must have expected aggregate status."
+        }
+        $results = @($testRecord.Test.results)
+        Assert-Condition `
+            ($results.Count -eq 1) `
+            "Admin Playwright test '$($testRecord.Title)' must have exactly one result."
+        Assert-Condition `
+            ([string]$results[0].status -eq "passed" -and
+                [int]$results[0].retry -eq 0) `
+            "Admin Playwright test '$($testRecord.Title)' must pass without retry."
+    }
+    foreach ($requiredCounter in @("expected", "flaky", "skipped", "unexpected")) {
+        Assert-Condition `
+            ($null -ne $report.stats.PSObject.Properties[$requiredCounter]) `
+            "Admin Playwright result '$ResultPath' is missing stats.$requiredCounter."
+    }
+    Assert-Condition `
+        ([int]$report.stats.expected -eq $expectedTestCount -and
+            [int]$report.stats.flaky -eq 0 -and
+            [int]$report.stats.skipped -eq 0 -and
+            [int]$report.stats.unexpected -eq 0) `
+        "Admin Playwright '$Mode' must report exactly $expectedTestCount expected tests with zero flaky, skipped, or unexpected outcomes."
+}
+
+function Get-AdminPlaywrightFailureDiagnostic {
+    param(
+        [Parameter(Mandatory)][string]$ResultPath,
+        [Parameter(Mandatory)]
+        [ValidateSet("LegacyGameConfig", "M35Management")]
+        [string]$Mode
+    )
+
+    if (-not (Test-Path -LiteralPath $ResultPath -PathType Leaf)) {
+        return "result-unavailable"
+    }
+    try {
+        $report = Get-Content -LiteralPath $ResultPath -Raw |
+            ConvertFrom-Json
+        $testRecords = [System.Collections.Generic.List[object]]::new()
+        function Add-AdminPlaywrightDiagnosticTests {
+            param(
+                [Parameter(Mandatory)]$Suite,
+                [string]$InheritedFile
+            )
+
+            $suiteFile = $InheritedFile
+            if ($null -ne $Suite.PSObject.Properties["file"] -and
+                -not [string]::IsNullOrWhiteSpace([string]$Suite.file)) {
+                $suiteFile = [string]$Suite.file
+            }
+            if ($null -ne $Suite.PSObject.Properties["specs"] -and
+                $null -ne $Suite.specs) {
+                foreach ($spec in @($Suite.specs)) {
+                    $specFile = $suiteFile
+                    if ($null -ne $spec.PSObject.Properties["file"] -and
+                        -not [string]::IsNullOrWhiteSpace([string]$spec.file)) {
+                        $specFile = [string]$spec.file
+                    }
+                    foreach ($test in @($spec.tests)) {
+                        $null = $testRecords.Add([pscustomobject]@{
+                                File = [System.IO.Path]::GetFileName($specFile)
+                                Title = [string]$spec.title
+                                Test = $test
+                            })
+                    }
+                }
+            }
+            if ($null -ne $Suite.PSObject.Properties["suites"] -and
+                $null -ne $Suite.suites) {
+                foreach ($childSuite in @($Suite.suites)) {
+                    Add-AdminPlaywrightDiagnosticTests `
+                        -Suite $childSuite `
+                        -InheritedFile $suiteFile
+                }
+            }
+        }
+        foreach ($suite in @($report.suites)) {
+            Add-AdminPlaywrightDiagnosticTests -Suite $suite
+        }
+
+        $expectedTests = if ($Mode -eq "M35Management") {
+            @(
+                [pscustomobject]@{
+                    File = "admin-access.spec.ts"
+                    Title = "administrator lifecycle and concurrency"
+                    Rule = "administrator-lifecycle-not-passed"
+                }
+                [pscustomobject]@{
+                    File = "admin-access.spec.ts"
+                    Title = "roles, permissions, and authorization"
+                    Rule = "roles-permissions-not-passed"
+                }
+                [pscustomobject]@{
+                    File = "admin-access.spec.ts"
+                    Title = "sessions and audit"
+                    Rule = "sessions-audit-not-passed"
+                }
+                [pscustomobject]@{
+                    File = "admin-access.spec.ts"
+                    Title = "responsive and failure states"
+                    Rule = "responsive-failure-states-not-passed"
+                }
+                [pscustomobject]@{
+                    File = "game-config.spec.ts"
+                    Title =
+                        "operator completes the GameConfig lifecycle against the real API"
+                    Rule = "game-config-lifecycle-not-passed"
+                }
+            )
+        }
+        else {
+            @(
+                [pscustomobject]@{
+                    File = "game-config.spec.ts"
+                    Title =
+                        "operator completes the GameConfig lifecycle against the real API"
+                    Rule = "game-config-lifecycle-not-passed"
+                }
+            )
+        }
+        if ($testRecords.Count -ne $expectedTests.Count) {
+            return "result-manifest-invalid"
+        }
+        foreach ($expectedTest in $expectedTests) {
+            $matchingRecords = @(
+                $testRecords |
+                    Where-Object {
+                        $_.File -ceq $expectedTest.File -and
+                        $_.Title -ceq $expectedTest.Title
+                    })
+            if ($matchingRecords.Count -ne 1) {
+                return "result-manifest-invalid"
+            }
+        }
+
+        foreach ($expectedTest in $expectedTests) {
+            $testRecord = $testRecords |
+                Where-Object {
+                    $_.File -ceq $expectedTest.File -and
+                    $_.Title -ceq $expectedTest.Title
+                } |
+                Select-Object -First 1
+            $results = @($testRecord.Test.results)
+            if ($results.Count -ne 1) {
+                return "$($expectedTest.Rule)-result-invalid"
+            }
+            if ([string]$results[0].status -ceq "passed") {
+                continue
+            }
+            $knownEvidenceRule = $null
+            $safeEvidenceRuleIds = @(
+                "aspnet-password-hash",
+                "authorization-bearer",
+                "dynamic-secret-pipe-acknowledgement",
+                "dynamic-secret-pipe-closed",
+                "dynamic-secret-pipe-configuration",
+                "dynamic-secret-pipe-connection",
+                "dynamic-secret-pipe-payload",
+                "dynamic-secret-pipe-timeout",
+                "dynamic-secret-pipe-write",
+                "exact-sensitive-value",
+                "jwt",
+                "mysql-uri",
+                "opaque-base64url-32-byte",
+                "password-connection-string",
+                "sensitive-json-field"
+            )
+            $failureTexts = @(
+                if ($null -ne $results[0].PSObject.Properties["error"] -and
+                    $null -ne $results[0].error) {
+                    if ($null -ne $results[0].error.PSObject.Properties["message"]) {
+                        [string]$results[0].error.message
+                    }
+                    if ($null -ne $results[0].error.PSObject.Properties["stack"]) {
+                        [string]$results[0].error.stack
+                    }
+                }
+                foreach ($errorRecord in @($results[0].errors)) {
+                    if ($null -ne $errorRecord.PSObject.Properties["message"]) {
+                        [string]$errorRecord.message
+                    }
+                }
+            )
+            foreach ($safeEvidenceRuleId in $safeEvidenceRuleIds) {
+                $ruleMessages = @(
+                    "Acceptance evidence rule '$safeEvidenceRuleId' failed.",
+                    "Acceptance evidence failed rule '$safeEvidenceRuleId' ")
+                if (@($failureTexts | Where-Object {
+                            $failureText = $_
+                            @($ruleMessages | Where-Object {
+                                    $failureText.Contains(
+                                        $_,
+                                        [StringComparison]::Ordinal)
+                                }).Count -gt 0
+                        }).Count -gt 0) {
+                    $knownEvidenceRule = $safeEvidenceRuleId
+                    break
+                }
+            }
+            $evidenceRuleSuffix = if ($null -ne $knownEvidenceRule) {
+                "#$knownEvidenceRule"
+            }
+            else {
+                ""
+            }
+            $locationCandidates = [System.Collections.Generic.List[object]]::new()
+            if ($null -ne $results[0].PSObject.Properties["errorLocation"] -and
+                $null -ne $results[0].errorLocation) {
+                $null = $locationCandidates.Add($results[0].errorLocation)
+            }
+            if ($null -ne $results[0].PSObject.Properties["error"] -and
+                $null -ne $results[0].error -and
+                $null -ne $results[0].error.PSObject.Properties["location"] -and
+                $null -ne $results[0].error.location) {
+                $null = $locationCandidates.Add($results[0].error.location)
+            }
+            foreach ($errorRecord in @($results[0].errors)) {
+                if ($null -ne $errorRecord.PSObject.Properties["location"] -and
+                    $null -ne $errorRecord.location) {
+                    $null = $locationCandidates.Add($errorRecord.location)
+                }
+            }
+            foreach ($location in $locationCandidates) {
+                if ([System.IO.Path]::GetFileName([string]$location.file) -cne
+                        [string]$expectedTest.File -or
+                    -not (Test-AdminManagementJsonInteger $location.line) -or
+                    -not (Test-AdminManagementJsonInteger $location.column) -or
+                    [int64]$location.line -lt 1 -or
+                    [int64]$location.line -gt 1000000 -or
+                    [int64]$location.column -lt 1 -or
+                    [int64]$location.column -gt 1000000) {
+                    continue
+                }
+                return ('{0}@{1}:{2}:{3}{4}' -f
+                    $expectedTest.Rule,
+                    $expectedTest.File,
+                    [int64]$location.line,
+                    [int64]$location.column,
+                    $evidenceRuleSuffix)
+            }
+            $sourceLocationPattern =
+                '(?<![A-Za-z0-9_.-])' +
+                [regex]::Escape([string]$expectedTest.File) +
+                ':(?<line>[0-9]{1,7}):(?<column>[0-9]{1,7})(?![0-9])'
+            $stackCandidates = @(
+                if ($null -ne $results[0].PSObject.Properties["error"] -and
+                    $null -ne $results[0].error -and
+                    $null -ne $results[0].error.PSObject.Properties["stack"] -and
+                    -not [string]::IsNullOrWhiteSpace(
+                        [string]$results[0].error.stack)) {
+                    [string]$results[0].error.stack
+                }
+            )
+            foreach ($stackCandidate in $stackCandidates) {
+                foreach ($sourceLocation in [regex]::Matches(
+                        $stackCandidate,
+                        $sourceLocationPattern)) {
+                    $line = [int64]$sourceLocation.Groups["line"].Value
+                    $column = [int64]$sourceLocation.Groups["column"].Value
+                    if ($line -lt 1 -or $line -gt 1000000 -or
+                        $column -lt 1 -or $column -gt 1000000) {
+                        continue
+                    }
+                    return ('{0}@{1}:{2}:{3}{4}' -f
+                        $expectedTest.Rule,
+                        $expectedTest.File,
+                        $line,
+                        $column,
+                        $evidenceRuleSuffix)
+                }
+            }
+            return "$($expectedTest.Rule)$evidenceRuleSuffix"
+        }
+        return "nonzero-with-passing-result"
+    }
+    catch {
+        return "result-unavailable"
+    }
+}
+
 function Invoke-AdminEndToEnd {
     param(
         [Parameter(Mandatory)]$Toolchain,
+        [Parameter(Mandatory)]
+        [ValidateSet("LegacyGameConfig", "M35Management")]
+        [string]$Mode,
         [switch]$RunSwordMasterAcceptance
     )
+
+    $managementSpecPath = "admin/apps/web-ele/e2e/admin-access.spec.ts"
+    $gameConfigSpecPath = "admin/apps/web-ele/e2e/game-config.spec.ts"
+    $playwrightSpecArguments = if ($Mode -eq "M35Management") {
+        Assert-Condition `
+            (Test-Path -LiteralPath $managementSpecPath -PathType Leaf) `
+            "AdminE2E is unavailable until '$managementSpecPath' defines the four frozen management tests."
+        $gameConfigSource = Get-Content -LiteralPath $gameConfigSpecPath -Raw
+        foreach ($forbiddenSqlFixture in @(
+            "DELETE FROM admin_role_permissions",
+            "INSERT INTO admin_role_permissions"
+        )) {
+            Assert-Condition `
+                (-not $gameConfigSource.Contains($forbiddenSqlFixture)) `
+                "M35 management E2E requires GameConfig permission state to be created through management HTTP."
+        }
+        @(
+            "apps/web-ele/e2e/admin-access.spec.ts",
+            "apps/web-ele/e2e/game-config.spec.ts"
+        )
+    }
+    else {
+        @("apps/web-ele/e2e/game-config.spec.ts")
+    }
 
     Invoke-CheckedCommand "docker" @("compose", "version")
     Invoke-CheckedCommand "docker" @("info", "--format", "{{.ServerVersion}}")
     $browserChannel = Resolve-E2EBrowserChannel
 
     $projectName = "novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
-    $testRoot = Join-Path $repositoryRoot ".local\database-tests"
-    $testEnvironmentFile = Join-Path $testRoot "$projectName.env"
+    $adminManagementRoot = Join-Path $repositoryRoot ".local\admin-management"
+    $runRoot = Join-Path $adminManagementRoot $projectName
+    $testEnvironmentFile = Join-Path $runRoot "database.env"
+    $legacyAdminPlaywrightRoot = Join-Path `
+        ([string]$Toolchain.adminRoot) `
+        "output\playwright"
+    $preexistingAdminPlaywrightSnapshot =
+        Get-AdminManagementArtifactSnapshot `
+            -ArtifactRoot $legacyAdminPlaywrightRoot
     $operationError = $null
     $cleanupErrors = [System.Collections.Generic.List[string]]::new()
     $cleanupRequired = $false
     $apiProcess = $null
+    $dbMigratorProcess = $null
+    $playwrightProcess = $null
+    $dynamicSecretChannel = $null
+    $dynamicSecretRecords = @()
+    $dynamicSecretSnapshotComplete = $false
+    $dynamicSecretRegistryComplete = $false
+    $processJobHandle = [IntPtr]::Zero
+    $ownedProcessIdentities = @()
+    $screenshotSpecifications = @()
+    $screenshotInspectionRecords = @()
+    $successfulScreenshotsValidated = $false
     $logRoot = $null
     $previousAdminAccessEnvironment = $null
     $previousDatabaseEnvironment = $null
     $testEnvironment = $null
     $composeArguments = @()
+    $publishedPort = 0
+    $apiPort = 0
+    $adminPort = 0
+    $connectionString = $null
+    $seedUserName = $null
+    $seedPassword = $null
+    $createPassword = $null
+    $createRetryPassword = $null
+    $resetPassword = $null
+    $resetRetryPassword = $null
+    $adminAccessEnvironment = [ordered]@{}
     $previousConnectionValues = [ordered]@{
         NOVAGAME_TEST_MYSQL_CONNECTION_STRING = $env:NOVAGAME_TEST_MYSQL_CONNECTION_STRING
         NOVAGAME_MYSQL_MIGRATION_CONNECTION_STRING = $env:NOVAGAME_MYSQL_MIGRATION_CONNECTION_STRING
@@ -5865,15 +13190,24 @@ function Invoke-AdminEndToEnd {
         "NOVAGAME_E2E_UPSTREAM_API_URL",
         "NOVAGAME_E2E_USERNAME",
         "NOVAGAME_E2E_PASSWORD",
+        "NOVAGAME_E2E_CREATE_PASSWORD",
+        "NOVAGAME_E2E_CREATE_RETRY_PASSWORD",
+        "NOVAGAME_E2E_RESET_PASSWORD",
+        "NOVAGAME_E2E_RESET_RETRY_PASSWORD",
         "NOVAGAME_E2E_BROWSER_CHANNEL",
         "NOVAGAME_E2E_MYSQL_CONTAINER",
         "NOVAGAME_E2E_MYSQL_ROOT_PASSWORD",
-        "NOVAGAME_E2E_MYSQL_DATABASE"
+        "NOVAGAME_E2E_MYSQL_DATABASE",
+        "PLAYWRIGHT_HTML_OUTPUT_DIR",
+        "PLAYWRIGHT_JSON_OUTPUT_FILE"
     )
     $previousRuntimeEnvironment = Get-NovaGameProcessEnvironmentSnapshot `
         -Names $runtimeEnvironmentNames
 
     try {
+        $logRoot = $runRoot
+        New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
+        $processJobHandle = New-NovaGameProcessJob
         Write-NovaGameDatabaseEnvironmentFile `
             -Path $testEnvironmentFile `
             -Database "novagame_e2e" `
@@ -5927,6 +13261,10 @@ function Invoke-AdminEndToEnd {
 
         $seedUserName = "verification-admin"
         $seedPassword = "Verification-Administrator-Password-123!"
+        $createPassword = "Create-$projectName-Password-123!"
+        $createRetryPassword = "Create-Retry-$projectName-Password-456!"
+        $resetPassword = "Reset-$projectName-Password-789!"
+        $resetRetryPassword = "Reset-Retry-$projectName-Password-012!"
         $adminAccessEnvironment = [ordered]@{
             NovaGame__AdminAccess__Jwt__SigningKey = New-NovaGameAdminAccessSigningKey
             NovaGame__AdminAccess__Seed__UserName = $seedUserName
@@ -5938,12 +13276,53 @@ function Invoke-AdminEndToEnd {
         $env:DOTNET_ENVIRONMENT = "Testing"
         $env:ASPNETCORE_ENVIRONMENT = "Testing"
 
-        Invoke-CheckedCommand "dotnet" @(
-            "run",
-            "--project", "server/src/NovaGame.DbMigrator/NovaGame.DbMigrator.csproj",
-            "--no-build",
-            "--no-restore"
-        )
+        $dbMigratorStandardOutputPath = Join-Path `
+            $logRoot `
+            "dbmigrator.stdout.log"
+        $dbMigratorStandardErrorPath = Join-Path `
+            $logRoot `
+            "dbmigrator.stderr.log"
+        $dbMigratorStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $dbMigratorStartInfo.WorkingDirectory = $repositoryRoot
+        $dbMigratorStartInfo.UseShellExecute = $false
+        $dbMigratorStartInfo.CreateNoWindow = $true
+        $dbMigratorStartInfo.RedirectStandardOutput = $false
+        $dbMigratorStartInfo.RedirectStandardError = $false
+        $dbMigratorStartInfo.Environment["NOVAGAME_VERIFICATION_STDOUT_PATH"] =
+            $dbMigratorStandardOutputPath
+        $dbMigratorStartInfo.Environment["NOVAGAME_VERIFICATION_STDERR_PATH"] =
+            $dbMigratorStandardErrorPath
+        $dbMigratorStartInfo.FileName =
+            (Get-Command "pwsh" -ErrorAction Stop).Source
+        foreach ($dbMigratorArgument in @(
+                "-NoProfile",
+                "-Command",
+                '$stdoutPath = $env:NOVAGAME_VERIFICATION_STDOUT_PATH; ' +
+                '$stderrPath = $env:NOVAGAME_VERIFICATION_STDERR_PATH; ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDOUT_PATH", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDERR_PATH", $null, "Process"); ' +
+                '& dotnet run --project server/src/NovaGame.DbMigrator/NovaGame.DbMigrator.csproj --no-build --no-restore ' +
+                '1> $stdoutPath 2> $stderrPath; exit $LASTEXITCODE'
+            )) {
+            $null = $dbMigratorStartInfo.ArgumentList.Add(
+                [string]$dbMigratorArgument)
+        }
+        $dbMigratorProcess = Start-NovaGameJobProcess `
+            -JobHandle $processJobHandle `
+            -TargetStartInfo $dbMigratorStartInfo
+        $dbMigratorCompleted = $dbMigratorProcess.WaitForExit(300000)
+        if (-not $dbMigratorCompleted) {
+            $dbMigratorProcess.Kill($true)
+        }
+        $dbMigratorProcess.WaitForExit()
+        $dbMigratorProcess.Refresh()
+        $dbMigratorExitCode = $dbMigratorProcess.ExitCode
+        if (-not $dbMigratorCompleted) {
+            throw "NovaGame DbMigrator exceeded 300 seconds."
+        }
+        if ($dbMigratorExitCode -ne 0) {
+            throw "NovaGame DbMigrator failed with exit code $dbMigratorExitCode."
+        }
 
         $apiPort = Get-AvailableLoopbackPort
         do {
@@ -5955,25 +13334,44 @@ function Invoke-AdminEndToEnd {
         $env:NovaCore__Web__ForwardedHeaders__IsEnabled = "true"
         $env:NovaCore__Web__ForwardedHeaders__KnownProxies__0 = "127.0.0.1"
 
-        $logRoot = Join-Path $repositoryRoot ".local\admin-e2e\$projectName"
-        New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
         $apiStandardOutputPath = Join-Path $logRoot "api.stdout.log"
         $apiStandardErrorPath = Join-Path $logRoot "api.stderr.log"
-        $dotnet = (Get-Command "dotnet" -ErrorAction Stop).Source
-        $apiProcess = Start-Process `
-            -FilePath $dotnet `
-            -ArgumentList @(
+        $apiStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $apiStartInfo.WorkingDirectory = $repositoryRoot
+        $apiStartInfo.UseShellExecute = $false
+        $apiStartInfo.CreateNoWindow = $true
+        $apiStartInfo.RedirectStandardOutput = $false
+        $apiStartInfo.RedirectStandardError = $false
+        foreach ($apiArgument in @(
                 "run",
                 "--project", "server/src/NovaGame.Api/NovaGame.Api.csproj",
                 "--no-build",
                 "--no-restore",
                 "--no-launch-profile"
-            ) `
-            -WorkingDirectory $repositoryRoot `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $apiStandardOutputPath `
-            -RedirectStandardError $apiStandardErrorPath `
-            -PassThru
+            )) {
+            $null = $apiStartInfo.ArgumentList.Add($apiArgument)
+        }
+        $apiStartInfo.Environment["NOVAGAME_VERIFICATION_STDOUT_PATH"] =
+            $apiStandardOutputPath
+        $apiStartInfo.Environment["NOVAGAME_VERIFICATION_STDERR_PATH"] =
+            $apiStandardErrorPath
+        $apiStartInfo.FileName = (Get-Command "pwsh" -ErrorAction Stop).Source
+        $apiStartInfo.ArgumentList.Clear()
+        foreach ($apiArgument in @(
+                "-NoProfile",
+                "-Command",
+                '$stdoutPath = $env:NOVAGAME_VERIFICATION_STDOUT_PATH; ' +
+                '$stderrPath = $env:NOVAGAME_VERIFICATION_STDERR_PATH; ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDOUT_PATH", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDERR_PATH", $null, "Process"); ' +
+                '& dotnet run --project server/src/NovaGame.Api/NovaGame.Api.csproj --no-build --no-restore --no-launch-profile ' +
+                '1> $stdoutPath 2> $stderrPath; exit $LASTEXITCODE'
+            )) {
+            $null = $apiStartInfo.ArgumentList.Add($apiArgument)
+        }
+        $apiProcess = Start-NovaGameJobProcess `
+            -JobHandle $processJobHandle `
+            -TargetStartInfo $apiStartInfo
 
         Wait-HttpEndpoint `
             -Uri ([Uri]"$apiUrl/health/live") `
@@ -5999,10 +13397,16 @@ function Invoke-AdminEndToEnd {
             NOVAGAME_E2E_UPSTREAM_API_URL = $apiUrl
             NOVAGAME_E2E_USERNAME = $seedUserName
             NOVAGAME_E2E_PASSWORD = $seedPassword
+            NOVAGAME_E2E_CREATE_PASSWORD = $createPassword
+            NOVAGAME_E2E_CREATE_RETRY_PASSWORD = $createRetryPassword
+            NOVAGAME_E2E_RESET_PASSWORD = $resetPassword
+            NOVAGAME_E2E_RESET_RETRY_PASSWORD = $resetRetryPassword
             NOVAGAME_E2E_BROWSER_CHANNEL = $browserChannel
             NOVAGAME_E2E_MYSQL_CONTAINER = [string]$mysqlContainers[0]
             NOVAGAME_E2E_MYSQL_ROOT_PASSWORD = [string]$testEnvironment["NOVAGAME_MYSQL_ROOT_PASSWORD"]
             NOVAGAME_E2E_MYSQL_DATABASE = [string]$testEnvironment["NOVAGAME_MYSQL_DATABASE"]
+            PLAYWRIGHT_HTML_OUTPUT_DIR = (Join-Path $logRoot "playwright-report")
+            PLAYWRIGHT_JSON_OUTPUT_FILE = (Join-Path $logRoot "playwright-result.json")
         }
         foreach ($entry in $e2eEnvironment.GetEnumerator()) {
             [Environment]::SetEnvironmentVariable(
@@ -6011,7 +13415,128 @@ function Invoke-AdminEndToEnd {
                 "Process")
         }
 
-        Invoke-AdminPnpm -Toolchain $Toolchain -ArgumentList @("run", "test:e2e")
+        $dynamicSecretChannel =
+            New-AdminManagementDynamicSecretCollector
+        $playwrightStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $playwrightStartInfo.FileName = [string]$Toolchain.nodePath
+        $playwrightStartInfo.WorkingDirectory = $runRoot
+        $playwrightStartInfo.UseShellExecute = $false
+        $playwrightStartInfo.CreateNoWindow = $true
+        $playwrightStartInfo.RedirectStandardOutput = $false
+        $playwrightStartInfo.RedirectStandardError = $false
+        $playwrightStartInfo.Environment["CI"] = "true"
+        $playwrightStartInfo.Environment["NO_COLOR"] = "1"
+        $playwrightStartInfo.Environment["FORCE_COLOR"] = "0"
+        $playwrightStartInfo.Environment["pnpm_config_store_dir"] =
+            [string]$Toolchain.storePath
+        $pnpmShimPath = Join-Path $runRoot "pnpm.cmd"
+        $pnpmShimContent = @(
+            "@echo off",
+            ('"{0}" "{1}" %*' -f
+                [string]$Toolchain.nodePath,
+                [string]$Toolchain.pnpmBootstrapPath)
+        ) -join "`r`n"
+        Set-Content `
+            -LiteralPath $pnpmShimPath `
+            -Value $pnpmShimContent `
+            -Encoding Ascii `
+            -NoNewline
+        $playwrightStartInfo.Environment["PATH"] =
+            "$runRoot$([System.IO.Path]::PathSeparator)" +
+            "$(Split-Path -Parent ([string]$Toolchain.nodePath))" +
+            "$([System.IO.Path]::PathSeparator)$env:PATH"
+        foreach ($entry in $e2eEnvironment.GetEnumerator()) {
+            $playwrightStartInfo.Environment[[string]$entry.Key] = [string]$entry.Value
+        }
+        $playwrightStartInfo.Environment[
+            "NOVAGAME_E2E_DYNAMIC_SECRET_PIPE"] =
+            [string]$dynamicSecretChannel.PipeName
+        $playwrightStartInfo.Environment[
+            "NOVAGAME_E2E_DYNAMIC_SECRET_PIPE_KEY"] =
+            [string]$dynamicSecretChannel.EncodedAuthenticationKey
+        $playwrightStandardOutputPath = Join-Path `
+            $logRoot `
+            "playwright.stdout.log"
+        $playwrightStandardErrorPath = Join-Path `
+            $logRoot `
+            "playwright.stderr.log"
+        $playwrightStartInfo.Environment["NOVAGAME_VERIFICATION_STDOUT_PATH"] =
+            $playwrightStandardOutputPath
+        $playwrightStartInfo.Environment["NOVAGAME_VERIFICATION_STDERR_PATH"] =
+            $playwrightStandardErrorPath
+        $playwrightCliPath = Join-Path `
+            ([string]$Toolchain.adminRoot) `
+            "node_modules\@playwright\test\cli.js"
+        Assert-Condition `
+            (Test-Path -LiteralPath $playwrightCliPath -PathType Leaf) `
+            "Admin Playwright CLI is missing at '$playwrightCliPath'."
+        $playwrightTargetArguments = @(
+            $playwrightCliPath,
+            "test",
+            "--config", (Join-Path `
+                ([string]$Toolchain.adminRoot) `
+                "playwright.config.ts")
+        ) + $playwrightSpecArguments + @(
+            "--reporter=json",
+            "--output", (Join-Path $logRoot "playwright-output")
+        )
+        $playwrightCommandPayload = [ordered]@{
+            FilePath = [string]$Toolchain.nodePath
+            Arguments = $playwrightTargetArguments
+        } | ConvertTo-Json -Compress
+        $playwrightStartInfo.Environment["NOVAGAME_VERIFICATION_COMMAND_PAYLOAD"] =
+            $playwrightCommandPayload
+        $playwrightStartInfo.FileName = (Get-Command "pwsh" -ErrorAction Stop).Source
+        $playwrightStartInfo.ArgumentList.Clear()
+        foreach ($playwrightArgument in @(
+                "-NoProfile",
+                "-Command",
+                '$payload = $env:NOVAGAME_VERIFICATION_COMMAND_PAYLOAD | ConvertFrom-Json -AsHashtable; ' +
+                '$stdoutPath = $env:NOVAGAME_VERIFICATION_STDOUT_PATH; ' +
+                '$stderrPath = $env:NOVAGAME_VERIFICATION_STDERR_PATH; ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_COMMAND_PAYLOAD", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDOUT_PATH", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDERR_PATH", $null, "Process"); ' +
+                '& ([string]$payload.FilePath) @([string[]]$payload.Arguments) ' +
+                '1> $stdoutPath 2> $stderrPath; exit $LASTEXITCODE'
+            )) {
+            $null = $playwrightStartInfo.ArgumentList.Add(
+                [string]$playwrightArgument)
+        }
+        $playwrightProcess = Start-NovaGameJobProcess `
+            -JobHandle $processJobHandle `
+            -TargetStartInfo $playwrightStartInfo
+        $playwrightCompleted = $playwrightProcess.WaitForExit(600000)
+        if (-not $playwrightCompleted) {
+            $playwrightProcess.Kill($true)
+        }
+        $playwrightProcess.WaitForExit()
+        $playwrightProcess.Refresh()
+        $playwrightExitCode = $playwrightProcess.ExitCode
+        if (-not $playwrightCompleted) {
+            throw "Admin Playwright acceptance exceeded 600 seconds."
+        }
+        if ($playwrightExitCode -ne 0) {
+            $playwrightFailureDiagnostic =
+                Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $env:PLAYWRIGHT_JSON_OUTPUT_FILE `
+                    -Mode $Mode
+            throw "Admin Playwright acceptance failed with exit code $playwrightExitCode. Failure rule: $playwrightFailureDiagnostic."
+        }
+        try {
+            Assert-AdminPlaywrightResult `
+                -ResultPath $env:PLAYWRIGHT_JSON_OUTPUT_FILE `
+                -Mode $Mode
+        }
+        catch {
+            throw "Admin Playwright result validation failed."
+        }
+        Assert-AdminManagementResponseAuditReports `
+            -RunRoot $runRoot `
+            -Mode $Mode |
+            Out-Null
+        $screenshotSpecifications = @(
+            Get-AdminManagementScreenshotSpecifications -Mode $Mode)
         if ($RunSwordMasterAcceptance) {
             Invoke-SwordMasterRealApiAcceptance -ApiUrl $apiUrl
         }
@@ -6021,10 +13546,128 @@ function Invoke-AdminEndToEnd {
     }
     finally {
         try {
-            Stop-ProcessTree -Process $apiProcess
+            if ($processJobHandle -ne [IntPtr]::Zero) {
+                $ownedProcessIdentities = @(
+                    Get-NovaGameJobProcessIdentities `
+                        -JobHandle $processJobHandle)
+            }
         }
         catch {
-            $null = $cleanupErrors.Add("Failed to stop the Admin E2E API process: $($_.Exception.Message)")
+            $null = $cleanupErrors.Add(
+                "Failed to capture the Admin management process job: $($_.Exception.Message)")
+        }
+
+        try {
+            if ($processJobHandle -ne [IntPtr]::Zero) {
+                Close-NovaGameProcessJob -JobHandle $processJobHandle
+                $processJobHandle = [IntPtr]::Zero
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to close the Admin management process job: $($_.Exception.Message)")
+        }
+
+        if ($processJobHandle -ne [IntPtr]::Zero) {
+            try {
+                Close-NovaGameProcessJob -JobHandle $processJobHandle
+                $processJobHandle = [IntPtr]::Zero
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to force-close the Admin management process job handle.")
+            }
+        }
+
+        try {
+            if ($null -ne $playwrightProcess) {
+                $playwrightProcess.Dispose()
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to dispose the Admin Playwright process handle.")
+        }
+
+        try {
+            if ($null -ne $dbMigratorProcess) {
+                $dbMigratorProcess.Dispose()
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to dispose the Admin DbMigrator process handle.")
+        }
+
+        try {
+            if ($null -ne $apiProcess) {
+                $apiProcess.Dispose()
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to dispose the Admin API process handle.")
+        }
+
+        if ($null -ne $dynamicSecretChannel) {
+            try {
+                $dynamicSecretRecords = @(
+                    $dynamicSecretChannel.Collector.StopAndSnapshot(
+                        [TimeSpan]::FromSeconds(10)))
+                $dynamicSecretSnapshotComplete = $true
+                $dynamicSecretKinds = @(
+                    $dynamicSecretRecords |
+                        ForEach-Object { [int]$_.Kind } |
+                        Sort-Object -Unique)
+                Assert-StringSet `
+                    -Expected @("1", "2") `
+                    -Actual @($dynamicSecretKinds | ForEach-Object { [string]$_ }) `
+                    -Message "The dynamic-secret registry did not receive both access and refresh tokens."
+                $dynamicSecretRegistryComplete = $true
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "dynamic-secret-registry-incomplete")
+                try {
+                    $dynamicSecretRecords = @(
+                        $dynamicSecretChannel.Collector.SnapshotForCleanup())
+                    $dynamicSecretSnapshotComplete = $true
+                }
+                catch {
+                    $null = $cleanupErrors.Add(
+                        "dynamic-secret-registry-cleanup-snapshot-failed")
+                }
+            }
+            finally {
+                try {
+                    $dynamicSecretChannel.Collector.Dispose()
+                }
+                catch {
+                    $null = $cleanupErrors.Add(
+                        "dynamic-secret-registry-dispose-failed")
+                }
+            }
+        }
+        elseif ($null -eq $operationError) {
+            $null = $cleanupErrors.Add(
+                "dynamic-secret-registry-missing")
+        }
+
+        if ($null -eq $operationError -and $cleanupErrors.Count -eq 0) {
+            try {
+                $screenshotInspectionRecords = @(
+                    Assert-AdminManagementSuccessfulScreenshots `
+                        -RunRoot $runRoot `
+                        -ScreenshotSpecifications $screenshotSpecifications)
+                Assert-AdminManagementScreenshotIdentity `
+                    -RunRoot $runRoot `
+                    -InspectionRecords $screenshotInspectionRecords
+                $successfulScreenshotsValidated = $true
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Admin management screenshot validation failed after process shutdown.")
+            }
         }
 
         try {
@@ -6090,7 +13733,7 @@ function Invoke-AdminEndToEnd {
 
         try {
             if (Test-Path -LiteralPath $testEnvironmentFile -PathType Leaf) {
-                $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot).TrimEnd('\') + '\'
+                $resolvedTestRoot = [System.IO.Path]::GetFullPath($runRoot).TrimEnd('\') + '\'
                 $resolvedTestEnvironmentFile = [System.IO.Path]::GetFullPath(
                     $testEnvironmentFile)
                 if (-not $resolvedTestEnvironmentFile.StartsWith(
@@ -6109,12 +13752,156 @@ function Invoke-AdminEndToEnd {
                 "Failed to remove temporary environment file '$testEnvironmentFile'.")
         }
 
+        try {
+            Assert-AdminManagementCleanup `
+                -ProjectName $projectName `
+                -Ports @($apiPort, $adminPort, $publishedPort) `
+                -OwnedProcessIdentities $ownedProcessIdentities `
+                -TemporarySecretPaths @($testEnvironmentFile)
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Admin management final cleanup assertion failed: $($_.Exception.Message)")
+        }
+
+        try {
+            $finalAdminPlaywrightSnapshot =
+                Get-AdminManagementArtifactSnapshot `
+                    -ArtifactRoot $legacyAdminPlaywrightRoot
+            $changedLegacyAdminArtifacts = @(
+                Compare-AdminManagementArtifactSnapshots `
+                    -Before $preexistingAdminPlaywrightSnapshot `
+                    -After $finalAdminPlaywrightSnapshot)
+            Assert-Condition `
+                ($changedLegacyAdminArtifacts.Count -eq 0) `
+                "Admin management evidence escaped its run root:`n$($changedLegacyAdminArtifacts -join "`n")"
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Admin management legacy-output audit failed: $($_.Exception.Message)")
+        }
+
         if ($null -eq $operationError -and
             $cleanupErrors.Count -eq 0 -and
+            -not $successfulScreenshotsValidated) {
+            $null = $cleanupErrors.Add(
+                "Admin management successful screenshots were not validated before cleanup.")
+        }
+        $allowedScreenshotRelativePaths = if (
+            $null -eq $operationError -and
+            $cleanupErrors.Count -eq 0 -and
+            $successfulScreenshotsValidated) {
+            @($screenshotSpecifications |
+                ForEach-Object { [string]$_.RelativePath })
+        }
+        else {
+            @()
+        }
+
+        if ($dynamicSecretRegistryComplete -and
+            $dynamicSecretSnapshotComplete) {
+            try {
+                Remove-AdminManagementNonRetainableArtifacts `
+                    -ArtifactRoot $runRoot `
+                    -AllowedScreenshotRelativePaths $allowedScreenshotRelativePaths
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to apply the Admin management artifact policy: $($_.Exception.Message)")
+            }
+        }
+        else {
+            $allowedScreenshotRelativePaths = @()
+        }
+        if (($null -ne $operationError -or $cleanupErrors.Count -gt 0) -and
+            $dynamicSecretRegistryComplete -and
+            $dynamicSecretSnapshotComplete) {
+            $allowedScreenshotRelativePaths = @()
+            try {
+                Remove-AdminManagementNonRetainableArtifacts `
+                    -ArtifactRoot $runRoot
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to remove binary Admin management failure evidence: $($_.Exception.Message)")
+            }
+        }
+
+        $artifactSensitiveValues = @(
+            @(
+                $seedPassword
+                $createPassword
+                $createRetryPassword
+                $resetPassword
+                $resetRetryPassword
+                [string]$adminAccessEnvironment[
+                    "NovaGame__AdminAccess__Jwt__SigningKey"]
+                if ($null -ne $testEnvironment) {
+                    [string]$testEnvironment["NOVAGAME_MYSQL_PASSWORD"]
+                    [string]$testEnvironment["NOVAGAME_MYSQL_ROOT_PASSWORD"]
+                }
+                [string]$connectionString
+                if ($null -ne $dynamicSecretChannel) {
+                    [string]$dynamicSecretChannel.EncodedAuthenticationKey
+                }
+                $dynamicSecretRecords |
+                    ForEach-Object { [string]$_.Value }
+            ) | Where-Object {
+                -not [string]::IsNullOrWhiteSpace([string]$_)
+            }
+        )
+        $artifactSecretScanPassed = $false
+        if ($dynamicSecretRegistryComplete -and
+            $dynamicSecretSnapshotComplete) {
+            try {
+                Assert-AdminManagementArtifactSecrets `
+                    -ArtifactRoot $runRoot `
+                    -SensitiveValues $artifactSensitiveValues `
+                    -AllowedScreenshotRelativePaths $allowedScreenshotRelativePaths `
+                    -ScreenshotInspectionRecords $screenshotInspectionRecords
+                $artifactSecretScanPassed = $true
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Admin management retained-artifact secret scan failed: $($_.Exception.Message)")
+                try {
+                    Remove-AdminManagementRunRootVerified `
+                        -RunRoot $runRoot `
+                        -MaximumAttempts 6
+                }
+                catch {
+                    $null = $cleanupErrors.Add(
+                        "Failed to remove unsafe Admin management artifacts: $($_.Exception.Message)")
+                }
+            }
+        }
+
+        $runRootRemovalRequired =
+            Test-AdminManagementRunRootRemovalRequired `
+                -OperationFailed ($null -ne $operationError) `
+                -CleanupErrorCount $cleanupErrors.Count `
+                -DynamicSecretRegistryComplete $dynamicSecretRegistryComplete `
+                -ArtifactSecretScanPassed $artifactSecretScanPassed
+        if ($runRootRemovalRequired -and
+            (Test-Path -LiteralPath $runRoot)) {
+            try {
+                Remove-AdminManagementRunRootVerified `
+                    -RunRoot $runRoot `
+                    -MaximumAttempts 6
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to remove incomplete dynamic-secret evidence: $($_.Exception.Message)")
+            }
+        }
+
+        if ($null -eq $operationError -and
+            $cleanupErrors.Count -eq 0 -and
+            $artifactSecretScanPassed -and
             -not [string]::IsNullOrWhiteSpace([string]$logRoot) -and
             (Test-Path -LiteralPath $logRoot -PathType Container)) {
             try {
-                $adminE2ERoot = Join-Path $repositoryRoot ".local\admin-e2e"
+                $adminE2ERoot = $adminManagementRoot
                 $resolvedAdminE2ERoot = [System.IO.Path]::GetFullPath(
                     $adminE2ERoot).TrimEnd('\') + '\'
                 $resolvedLogRoot = [System.IO.Path]::GetFullPath($logRoot)
@@ -6125,12 +13912,34 @@ function Invoke-AdminEndToEnd {
                         "Refusing to remove Admin E2E logs outside '$resolvedAdminE2ERoot'.")
                 }
                 else {
-                    Remove-Item -LiteralPath $resolvedLogRoot -Recurse -Force
+                    Remove-AdminManagementRunRootVerified `
+                        -RunRoot $resolvedLogRoot `
+                        -MaximumAttempts 6
                 }
             }
             catch {
                 $null = $cleanupErrors.Add(
                     "Failed to remove successful Admin E2E logs '$logRoot'.")
+                try {
+                    Remove-AdminManagementNonRetainableArtifacts `
+                        -ArtifactRoot $runRoot
+                    Assert-AdminManagementArtifactSecrets `
+                        -ArtifactRoot $runRoot `
+                        -SensitiveValues $artifactSensitiveValues
+                }
+                catch {
+                    $null = $cleanupErrors.Add(
+                        "Failed to reduce unremoved Admin E2E evidence to safe text: $($_.Exception.Message)")
+                    try {
+                        Remove-AdminManagementRunRootVerified `
+                            -RunRoot $runRoot `
+                            -MaximumAttempts 6
+                    }
+                    catch {
+                        $null = $cleanupErrors.Add(
+                            "Failed to remove unverified Admin E2E evidence '$runRoot'.")
+                    }
+                }
             }
         }
     }
@@ -6150,6 +13959,13 @@ function Test-Admin {
     param([switch]$RunSwordMasterAcceptance)
 
     Test-GameConfig
+    $m35BrowserMode = if ((Get-M35TaskStatus -TaskId "M35-07-T01") -in @(
+            "in_progress", "blocked", "complete")) {
+        "M35Management"
+    }
+    else {
+        "LegacyGameConfig"
+    }
 
     foreach ($requiredPath in @(
         "admin/LICENSE",
@@ -6256,9 +14072,132 @@ function Test-Admin {
         }
     )
     Assert-Condition ($playwrightConfigs.Count -ge 1) "Admin Playwright configuration is missing."
-    Assert-Condition ($browserSpecs.Count -ge 1) "Admin browser coverage is missing."
+    $expectedBrowserSpecs = if ($m35BrowserMode -eq "M35Management") {
+        @(
+            "admin/apps/web-ele/e2e/admin-access.spec.ts",
+            "admin/apps/web-ele/e2e/game-config.spec.ts"
+        )
+    }
+    else {
+        @("admin/apps/web-ele/e2e/game-config.spec.ts")
+    }
+    Assert-StringSet `
+        -Expected $expectedBrowserSpecs `
+        -Actual $browserSpecs `
+        -Message "Admin browser specifications do not match the active M3.5 stage."
+    foreach ($browserSpec in $browserSpecs) {
+        $browserSpecSource = Get-Content -LiteralPath $browserSpec -Raw
+        Assert-Condition `
+            (-not [regex]::IsMatch(
+                $browserSpecSource,
+                '(?m)\b(?:page|context)\.request\.(?:delete|fetch|get|head|patch|post|put)\s*\(|\brequest\.newContext\s*\(')) `
+            "Admin browser spec '$browserSpec' must use the audited direct-request wrapper."
+        Assert-Condition `
+            (-not [regex]::IsMatch(
+                $browserSpecSource,
+                '(?m)\b(?:page|context)\.route\s*\(|\broute\.abort\s*\(')) `
+            "Admin browser spec '$browserSpec' must not own request interception or aborts."
+    }
+    $acceptanceEvidenceSource = Get-Content `
+        -LiteralPath "admin/apps/web-ele/e2e/acceptance-evidence.ts" `
+        -Raw
+    Assert-Condition `
+        ($acceptanceEvidenceSource.Contains(
+                "withExpectedApiNetworkFailure",
+                [StringComparison]::Ordinal) -and
+            $acceptanceEvidenceSource.Contains(
+                "newObservedContext",
+                [StringComparison]::Ordinal) -and
+            $acceptanceEvidenceSource.Contains(
+                "await route.abort('failed');",
+                [StringComparison]::Ordinal)) `
+        "Admin expected network failures must use the evidence-owned exact abort scope."
+    $contextClosePosition = $acceptanceEvidenceSource.IndexOf(
+        "await this.closeContext(context);",
+        [StringComparison]::Ordinal)
+    $listenerDetachPosition = $acceptanceEvidenceSource.IndexOf(
+        "context.off('request', handlers.request);",
+        [StringComparison]::Ordinal)
+    Assert-Condition `
+        ($contextClosePosition -ge 0 -and
+            $listenerDetachPosition -gt $contextClosePosition) `
+        "Admin response evidence must close browser contexts before detaching request listeners."
+    Assert-Condition `
+        ($acceptanceEvidenceSource.Contains(
+                "private observeContext(",
+                [StringComparison]::Ordinal) -and
+            -not $acceptanceEvidenceSource.Contains(
+                "assertScreenshotSurface",
+                [StringComparison]::Ordinal)) `
+        "Admin acceptance context observation and screenshot scanning must remain evidence-internal."
+    Assert-Condition `
+        ($acceptanceEvidenceSource.Contains(
+                "this.browserApiOrigin = requiredHttpOrigin('NOVAGAME_E2E_BASE_URL');",
+                [StringComparison]::Ordinal) -and
+            $acceptanceEvidenceSource.Contains(
+                "this.directApiOrigin = requiredHttpOrigin('NOVAGAME_E2E_API_URL');",
+                [StringComparison]::Ordinal) -and
+            $acceptanceEvidenceSource.Contains(
+                "this.browserApiOrigin === this.directApiOrigin",
+                [StringComparison]::Ordinal) -and
+            $acceptanceEvidenceSource.Contains(
+                "parsedUrl.origin !== this.directApiOrigin",
+                [StringComparison]::Ordinal) -and
+            $acceptanceEvidenceSource.Contains(
+                "context ? this.browserApiOrigin : this.directApiOrigin",
+                [StringComparison]::Ordinal)) `
+        "Admin acceptance browser and direct API origins must remain distinct and source-bound."
+    $gameConfigAcceptanceSource = Get-Content `
+        -LiteralPath "admin/apps/web-ele/e2e/game-config.spec.ts" `
+        -Raw
+    Assert-Condition `
+        ($gameConfigAcceptanceSource.Contains(
+                "const apiBaseURL = requireEnvironment('NOVAGAME_E2E_API_URL');",
+                [StringComparison]::Ordinal) -and
+            -not $gameConfigAcceptanceSource.Contains(
+                "NOVAGAME_E2E_BASE_URL",
+                [StringComparison]::Ordinal)) `
+        "The legacy GameConfig direct-request source must remain NOVAGAME_E2E_API_URL."
+    $captureScreenshotStart = $acceptanceEvidenceSource.IndexOf(
+        "async captureScreenshot(page: Page, requiredPath: string): Promise<void> {",
+        [StringComparison]::Ordinal)
+    $captureScreenshotEnd = $acceptanceEvidenceSource.IndexOf(
+        "prepareLegacyGameConfigPermissionFixture",
+        [StringComparison]::Ordinal)
+    Assert-Condition `
+        ($captureScreenshotStart -ge 0 -and
+            $captureScreenshotEnd -gt $captureScreenshotStart) `
+        "Admin acceptance screenshots must use the evidence-owned atomic capture method."
+    $captureScreenshotSource = $acceptanceEvidenceSource.Substring(
+        $captureScreenshotStart,
+        $captureScreenshotEnd - $captureScreenshotStart)
+    $screenshotScanPosition = $captureScreenshotSource.IndexOf(
+        "await this.scanScreenshotSurface(page);",
+        [StringComparison]::Ordinal)
+    $screenshotCapturePosition = $captureScreenshotSource.IndexOf(
+        "await page.screenshot({",
+        [StringComparison]::Ordinal)
+    $screenshotPathLedgerPosition = $captureScreenshotSource.IndexOf(
+        "this.screenshotPaths.add(requiredPath);",
+        [StringComparison]::Ordinal)
+    $screenshotScanLedgerPosition = $captureScreenshotSource.IndexOf(
+        "this.screenshotSurfaceScans += 1;",
+        [StringComparison]::Ordinal)
+    Assert-Condition `
+        ($screenshotScanPosition -ge 0 -and
+            $screenshotCapturePosition -gt $screenshotScanPosition -and
+            $screenshotPathLedgerPosition -gt $screenshotCapturePosition -and
+            $screenshotScanLedgerPosition -gt $screenshotPathLedgerPosition -and
+            $acceptanceEvidenceSource.Contains(
+                "this.screenshotSurfaceScans !== this.screenshotPaths.size",
+                [StringComparison]::Ordinal)) `
+        "Admin acceptance screenshots must scan before capture and ledger only successful unique captures."
 
     $toolchain = Initialize-AdminToolchain
+    Test-AdminManagementDynamicSecretClientPolicy -Toolchain $toolchain
+    Test-AdminAcceptanceOwnershipPolicy `
+        -Toolchain $toolchain `
+        -SpecPaths $browserSpecs
     $previousCi = $env:CI
     $previousNodeOptionsExists = Test-Path -LiteralPath "Env:NODE_OPTIONS"
     $previousNodeOptions = $env:NODE_OPTIONS
@@ -6285,6 +14224,7 @@ function Test-Admin {
                 "--filter", "@vben/web-ele...", "--if-present", "run", "build")
         Invoke-AdminEndToEnd `
             -Toolchain $toolchain `
+            -Mode $m35BrowserMode `
             -RunSwordMasterAcceptance:$RunSwordMasterAcceptance
     }
     finally {
@@ -6301,11 +14241,15 @@ function Test-Admin {
 }
 
 function Test-AdminEndToEnd {
+    $m35BrowserTaskStatus = Get-M35TaskStatus -TaskId "M35-07-T01"
+    Assert-Condition `
+        ($m35BrowserTaskStatus -in @("in_progress", "blocked", "complete")) `
+        "AdminE2E is unavailable before M35-07-T01 is active. Use -Scope Admin for the legacy GameConfig regression."
     $toolchain = Initialize-AdminToolchain
     $previousCi = $env:CI
     $env:CI = "true"
     try {
-        Invoke-AdminEndToEnd -Toolchain $toolchain
+        Invoke-AdminEndToEnd -Toolchain $toolchain -Mode "M35Management"
     }
     finally {
         $env:CI = $previousCi
@@ -7216,7 +15160,7 @@ function Invoke-DotNetFilteredTestWithExecutionCount {
 
     $resultsRoot = Join-Path `
         $localRoot `
-        ("test-results\swordmaster-" + [Guid]::NewGuid().ToString("N"))
+        ("test-results\focused-" + [Guid]::NewGuid().ToString("N"))
     $resolvedResultsRoot = [System.IO.Path]::GetFullPath($resultsRoot)
     $resolvedLocalRoot = [System.IO.Path]::GetFullPath($localRoot).TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
@@ -9490,6 +17434,7 @@ switch ($Scope) {
     "Database" { Test-Database }
     "Authentication" { Test-Authentication }
     "GameConfig" { Test-GameConfig }
+    "AdminManagement" { Test-AdminManagement }
     "AdminE2E" { Test-AdminEndToEnd }
     "Admin" { Test-Admin }
     "Client" { Test-Client }

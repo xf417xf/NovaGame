@@ -18,7 +18,16 @@ M3 is complete. Its server, independent-admin, real dual-MySQL API, desktop/mobi
 verified. The complete player-equipment-grant capability remains SwordMaster-owned.
 `request-audit-context-consumer-contract` remains a possible later candidate only and is neither
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
-another capability, M4, or NovaCore changes. No repository milestone is active.
+another capability, M4, or NovaCore changes.
+
+[M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone at
+`M35-04`, and only `M35-04-T01` is executable after M35-03 completed its Domain, Application, and
+focused-test tasks. The authorized `administrator-management` capability extends the existing
+NovaGame-owned `Operations/AdminAccess` capability through administrator, role and permission,
+session, audit, and generic Vben `web-ele` operations. The active task authorizes only approved
+repository queries, row locks, mappings, indexes, all three frozen receipt kinds, and the explicit
+MySQL migration. It does not authorize permission seeding, HTTP APIs or OpenAPI, Admin UI, later
+M35-04 tasks, SwordMaster changes, extraction, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 When sources appear to conflict, stop and resolve the conflict before implementation. Do not silently weaken a repository rule or an active goal acceptance criterion.
 
@@ -33,3 +42,4 @@ When sources appear to conflict, stop and resolve the conflict before implementa
 - [M1 First SwordMaster Domain Slice completed goal record](goals/m1.md)
 - [M2 First Validated Extraction completed goal record](goals/m2.md)
 - [M3 SwordMaster Player Equipment Grant completed goal record](goals/m3.md)
+- [M3.5 Administrator Management active goal](goals/m3.5.md)

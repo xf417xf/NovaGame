@@ -6,11 +6,11 @@ import type {
   Response,
 } from '@playwright/test';
 
-import { Buffer } from 'node:buffer';
-import { spawnSync } from 'node:child_process';
-import { mkdir, readFile } from 'node:fs/promises';
+import type { AcceptanceEvidenceAudit } from './acceptance-evidence';
 
-import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+
+import { expect, test } from './acceptance-evidence';
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -51,35 +51,10 @@ interface Version {
   sourceDraftId: string;
 }
 
-interface DockerInspectResult {
-  Config?: {
-    Labels?: null | Record<string, string>;
-  };
-  Name?: string;
-  State?: {
-    Running?: boolean;
-  };
-}
-
-interface MySqlFixture {
-  container: string;
-  database: string;
-  rootPassword: string;
-}
-
-interface PermissionFixture extends MySqlFixture {
-  roleId: string;
-}
-
 const configurationSet = 'default';
 const environmentName = 'development';
 const loginPageReadyTimeoutMs = 120_000;
 const schemaVersion = '1';
-const permissionNames = [
-  'Content.GameConfig.ManageDrafts',
-  'Content.GameConfig.Publish',
-  'Content.GameConfig.Activate',
-] as const;
 const visualOutputDirectory = 'output/playwright/visual';
 
 test.use({ trace: 'off' });
@@ -119,7 +94,12 @@ function drawer(page: Page, testId: string): Locator {
     );
 }
 
-async function readApiData<T>(response: APIResponse | Response): Promise<T> {
+async function readApiData<T>(
+  response: APIResponse | Response,
+  acceptanceEvidence: AcceptanceEvidenceAudit,
+  method?: string,
+): Promise<T> {
+  await acceptanceEvidence.auditResponse(response, method);
   const responseText = await response.text();
   let body: ApiEnvelope<T>;
   try {
@@ -132,11 +112,9 @@ async function readApiData<T>(response: APIResponse | Response): Promise<T> {
 
   if (!response.ok() || !body.succeeded) {
     const errorCode = body.error?.code ?? 'NovaGame.UnknownError';
-    const errorMessage =
-      body.error?.message ?? 'No stable API error message was returned.';
     throw new Error(
       `NovaGame API request failed with status ${response.status()} ` +
-        `and code '${errorCode}': ${errorMessage}`,
+        `and code '${errorCode}'.`,
     );
   }
   if (body.data === undefined) {
@@ -203,7 +181,9 @@ async function login(
   page: Page,
   username: string,
   password: string,
+  acceptanceEvidence: AcceptanceEvidenceAudit,
 ): Promise<string> {
+  acceptanceEvidence.registerSensitiveValue(password);
   await page.goto('/auth/login', {
     timeout: loginPageReadyTimeoutMs,
     waitUntil: 'commit',
@@ -223,12 +203,14 @@ async function login(
   await page.getByRole('button', { name: 'login' }).click();
   const session = await readApiData<AccessTokenResponse>(
     await loginResponsePromise,
+    acceptanceEvidence,
   );
 
   await expect(page).toHaveURL(/game-config/, { timeout: 60_000 });
   await expect(
     page.getByRole('heading', { name: 'Game configuration' }),
   ).toBeVisible({ timeout: 60_000 });
+  await acceptanceEvidence.assertCurrentRefreshCookie();
   return session.accessToken;
 }
 
@@ -246,6 +228,7 @@ async function captureWorkspaceViewport(
   page: Page,
   name: string,
   viewport: { height: number; width: number },
+  acceptanceEvidence: AcceptanceEvidenceAudit,
 ): Promise<void> {
   await page.setViewportSize(viewport);
   await expect(
@@ -265,18 +248,17 @@ async function captureWorkspaceViewport(
       `${bodyWidth.clientWidth}px.`,
   ).toBeLessThanOrEqual(bodyWidth.clientWidth);
 
-  await mkdir(visualOutputDirectory, { recursive: true });
-  await page.screenshot({
-    animations: 'disabled',
-    fullPage: true,
-    path: `${visualOutputDirectory}/game-config-${name}.png`,
-  });
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/game-config-${name}.png`,
+  );
 }
 
 async function createAndValidateDraft(
   page: Page,
   name: string,
   content: string,
+  acceptanceEvidence: AcceptanceEvidenceAudit,
 ): Promise<{ draft: Draft; validation: ValidationResult }> {
   await page.getByTestId('create-draft').click();
   await expect(page.getByTestId('draft-editor')).toBeVisible();
@@ -296,9 +278,13 @@ async function createAndValidateDraft(
   );
   await page.getByTestId('validate-draft').click();
 
-  const draft = await readApiData<Draft>(await createResponsePromise);
+  const draft = await readApiData<Draft>(
+    await createResponsePromise,
+    acceptanceEvidence,
+  );
   const validation = await readApiData<ValidationResult>(
     await validationResponsePromise,
+    acceptanceEvidence,
   );
   return { draft, validation };
 }
@@ -311,215 +297,13 @@ async function closeDrawer(page: Page, testId: string): Promise<void> {
   await expect(page.getByTestId(testId)).toBeHidden();
 }
 
-function runDocker(args: string[], environment?: NodeJS.ProcessEnv): string {
-  const result = spawnSync('docker', args, {
-    encoding: 'utf8',
-    env: environment,
-    shell: false,
-    windowsHide: true,
-  });
-
-  if (result.error || result.status !== 0) {
-    throw new Error(
-      `Docker E2E fixture command failed with exit code ${result.status ?? 'unknown'}.`,
-    );
-  }
-  return result.stdout.trim();
-}
-
-function sqlUtf8Literal(value: string): string {
-  return `CONVERT(0x${Buffer.from(value, 'utf8').toString('hex')} USING utf8mb4)`;
-}
-
-function executeMySql(fixture: MySqlFixture, sql: string): string {
-  return runDocker(
-    [
-      'exec',
-      '--env',
-      'MYSQL_PWD',
-      fixture.container,
-      'mysql',
-      '--protocol=TCP',
-      '--user=root',
-      `--database=${fixture.database}`,
-      '--batch',
-      '--skip-column-names',
-      '--execute',
-      sql,
-    ],
-    { ...process.env, MYSQL_PWD: fixture.rootPassword },
-  );
-}
-
-function readOutputLines(output: string): string[] {
-  return output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function createDisposablePermissionFixture(
-  username: string,
-): PermissionFixture {
-  const container = requireEnvironment('NOVAGAME_E2E_MYSQL_CONTAINER');
-  const rootPassword = requireEnvironment('NOVAGAME_E2E_MYSQL_ROOT_PASSWORD');
-  const database = requireEnvironment('NOVAGAME_E2E_MYSQL_DATABASE');
-  if (database !== 'novagame_e2e') {
-    throw new Error(
-      `Refusing permission mutation for non-disposable database '${database}'.`,
-    );
-  }
-
-  const inspectOutput = runDocker(['inspect', container]);
-  let inspectResults: DockerInspectResult[];
-  try {
-    inspectResults = JSON.parse(inspectOutput) as DockerInspectResult[];
-  } catch {
-    throw new Error('Docker did not return valid inspection data.');
-  }
-  if (inspectResults.length !== 1) {
-    throw new Error('Docker inspection did not resolve exactly one container.');
-  }
-
-  const inspected = inspectResults[0];
-  const labels = inspected?.Config?.Labels ?? {};
-  const composeProject = labels['com.docker.compose.project'] ?? '';
-  const composeService = labels['com.docker.compose.service'] ?? '';
-  const containerName = inspected?.Name?.replace(/^\/+/, '') ?? '';
-  if (
-    !/^novagame-test-[a-f0-9]{12}$/.test(composeProject) ||
-    composeService !== 'mysql' ||
-    !containerName.startsWith(`${composeProject}-mysql-`) ||
-    inspected?.State?.Running !== true
-  ) {
-    throw new Error(
-      'Refusing permission mutation outside a running disposable novagame-test-* MySQL container.',
-    );
-  }
-
-  const mysqlFixture: MySqlFixture = { container, database, rootPassword };
-  if (executeMySql(mysqlFixture, 'SELECT DATABASE();') !== database) {
-    throw new Error(
-      'The MySQL client did not select the disposable E2E database.',
-    );
-  }
-
-  const normalizedUsername = username.trim().normalize('NFKC').toUpperCase();
-  const roleIds = readOutputLines(
-    executeMySql(
-      mysqlFixture,
-      `SELECT DISTINCT rm.RoleId
-FROM admin_role_memberships AS rm
-INNER JOIN admin_administrators AS a ON a.Id = rm.AdministratorId
-WHERE a.NormalizedUserName = ${sqlUtf8Literal(normalizedUsername)}
-ORDER BY rm.RoleId;`,
-    ),
-  );
-  const roleId = roleIds[0];
-  if (roleIds.length !== 1 || !roleId) {
-    throw new Error(
-      `Disposable permission fixture expected one role for the configured administrator, found ${roleIds.length}.`,
-    );
-  }
-
-  const fixture: PermissionFixture = {
-    ...mysqlFixture,
-    roleId,
-  };
-  const permissionList = permissionNames
-    .map((permissionName) => sqlUtf8Literal(permissionName))
-    .join(', ');
-  const permissionCount = Number(
-    executeMySql(
-      fixture,
-      `SELECT COUNT(*)
-FROM admin_role_permissions
-WHERE RoleId = ${sqlUtf8Literal(fixture.roleId)}
-  AND Name IN (${permissionList});`,
-    ),
-  );
-  if (permissionCount !== permissionNames.length) {
-    throw new Error(
-      `Disposable permission fixture expected ${permissionNames.length} mutable permissions, found ${permissionCount}.`,
-    );
-  }
-
-  return fixture;
-}
-
-function revokeMutationPermissions(fixture: PermissionFixture): void {
-  const permissionList = permissionNames
-    .map((permissionName) => sqlUtf8Literal(permissionName))
-    .join(', ');
-  const results = readOutputLines(
-    executeMySql(
-      fixture,
-      `DELETE FROM admin_role_permissions
-WHERE RoleId = ${sqlUtf8Literal(fixture.roleId)}
-  AND Name IN (${permissionList});
-SELECT ROW_COUNT();
-SELECT COUNT(*)
-FROM admin_role_permissions
-WHERE RoleId = ${sqlUtf8Literal(fixture.roleId)}
-  AND Name IN (${permissionList});`,
-    ),
-  ).map(Number);
-
-  if (
-    results.length !== 2 ||
-    results[0] !== permissionNames.length ||
-    results[1] !== 0
-  ) {
-    throw new Error(
-      'Disposable permission revocation did not remove exactly three permissions.',
-    );
-  }
-}
-
-function restoreMutationPermissions(fixture: PermissionFixture): void {
-  const permissionRows = permissionNames
-    .map((permissionName, index) =>
-      index === 0
-        ? `SELECT ${sqlUtf8Literal(permissionName)} AS Name`
-        : `UNION ALL SELECT ${sqlUtf8Literal(permissionName)}`,
-    )
-    .join('\n');
-  const permissionList = permissionNames
-    .map((permissionName) => sqlUtf8Literal(permissionName))
-    .join(', ');
-  const restoredCount = Number(
-    executeMySql(
-      fixture,
-      `INSERT INTO admin_role_permissions
-    (Id, RoleId, Name, GrantedAtUtc, GrantedByAdministratorId)
-SELECT UUID(), ${sqlUtf8Literal(fixture.roleId)}, permissions.Name, UTC_TIMESTAMP(6), NULL
-FROM (
-${permissionRows}
-) AS permissions
-LEFT JOIN admin_role_permissions AS existing
-  ON existing.RoleId = ${sqlUtf8Literal(fixture.roleId)}
- AND existing.Name = permissions.Name
-WHERE existing.Id IS NULL;
-SELECT COUNT(*)
-FROM admin_role_permissions
-WHERE RoleId = ${sqlUtf8Literal(fixture.roleId)}
-  AND Name IN (${permissionList});`,
-    ),
-  );
-
-  if (restoredCount !== permissionNames.length) {
-    throw new Error(
-      'Disposable permission restoration did not restore all three permissions.',
-    );
-  }
-}
-
 test('operator completes the GameConfig lifecycle against the real API', async ({
+  acceptanceEvidence,
   page,
 }) => {
   test.setTimeout(300_000);
 
-  const baseURL = requireEnvironment('NOVAGAME_E2E_BASE_URL');
+  const apiBaseURL = requireEnvironment('NOVAGAME_E2E_API_URL');
   const username = requireEnvironment('NOVAGAME_E2E_USERNAME');
   const password = requireEnvironment('NOVAGAME_E2E_PASSWORD');
   const runId = Date.now().toString(36);
@@ -540,31 +324,32 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     },
   });
 
-  let accessToken = await login(page, username, password);
-  const authenticatedCookies = await page.context().cookies();
-  const refreshCookie = authenticatedCookies.find(
-    (cookie) => cookie.name === 'novagame.admin.refresh_token',
-  );
-  expect(refreshCookie).toMatchObject({
-    httpOnly: true,
-    path: '/api/auth',
-    sameSite: 'Strict',
-    secure: true,
-  });
+  let accessToken = await login(page, username, password, acceptanceEvidence);
 
-  await captureWorkspaceViewport(page, 'mobile-390x844', {
-    height: 844,
-    width: 390,
-  });
-  await captureWorkspaceViewport(page, 'desktop-1440x900', {
-    height: 900,
-    width: 1440,
-  });
+  await captureWorkspaceViewport(
+    page,
+    'mobile-390x844',
+    {
+      height: 844,
+      width: 390,
+    },
+    acceptanceEvidence,
+  );
+  await captureWorkspaceViewport(
+    page,
+    'desktop-1440x900',
+    {
+      height: 900,
+      width: 1440,
+    },
+    acceptanceEvidence,
+  );
 
   const invalid = await createAndValidateDraft(
     page,
     firstDraftName,
     '{"items":[]}',
+    acceptanceEvidence,
   );
   expect(invalid.validation.isValid).toBe(false);
   await expect(page.getByTestId('validation-issues')).toContainText(
@@ -583,16 +368,19 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     `/api/game-config/drafts/${invalid.draft.id}/validate`,
   );
   await page.getByTestId('validate-draft').click();
-  await readApiData<Draft>(await validUpdatePromise);
+  await readApiData<Draft>(await validUpdatePromise, acceptanceEvidence);
   const validValidation = await readApiData<ValidationResult>(
     await validValidationPromise,
+    acceptanceEvidence,
   );
   expect(validValidation.isValid).toBe(true);
   await expect(page.getByTestId('review-draft')).toBeVisible();
 
   const externalName = `${firstDraftName} external`;
-  const externalResponse = await page.request.put(
-    apiUrl(baseURL, `/game-config/drafts/${invalid.draft.id}`),
+  const externalResponse = await acceptanceEvidence.apiRequest(
+    page.request,
+    'PUT',
+    apiUrl(apiBaseURL, `/game-config/drafts/${invalid.draft.id}`),
     {
       data: {
         content: validContent,
@@ -603,7 +391,11 @@ test('operator completes the GameConfig lifecycle against the real API', async (
       headers: authorizationHeaders(accessToken),
     },
   );
-  const externalDraft = await readApiData<Draft>(externalResponse);
+  const externalDraft = await readApiData<Draft>(
+    externalResponse,
+    acceptanceEvidence,
+    'PUT',
+  );
 
   await formField(page, 'draft-name').fill(`${firstDraftName} stale`);
   const conflictResponsePromise = waitForApiResponseOrFailure(
@@ -613,7 +405,7 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     409,
   );
   await page.getByTestId('save-draft').click();
-  await conflictResponsePromise;
+  await acceptanceEvidence.auditResponse(await conflictResponsePromise);
   await expect(page.getByTestId('reload-conflicted-draft')).toBeVisible();
   await page.getByTestId('reload-conflicted-draft').click();
   await expect(formField(page, 'draft-name')).toHaveValue(externalName);
@@ -630,9 +422,13 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     `/api/game-config/drafts/${externalDraft.id}/validate`,
   );
   await page.getByTestId('validate-draft').click();
-  const finalDraft = await readApiData<Draft>(await finalUpdatePromise);
+  const finalDraft = await readApiData<Draft>(
+    await finalUpdatePromise,
+    acceptanceEvidence,
+  );
   const finalValidation = await readApiData<ValidationResult>(
     await finalValidationPromise,
+    acceptanceEvidence,
   );
   expect(finalValidation.isValid).toBe(true);
   await closeDrawer(page, 'draft-editor');
@@ -650,7 +446,10 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     `/api/game-config/drafts/${finalDraft.id}/publish`,
   );
   await page.getByTestId('publish-draft').click();
-  const firstVersion = await readApiData<Version>(await firstPublishPromise);
+  const firstVersion = await readApiData<Version>(
+    await firstPublishPromise,
+    acceptanceEvidence,
+  );
   await expect(page.getByTestId('version-detail')).toBeVisible();
   await expect(page.getByTestId('version-id')).toHaveText(firstVersion.id);
 
@@ -679,6 +478,7 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   await page.getByTestId('confirm-activation').click();
   const firstEnvironment = await readApiData<Environment>(
     await firstActivationPromise,
+    acceptanceEvidence,
   );
   expect(firstEnvironment.activeVersionId).toBe(firstVersion.id);
   await closeDrawer(page, 'version-detail');
@@ -687,6 +487,7 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     page,
     secondDraftName,
     secondContent,
+    acceptanceEvidence,
   );
   expect(second.validation.isValid).toBe(true);
   await closeDrawer(page, 'draft-editor');
@@ -703,7 +504,10 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     `/api/game-config/drafts/${second.draft.id}/publish`,
   );
   await page.getByTestId('publish-draft').click();
-  const secondVersion = await readApiData<Version>(await secondPublishPromise);
+  const secondVersion = await readApiData<Version>(
+    await secondPublishPromise,
+    acceptanceEvidence,
+  );
   await expect(page.getByTestId('version-detail')).toBeVisible();
   await expect(page.getByTestId('version-id')).toHaveText(secondVersion.id);
   await page.getByTestId('activate-from-detail').click();
@@ -716,6 +520,7 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   await page.getByTestId('confirm-activation').click();
   const secondEnvironment = await readApiData<Environment>(
     await secondActivationPromise,
+    acceptanceEvidence,
   );
   expect(secondEnvironment).toMatchObject({
     activeVersionId: secondVersion.id,
@@ -734,14 +539,17 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   await page.getByTestId('confirm-rollback').click();
   const rolledBackEnvironment = await readApiData<Environment>(
     await rollbackPromise,
+    acceptanceEvidence,
   );
   expect(rolledBackEnvironment).toMatchObject({
     activeVersionId: firstVersion.id,
     previousVersionId: secondVersion.id,
   });
 
-  const permissionDraftResponse = await page.request.post(
-    apiUrl(baseURL, '/game-config/drafts'),
+  const permissionDraftResponse = await acceptanceEvidence.apiRequest(
+    page.request,
+    'POST',
+    apiUrl(apiBaseURL, '/game-config/drafts'),
     {
       data: {
         configurationSet,
@@ -752,25 +560,33 @@ test('operator completes the GameConfig lifecycle against the real API', async (
       headers: authorizationHeaders(accessToken),
     },
   );
-  const permissionDraft = await readApiData<Draft>(permissionDraftResponse);
+  const permissionDraft = await readApiData<Draft>(
+    permissionDraftResponse,
+    acceptanceEvidence,
+    'POST',
+  );
   await readApiData<ValidationResult>(
-    await page.request.post(
-      apiUrl(baseURL, `/game-config/drafts/${permissionDraft.id}/validate`),
+    await acceptanceEvidence.apiRequest(
+      page.request,
+      'POST',
+      apiUrl(apiBaseURL, `/game-config/drafts/${permissionDraft.id}/validate`),
       {
         data: { expectedRevision: permissionDraft.revision },
         headers: authorizationHeaders(accessToken),
       },
     ),
+    acceptanceEvidence,
+    'POST',
   );
 
-  const permissionFixture = createDisposablePermissionFixture(username);
+  acceptanceEvidence.prepareLegacyGameConfigPermissionFixture(username);
   let permissionsMayNeedRestoration = false;
   let permissionPhaseError: Error | undefined;
   try {
     permissionsMayNeedRestoration = true;
-    revokeMutationPermissions(permissionFixture);
+    acceptanceEvidence.revokeLegacyGameConfigMutationPermissions();
     await logout(page);
-    accessToken = await login(page, username, password);
+    accessToken = await login(page, username, password, acceptanceEvidence);
 
     await expect(page).toHaveURL(/\/game-config(?:[/?#].*)?$/);
     await expect(
@@ -801,8 +617,10 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     await page.getByRole('tab', { name: 'Environment' }).click();
     await expect(page.getByTestId('open-rollback')).toHaveCount(0);
 
-    const forbiddenCreate = await page.request.post(
-      apiUrl(baseURL, '/game-config/drafts'),
+    const forbiddenCreate = await acceptanceEvidence.apiRequest(
+      page.request,
+      'POST',
+      apiUrl(apiBaseURL, '/game-config/drafts'),
       {
         data: {
           configurationSet,
@@ -813,10 +631,13 @@ test('operator completes the GameConfig lifecycle against the real API', async (
         headers: authorizationHeaders(accessToken),
       },
     );
+    await acceptanceEvidence.auditResponse(forbiddenCreate, 'POST');
     expect(forbiddenCreate.status()).toBe(403);
 
-    const forbiddenPublish = await page.request.post(
-      apiUrl(baseURL, `/game-config/drafts/${permissionDraft.id}/publish`),
+    const forbiddenPublish = await acceptanceEvidence.apiRequest(
+      page.request,
+      'POST',
+      apiUrl(apiBaseURL, `/game-config/drafts/${permissionDraft.id}/publish`),
       {
         data: {
           expectedRevision: permissionDraft.revision,
@@ -825,10 +646,16 @@ test('operator completes the GameConfig lifecycle against the real API', async (
         headers: authorizationHeaders(accessToken),
       },
     );
+    await acceptanceEvidence.auditResponse(forbiddenPublish, 'POST');
     expect(forbiddenPublish.status()).toBe(403);
 
-    const forbiddenActivation = await page.request.post(
-      apiUrl(baseURL, `/game-config/environments/${environmentName}/activate`),
+    const forbiddenActivation = await acceptanceEvidence.apiRequest(
+      page.request,
+      'POST',
+      apiUrl(
+        apiBaseURL,
+        `/game-config/environments/${environmentName}/activate`,
+      ),
       {
         data: {
           configurationSet,
@@ -838,6 +665,7 @@ test('operator completes the GameConfig lifecycle against the real API', async (
         headers: authorizationHeaders(accessToken),
       },
     );
+    await acceptanceEvidence.auditResponse(forbiddenActivation, 'POST');
     expect(forbiddenActivation.status()).toBe(403);
 
     await logout(page);
@@ -857,7 +685,7 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   let restorationError: Error | undefined;
   if (permissionsMayNeedRestoration) {
     try {
-      restoreMutationPermissions(permissionFixture);
+      acceptanceEvidence.restoreLegacyGameConfigMutationPermissions();
     } catch (error) {
       restorationError = normalizeError(
         error,
@@ -873,11 +701,15 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     );
   }
   if (permissionPhaseError) {
-    throw new Error(permissionPhaseError.message, {
-      cause: permissionPhaseError,
-    });
+    throw normalizeError(
+      permissionPhaseError,
+      'The permission verification phase failed with a non-Error value.',
+    );
   }
   if (restorationError) {
-    throw new Error(restorationError.message, { cause: restorationError });
+    throw normalizeError(
+      restorationError,
+      'Permission restoration failed with a non-Error value.',
+    );
   }
 });

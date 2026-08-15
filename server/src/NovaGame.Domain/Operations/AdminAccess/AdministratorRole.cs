@@ -20,10 +20,17 @@ public sealed class AdministratorRole : Entity<Guid>
             throw new ArgumentException("Role membership identifiers cannot be empty.");
         }
 
+        if (assignedByAdministratorId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "The assigning administrator identifier cannot be empty.",
+                nameof(assignedByAdministratorId));
+        }
+
         Id = id;
         AdministratorId = administratorId;
         RoleId = roleId;
-        AssignedAtUtc = assignedAtUtc;
+        AssignedAtUtc = RequireUtc(assignedAtUtc);
         AssignedByAdministratorId = assignedByAdministratorId;
     }
 
@@ -34,4 +41,14 @@ public sealed class AdministratorRole : Entity<Guid>
     public DateTime AssignedAtUtc { get; private set; }
 
     public Guid? AssignedByAdministratorId { get; private set; }
+
+    private static DateTime RequireUtc(DateTime value)
+    {
+        if (value.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException("The assignment timestamp must use UTC.", nameof(value));
+        }
+
+        return value;
+    }
 }
