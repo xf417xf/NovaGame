@@ -1,5 +1,6 @@
 using System.Text;
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.Swagger;
@@ -69,6 +70,48 @@ public sealed class AdminAccessManagementOpenApiTests
             AssertSuccessEnvelope(swagger, operation, specification.ResponseDataSchemaId);
             AssertErrorEnvelopes(swagger, operation, specification.StatusCodes);
         }
+    }
+
+    [Fact]
+    public async Task RealProgramExposesExactManagementEndpointSurface()
+    {
+        await using var factory = CreateFactory();
+        var endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        var actual = new List<ManagementEndpointOperation>();
+
+        foreach (var endpoint in endpointDataSource.Endpoints.OfType<RouteEndpoint>())
+        {
+            var rawPath = endpoint.RoutePattern.RawText;
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                continue;
+            }
+
+            var path = NormalizeRoutePath(rawPath);
+            if (!IsManagementPath(path))
+            {
+                continue;
+            }
+
+            var httpMethods = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;
+            Assert.NotNull(httpMethods);
+            Assert.NotEmpty(httpMethods);
+            actual.AddRange(httpMethods.Select(method => new ManagementEndpointOperation(path, method)));
+        }
+
+        var expected = GetOperationSpecifications()
+            .Select(specification => new ManagementEndpointOperation(
+                specification.Path,
+                specification.Method.ToString().ToUpperInvariant()))
+            .OrderBy(operation => operation.Path, StringComparer.Ordinal)
+            .ThenBy(operation => operation.Method, StringComparer.Ordinal)
+            .ToArray();
+        var orderedActual = actual
+            .OrderBy(operation => operation.Path, StringComparer.Ordinal)
+            .ThenBy(operation => operation.Method, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, orderedActual);
     }
 
     [Fact]
@@ -523,6 +566,11 @@ public sealed class AdminAccessManagementOpenApiTests
                path.StartsWith("/api/admin-access/", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string NormalizeRoutePath(string rawPath)
+    {
+        return "/" + rawPath.TrimStart('/');
+    }
+
     private static OpenApiResponse GetResponse(OpenApiOperation operation, string statusCode)
     {
         Assert.True(operation.Responses.TryGetValue(statusCode, out var response));
@@ -788,4 +836,6 @@ public sealed class AdminAccessManagementOpenApiTests
         public IReadOnlyCollection<string> PathParameterNames =>
             PathParameters ?? Array.Empty<string>();
     }
+
+    private sealed record ManagementEndpointOperation(string Path, string Method);
 }

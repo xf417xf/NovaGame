@@ -34,13 +34,13 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5](docs/goals/m3.5.md) is now the only active repository milestone at `M35-04`, with only
-`M35-04-T06` executable after the verified Domain, Application, persistence, permission, seed,
-thin HTTP/API, real-MySQL integration, and checked OpenAPI/TypeScript contract tasks. It advances
-the NovaGame-owned `Operations/AdminAccess` `administrator-management` vertical slice across .NET,
-MySQL 8.4, and the generic Vben Admin 5 `web-ele` application. The active task authorizes only the
-cumulative M35-04 governance verification and state transition. It does not authorize Vben
-management UI implementation, M35-05 or later tasks, SwordMaster, extraction, M4, or NovaCore
-changes; M4 remains `Unscheduled`.
+`M35-04-T05` executable after an independent review found its route-surface guard observed only
+Swagger and could miss a runtime endpoint hidden from ApiExplorer. It advances the NovaGame-owned
+`Operations/AdminAccess` `administrator-management` vertical slice across .NET, MySQL 8.4, and the
+generic Vben Admin 5 `web-ele` application. The active task authorizes only correction and full
+re-verification of the checked OpenAPI/TypeScript contract workflow. It does not authorize
+M35-04-T06, Vben management UI implementation, M35-05 or later tasks, SwordMaster, extraction, M4,
+or NovaCore changes; M4 remains `Unscheduled`.
 
 ## Prerequisites
 
