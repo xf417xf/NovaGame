@@ -43,6 +43,8 @@ public sealed class AdminAccessManagementMigrationTests
                 AND `TABLE_NAME` IN (
                     'admin_administrators',
                     'admin_roles',
+                    'admin_role_memberships',
+                    'admin_role_permissions',
                     'admin_refresh_token_sessions',
                     'admin_audit_records',
                     'admin_access_command_receipts')
@@ -72,11 +74,17 @@ public sealed class AdminAccessManagementMigrationTests
                 "ux_admin_roles_built_in_slot",
                 "ix_admin_roles_list",
                 "ix_admin_roles_active_list",
+                "ix_admin_role_memberships_role_admin",
                 "ix_admin_refresh_sessions_family_order",
                 "ix_admin_refresh_sessions_admin_family_order",
                 "ix_admin_refresh_sessions_family_replacement",
+                "ix_admin_audit_records_action_time_id",
+                "ix_admin_audit_records_actor_time_id",
                 "ix_admin_audit_records_time_id",
                 "ix_admin_audit_records_correlation_time_id",
+                "ix_admin_audit_records_role_time_id",
+                "ix_admin_audit_records_subject_time_id",
+                "ix_admin_audit_records_success_time_id",
                 "ux_admin_access_receipts_actor_kind_key"
             });
         Assert.Subset(
@@ -91,6 +99,157 @@ public sealed class AdminAccessManagementMigrationTests
                 "ck_admin_access_receipts_revision",
                 "ck_admin_access_receipts_command_kind"
             });
+
+        foreach (var expectedIndex in new[]
+        {
+            new IndexDefinition(
+                "admin_administrators",
+                "ux_admin_administrators_normalized_name",
+                ["NormalizedUserName"],
+                IsUnique: true),
+            new IndexDefinition(
+                "admin_administrators",
+                "ix_admin_administrators_active_name_id",
+                ["IsActive", "NormalizedUserName", "Id"],
+                IsUnique: false),
+            new IndexDefinition(
+                "admin_roles",
+                "ux_admin_roles_normalized_name",
+                ["NormalizedName"],
+                IsUnique: true),
+            new IndexDefinition(
+                "admin_roles",
+                "ux_admin_roles_built_in_slot",
+                ["BuiltInRoleSlot"],
+                IsUnique: true),
+            new IndexDefinition(
+                "admin_roles",
+                "ix_admin_roles_list",
+                ["IsBuiltIn", "NormalizedName", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["IsBuiltIn"]),
+            new IndexDefinition(
+                "admin_roles",
+                "ix_admin_roles_active_list",
+                ["IsActive", "IsBuiltIn", "NormalizedName", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["IsBuiltIn"]),
+            new IndexDefinition(
+                "admin_role_memberships",
+                "ux_admin_role_memberships_admin_role",
+                ["AdministratorId", "RoleId"],
+                IsUnique: true),
+            new IndexDefinition(
+                "admin_role_memberships",
+                "ix_admin_role_memberships_role_admin",
+                ["RoleId", "AdministratorId"],
+                IsUnique: false),
+            new IndexDefinition(
+                "admin_role_permissions",
+                "ux_admin_role_permissions_role_name",
+                ["RoleId", "Name"],
+                IsUnique: true),
+            new IndexDefinition(
+                "admin_refresh_token_sessions",
+                "ux_admin_refresh_sessions_token_hash",
+                ["TokenHash"],
+                IsUnique: true),
+            new IndexDefinition(
+                "admin_refresh_token_sessions",
+                "ix_admin_refresh_sessions_admin_expiry",
+                ["AdministratorId", "ExpiresAtUtc"],
+                IsUnique: false),
+            new IndexDefinition(
+                "admin_refresh_token_sessions",
+                "ix_admin_refresh_sessions_family_order",
+                ["FamilyId", "CreatedAtUtc", "Id"],
+                IsUnique: false),
+            new IndexDefinition(
+                "admin_refresh_token_sessions",
+                "ix_admin_refresh_sessions_admin_family_order",
+                ["AdministratorId", "FamilyId", "CreatedAtUtc", "Id"],
+                IsUnique: false),
+            new IndexDefinition(
+                "admin_refresh_token_sessions",
+                "ix_admin_refresh_sessions_family_replacement",
+                ["FamilyId", "ReplacedBySessionId"],
+                IsUnique: false),
+            new IndexDefinition(
+                "admin_audit_records",
+                "ix_admin_audit_records_time_id",
+                ["OccurredAtUtc", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["OccurredAtUtc", "Id"]),
+            new IndexDefinition(
+                "admin_audit_records",
+                "ix_admin_audit_records_actor_time_id",
+                ["ActorAdministratorId", "OccurredAtUtc", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["OccurredAtUtc", "Id"]),
+            new IndexDefinition(
+                "admin_audit_records",
+                "ix_admin_audit_records_subject_time_id",
+                ["AdministratorId", "OccurredAtUtc", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["OccurredAtUtc", "Id"]),
+            new IndexDefinition(
+                "admin_audit_records",
+                "ix_admin_audit_records_role_time_id",
+                ["RoleId", "OccurredAtUtc", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["OccurredAtUtc", "Id"]),
+            new IndexDefinition(
+                "admin_audit_records",
+                "ix_admin_audit_records_action_time_id",
+                ["Action", "OccurredAtUtc", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["OccurredAtUtc", "Id"]),
+            new IndexDefinition(
+                "admin_audit_records",
+                "ix_admin_audit_records_success_time_id",
+                ["Succeeded", "OccurredAtUtc", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["OccurredAtUtc", "Id"]),
+            new IndexDefinition(
+                "admin_audit_records",
+                "ix_admin_audit_records_correlation_time_id",
+                ["CorrelationId", "OccurredAtUtc", "Id"],
+                IsUnique: false,
+                DescendingColumns: ["OccurredAtUtc", "Id"]),
+            new IndexDefinition(
+                "admin_access_command_receipts",
+                "ux_admin_access_receipts_actor_kind_key",
+                ["ActorAdministratorId", "CommandKind", "IdempotencyKey"],
+                IsUnique: true)
+        })
+        {
+            Assert.Equal(
+                expectedIndex.Columns,
+                await ReadIndexColumnsAsync(
+                    dbContext,
+                    expectedIndex.TableName,
+                    expectedIndex.Name));
+            Assert.Equal(
+                expectedIndex.Columns
+                    .Select(column => expectedIndex.DescendingColumns?.Contains(column) == true ? "D" : "A"),
+                await ReadIndexSortDirectionsAsync(
+                    dbContext,
+                    expectedIndex.TableName,
+                    expectedIndex.Name));
+            Assert.Equal(
+                expectedIndex.IsUnique ? 0L : 1L,
+                await ReadLongAsync(
+                    dbContext,
+                    """
+                    SELECT MAX(`NON_UNIQUE`) AS `Value`
+                    FROM `information_schema`.`STATISTICS`
+                    WHERE `TABLE_SCHEMA` = DATABASE()
+                        AND `TABLE_NAME` = @tableName
+                        AND `INDEX_NAME` = @indexName
+                    """,
+                    P("@tableName", expectedIndex.TableName),
+                    P("@indexName", expectedIndex.Name)));
+        }
     }
 
     [Fact]
@@ -110,6 +269,7 @@ public sealed class AdminAccessManagementMigrationTests
             await AssertUpgradedLegacyRowsAsync(dbContext, legacy);
             await AssertCurrentMembershipSchemaAsync(dbContext);
             await AssertFrozenCollationsAsync(dbContext);
+            await AssertBuiltInRoleSlotAsync(dbContext, legacy);
             await AssertFrozenConstraintsAsync(dbContext, legacy);
             await AssertDatabaseDefaultsAsync(dbContext, legacy);
             await InsertValidReceiptAsync(dbContext, legacy);
@@ -412,16 +572,65 @@ public sealed class AdminAccessManagementMigrationTests
     {
         Assert.Equal(
             ["RoleId"],
-            await ReadIndexColumnsAsync(dbContext, "ix_admin_role_memberships_role"));
-        Assert.Empty(await ReadIndexColumnsAsync(dbContext, "ix_admin_role_memberships_role_admin"));
+            await ReadIndexColumnsAsync(
+                dbContext,
+                "admin_role_memberships",
+                "ix_admin_role_memberships_role"));
+        Assert.Empty(await ReadIndexColumnsAsync(
+            dbContext,
+            "admin_role_memberships",
+            "ix_admin_role_memberships_role_admin"));
     }
 
     private static async Task AssertCurrentMembershipSchemaAsync(NovaGameDbContext dbContext)
     {
         Assert.Equal(
             ["RoleId", "AdministratorId"],
-            await ReadIndexColumnsAsync(dbContext, "ix_admin_role_memberships_role_admin"));
-        Assert.Empty(await ReadIndexColumnsAsync(dbContext, "ix_admin_role_memberships_role"));
+            await ReadIndexColumnsAsync(
+                dbContext,
+                "admin_role_memberships",
+                "ix_admin_role_memberships_role_admin"));
+        Assert.Empty(await ReadIndexColumnsAsync(
+            dbContext,
+            "admin_role_memberships",
+            "ix_admin_role_memberships_role"));
+    }
+
+    private static async Task AssertBuiltInRoleSlotAsync(
+        NovaGameDbContext dbContext,
+        LegacyAdminAccessRows legacy)
+    {
+        var extra = await ReadRequiredStringAsync(
+            dbContext,
+            """
+            SELECT `EXTRA` AS `Value`
+            FROM `information_schema`.`COLUMNS`
+            WHERE `TABLE_SCHEMA` = DATABASE()
+                AND `TABLE_NAME` = 'admin_roles'
+                AND `COLUMN_NAME` = 'BuiltInRoleSlot'
+            """);
+        var expression = await ReadRequiredStringAsync(
+            dbContext,
+            """
+            SELECT `GENERATION_EXPRESSION` AS `Value`
+            FROM `information_schema`.`COLUMNS`
+            WHERE `TABLE_SCHEMA` = DATABASE()
+                AND `TABLE_NAME` = 'admin_roles'
+                AND `COLUMN_NAME` = 'BuiltInRoleSlot'
+            """);
+
+        Assert.Contains("STORED GENERATED", extra, StringComparison.Ordinal);
+        Assert.Contains("IsBuiltIn", expression, StringComparison.Ordinal);
+        Assert.Equal(
+            1L,
+            await ReadLongAsync(
+                dbContext,
+                "SELECT `BuiltInRoleSlot` AS `Value` FROM `admin_roles` WHERE `Id` = @roleId",
+                P("@roleId", legacy.BuiltInRoleId.ToString("D"))));
+        Assert.Null(await ReadValueAsync(
+            dbContext,
+            "SELECT `BuiltInRoleSlot` AS `Value` FROM `admin_roles` WHERE `Id` = @roleId",
+            P("@roleId", legacy.CustomRoleId.ToString("D"))));
     }
 
     private static async Task AssertFrozenCollationsAsync(NovaGameDbContext dbContext)
@@ -471,6 +680,14 @@ public sealed class AdminAccessManagementMigrationTests
             dbContext,
             "UPDATE `admin_roles` SET `IsActive` = 0 WHERE `Id` = @roleId",
             P("@roleId", legacy.BuiltInRoleId.ToString("D"))));
+        await AssertDatabaseRejectsAsync(() => ExecuteAsync(
+            dbContext,
+            """
+            INSERT INTO `admin_roles` (`Id`, `Name`, `NormalizedName`, `IsBuiltIn`, `CreatedAtUtc`)
+            VALUES (@roleId, 'Administrators', 'ADMINISTRATORS', 1, @createdAtUtc)
+            """,
+            P("@roleId", Guid.NewGuid().ToString("D")),
+            P("@createdAtUtc", legacy.CreatedAtUtc)));
         await AssertDatabaseRejectsAsync(() => ExecuteAsync(
             dbContext,
             "UPDATE `admin_audit_records` SET `TargetRevision` = 0 WHERE `Id` = @auditId",
@@ -628,6 +845,7 @@ public sealed class AdminAccessManagementMigrationTests
 
     private static Task<IReadOnlyList<string>> ReadIndexColumnsAsync(
         NovaGameDbContext dbContext,
+        string tableName,
         string indexName)
     {
         return ReadValuesAsync(
@@ -636,10 +854,30 @@ public sealed class AdminAccessManagementMigrationTests
             SELECT `COLUMN_NAME`
             FROM `information_schema`.`STATISTICS`
             WHERE `TABLE_SCHEMA` = DATABASE()
-                AND `TABLE_NAME` = 'admin_role_memberships'
+                AND `TABLE_NAME` = @tableName
                 AND `INDEX_NAME` = @indexName
             ORDER BY `SEQ_IN_INDEX`
             """,
+            P("@tableName", tableName),
+            P("@indexName", indexName));
+    }
+
+    private static Task<IReadOnlyList<string>> ReadIndexSortDirectionsAsync(
+        NovaGameDbContext dbContext,
+        string tableName,
+        string indexName)
+    {
+        return ReadValuesAsync(
+            dbContext,
+            """
+            SELECT `COLLATION`
+            FROM `information_schema`.`STATISTICS`
+            WHERE `TABLE_SCHEMA` = DATABASE()
+                AND `TABLE_NAME` = @tableName
+                AND `INDEX_NAME` = @indexName
+            ORDER BY `SEQ_IN_INDEX`
+            """,
+            P("@tableName", tableName),
             P("@indexName", indexName));
     }
 
@@ -750,6 +988,13 @@ public sealed class AdminAccessManagementMigrationTests
     }
 
     private sealed record ColumnCollation(string TableName, string ColumnName, string Collation);
+
+    private sealed record IndexDefinition(
+        string TableName,
+        string Name,
+        IReadOnlyList<string> Columns,
+        bool IsUnique,
+        IReadOnlyCollection<string>? DescendingColumns = null);
 
     private sealed record LegacyAdminAccessRows(
         Guid AdministratorId,

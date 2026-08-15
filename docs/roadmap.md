@@ -143,12 +143,14 @@ contracts, and M35-03 completed its approved Domain/Application implementation a
 matrix. M35-04-T01 completed its approved persistence implementation, independent review fixes,
 and real-MySQL verification; M35-04-T02 completed management permission registration and
 idempotent DbMigrator seed synchronization; M35-04-T03 completed the frozen thin management HTTP
-layer and real-MySQL API/OpenAPI verification. M3.5 is active at `M35-04`, with only `M35-04-T04`
-executable. The user separately authorized the NovaGame-owned `administrator-management` capability
-on 2026-08-13. M35-04-T04 authorizes only the frozen MySQL integration evidence for migrations,
-seed, permissions, account/role/session/audit queries, mutations, locking, replay, and atomic audit
-behavior. This authorization does not come from M3 and does not authorize M35-04-T05 or later work,
-Admin UI, SwordMaster changes, extraction, M4, or NovaCore changes.
+layer and real-MySQL API/OpenAPI verification; M35-04-T04 completed the frozen real-MySQL
+integration evidence for migrations, seed, permissions, account/role/session/audit queries,
+mutations, locking, replay, and atomic audit behavior. M3.5 is active at `M35-04`, with only
+`M35-04-T05` executable. The user separately authorized the NovaGame-owned
+`administrator-management` capability on 2026-08-13. M35-04-T05 authorizes only capture of the
+frozen management OpenAPI surface and checked generation of the admin TypeScript contracts. This
+authorization does not come from M3 and does not authorize M35-04-T06 or later work, Vben
+management UI implementation, SwordMaster changes, extraction, M4, or NovaCore changes.
 
 ### Goal
 

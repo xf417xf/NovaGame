@@ -2,12 +2,18 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NovaCore.BuildingBlocks.Data;
+using NovaCore.BuildingBlocks.Correlation;
 using NovaGame.Application.Contracts.Operations.AdminAccess;
+using NovaGame.Domain.Operations.AdminAccess;
 using NovaGame.Domain.Shared.Operations.AdminAccess;
+using NovaGame.Host.EntityFrameworkCore.Operations.AdminAccess;
 using Xunit;
 
 namespace NovaGame.EntityFrameworkCore.Tests;
@@ -18,6 +24,8 @@ public sealed class AdminAccessManagementApiTests
     private const string SeedUserName = "admin";
     private const string SeedPassword = "Test-Administrator-Password-123!";
     private const string ManagementUserAgent = "NovaGame-AdminManagementApiTests/1.0";
+    private const string AuditFailureConstraintName = "ck_admin_access_audit_fail_api";
+    private const string AuditFailureCorrelationId = "m35-t04-audit-failure";
 
     private readonly MySqlDatabaseFixture _fixture;
 
@@ -263,9 +271,171 @@ public sealed class AdminAccessManagementApiTests
         Assert.Equal(role.Revision, audit.GetProperty("targetRevision").GetInt64());
     }
 
-    private NovaGameApiFactory CreateFactory()
+    [Fact]
+    public async Task ConcurrentSameKeyRoleCreatesReplayFromOneRealMySqlReceiptAndOneAudit()
     {
-        return new NovaGameApiFactory(_fixture.ConnectionString, SeedUserName, SeedPassword);
+        await ResetAdminAccessAsync();
+        var barrier = new ReceiptClaimBarrier();
+        await using var factory = CreateFactory(services =>
+        {
+            services.RemoveAll<IAdminAccessCommandReceiptRepository>();
+            services.AddScoped<AdminAccessCommandReceiptRepository>();
+            services.AddScoped<IAdminAccessCommandReceiptRepository>(serviceProvider =>
+                new BlockingFirstReceiptClaimRepository(
+                    serviceProvider.GetRequiredService<AdminAccessCommandReceiptRepository>(),
+                    barrier));
+        });
+        await SeedAsync(factory);
+
+        using var firstClient = await CreateAuthenticatedClientAsync(factory, SeedUserName, SeedPassword);
+        using var secondClient = await CreateAuthenticatedClientAsync(factory, SeedUserName, SeedPassword);
+        var roleName = $"Concurrent MySQL role {Guid.NewGuid():N}";
+        var idempotencyKey = Guid.NewGuid();
+        Task<HttpResponseMessage>? firstRequest = null;
+        Task<HttpResponseMessage>? secondRequest = null;
+
+        try
+        {
+            firstRequest = SendCreateRoleAsync(
+                firstClient,
+                roleName,
+                [],
+                idempotencyKey.ToString("D"));
+            await barrier.FirstClaimed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+            secondRequest = SendCreateRoleAsync(
+                secondClient,
+                roleName,
+                [],
+                idempotencyKey.ToString("D"));
+            await barrier.SecondDatabaseClaimSubmitted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.False(secondRequest.IsCompleted);
+
+            barrier.ReleaseFirstClaim.TrySetResult(true);
+            using var firstResponse = await firstRequest.WaitAsync(TimeSpan.FromSeconds(15));
+            using var secondResponse = await secondRequest.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+            AssertStrongEntityTag(firstResponse, expectedRevision: 1);
+            AssertStrongEntityTag(secondResponse, expectedRevision: 1);
+
+            var firstPayload = await ReadJsonAsync(firstResponse);
+            var secondPayload = await ReadJsonAsync(secondResponse);
+            AssertSucceeded(firstPayload);
+            AssertSucceeded(secondPayload);
+            var roleId = firstPayload.GetProperty("data").GetProperty("id").GetGuid();
+            Assert.Equal(
+                roleId,
+                secondPayload.GetProperty("data").GetProperty("id").GetGuid());
+
+            await using var verificationContext = _fixture.CreateDbContext();
+            var storedRole = await verificationContext.AdminRoles.SingleAsync(role => role.Id == roleId);
+            var receipts = await verificationContext.AdminAccessCommandReceipts
+                .Where(receipt =>
+                    receipt.CommandKind == AdminAccessCommandKind.AdminRoleCreate &&
+                    receipt.IdempotencyKey == idempotencyKey)
+                .ToArrayAsync();
+            var audits = await verificationContext.AdminAccessAuditRecords
+                .Where(audit =>
+                    audit.Action == AdminAccessAuditAction.RoleCreated &&
+                    audit.RoleId == roleId)
+                .ToArrayAsync();
+
+            Assert.Equal(roleName, storedRole.Name);
+            var receipt = Assert.Single(receipts);
+            Assert.Equal(roleId, receipt.TargetResourceId);
+            Assert.Equal(1, receipt.ResultingRevision);
+            var audit = Assert.Single(audits);
+            Assert.True(audit.Succeeded);
+            Assert.Equal(roleId, audit.RoleId);
+            Assert.Equal(1, audit.TargetRevision);
+        }
+        finally
+        {
+            barrier.ReleaseFirstClaim.TrySetResult(true);
+        }
+    }
+
+    [Fact]
+    public async Task RealMySqlAuditFailureRollsBackRoleReceiptAndAuditThenPermitsSameKeyRetry()
+    {
+        await ResetAdminAccessAsync();
+        await using var factory = CreateFactory();
+        await SeedAsync(factory);
+        var administrator = await GetSeedAdministratorAsync();
+        var roleName = $"Audit rollback MySQL role {Guid.NewGuid():N}";
+        var idempotencyKey = Guid.NewGuid();
+        var request = new CreateAdminRoleRequest
+        {
+            Name = roleName,
+            PermissionNames = []
+        };
+        var constraintCreated = false;
+
+        try
+        {
+            await CreateAuditFailureConstraintAsync();
+            constraintCreated = true;
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                ExecuteAsAdministratorAsync(
+                    factory,
+                    administrator,
+                    AuditFailureCorrelationId,
+                    service => service.CreateAdminRoleAsync(request, idempotencyKey)));
+        }
+        finally
+        {
+            if (constraintCreated)
+            {
+                await DropAuditFailureConstraintAsync();
+            }
+        }
+
+        await using (var rollbackContext = _fixture.CreateDbContext())
+        {
+            Assert.Empty(await rollbackContext.AdminRoles
+                .Where(role => role.Name == roleName)
+                .ToArrayAsync());
+            Assert.Empty(await rollbackContext.AdminAccessCommandReceipts
+                .Where(receipt => receipt.IdempotencyKey == idempotencyKey)
+                .ToArrayAsync());
+            Assert.Empty(await rollbackContext.AdminAccessAuditRecords
+                .Where(audit => audit.CorrelationId == AuditFailureCorrelationId)
+                .ToArrayAsync());
+        }
+
+        var retry = await ExecuteAsAdministratorAsync(
+            factory,
+            administrator,
+            AuditFailureCorrelationId,
+            service => service.CreateAdminRoleAsync(request, idempotencyKey));
+
+        Assert.Equal(1, retry.Revision);
+        await using var verificationContext = _fixture.CreateDbContext();
+        var storedRole = await verificationContext.AdminRoles.SingleAsync(role => role.Id == retry.Id);
+        var receipt = Assert.Single(await verificationContext.AdminAccessCommandReceipts
+            .Where(candidate => candidate.IdempotencyKey == idempotencyKey)
+            .ToArrayAsync());
+        var audit = Assert.Single(await verificationContext.AdminAccessAuditRecords
+            .Where(candidate => candidate.RoleId == retry.Id)
+            .ToArrayAsync());
+
+        Assert.Equal(roleName, storedRole.Name);
+        Assert.Equal(retry.Id, receipt.TargetResourceId);
+        Assert.Equal(retry.Id, audit.RoleId);
+        Assert.Equal(AdminAccessAuditAction.RoleCreated, audit.Action);
+        Assert.Equal(AuditFailureCorrelationId, audit.CorrelationId);
+        Assert.Equal(1, audit.TargetRevision);
+    }
+
+    private NovaGameApiFactory CreateFactory(
+        Action<IServiceCollection>? configureTestServices = null)
+    {
+        return new NovaGameApiFactory(
+            _fixture.ConnectionString,
+            SeedUserName,
+            SeedPassword,
+            configureTestServices: configureTestServices);
     }
 
     private async Task ResetAdminAccessAsync()
@@ -290,6 +460,71 @@ public sealed class AdminAccessManagementApiTests
     {
         await using var scope = factory.Services.CreateAsyncScope();
         await scope.ServiceProvider.GetRequiredService<IDataSeedManager>().SeedAsync();
+    }
+
+    private async Task<Administrator> GetSeedAdministratorAsync()
+    {
+        await using var dbContext = _fixture.CreateDbContext();
+        return await dbContext.Administrators.SingleAsync(
+            administrator => administrator.NormalizedUserName == SeedUserName.ToUpperInvariant());
+    }
+
+    private static async Task<T> ExecuteAsAdministratorAsync<T>(
+        NovaGameApiFactory factory,
+        Administrator administrator,
+        string correlationId,
+        Func<IAdminAccessManagementAppService, Task<T>> action)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var httpContextAccessor = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
+        var correlationIdAccessor = scope.ServiceProvider.GetRequiredService<ICorrelationIdAccessor>();
+        var previousCorrelationId = correlationIdAccessor.CorrelationId;
+        try
+        {
+            httpContextAccessor.HttpContext = CreateHttpContext(administrator.Id, administrator.UserName);
+            correlationIdAccessor.CorrelationId = correlationId;
+            return await action(scope.ServiceProvider.GetRequiredService<IAdminAccessManagementAppService>());
+        }
+        finally
+        {
+            correlationIdAccessor.CorrelationId = previousCorrelationId;
+            httpContextAccessor.HttpContext = null;
+        }
+    }
+
+    private async Task CreateAuditFailureConstraintAsync()
+    {
+        await using var dbContext = _fixture.CreateDbContext();
+        await dbContext.Database.ExecuteSqlRawAsync($"""
+            ALTER TABLE `admin_audit_records`
+            ADD CONSTRAINT `{AuditFailureConstraintName}`
+            CHECK (
+                `Action` <> 'RoleCreated' OR
+                `CorrelationId` IS NULL OR
+                `CorrelationId` <> '{AuditFailureCorrelationId}')
+            """);
+    }
+
+    private async Task DropAuditFailureConstraintAsync()
+    {
+        await using var dbContext = _fixture.CreateDbContext();
+        await dbContext.Database.ExecuteSqlRawAsync(
+            $"ALTER TABLE `admin_audit_records` DROP CHECK `{AuditFailureConstraintName}`");
+    }
+
+    private static DefaultHttpContext CreateHttpContext(Guid administratorId, string userName)
+    {
+        var identity = new ClaimsIdentity(
+            [
+                new Claim("sub", administratorId.ToString("D")),
+                new Claim("name", userName)
+            ],
+            authenticationType: "AdminAccessManagementApiTests");
+        return new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(identity),
+            TraceIdentifier = $"admin-management-api-{Guid.NewGuid():N}"
+        };
     }
 
     private static async Task<HttpClient> CreateAuthenticatedClientAsync(
@@ -498,4 +733,60 @@ public sealed class AdminAccessManagementApiTests
     }
 
     private sealed record ManagementRole(Guid Id, long Revision, string ETag);
+
+    private sealed class ReceiptClaimBarrier
+    {
+        private int _claimCount;
+
+        public TaskCompletionSource<bool> FirstClaimed { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> SecondDatabaseClaimSubmitted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReleaseFirstClaim { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int GetNextClaimOrder()
+        {
+            return Interlocked.Increment(ref _claimCount);
+        }
+    }
+
+    private sealed class BlockingFirstReceiptClaimRepository : IAdminAccessCommandReceiptRepository
+    {
+        private readonly AdminAccessCommandReceiptRepository _inner;
+        private readonly ReceiptClaimBarrier _barrier;
+
+        public BlockingFirstReceiptClaimRepository(
+            AdminAccessCommandReceiptRepository inner,
+            ReceiptClaimBarrier barrier)
+        {
+            _inner = inner;
+            _barrier = barrier;
+        }
+
+        public async Task<AdminAccessCommandReceipt> ClaimAsync(
+            AdminAccessCommandReceipt candidate,
+            CancellationToken cancellationToken = default)
+        {
+            var claimOrder = _barrier.GetNextClaimOrder();
+            if (claimOrder == 1)
+            {
+                var receipt = await _inner.ClaimAsync(candidate, cancellationToken);
+                _barrier.FirstClaimed.TrySetResult(true);
+                await _barrier.ReleaseFirstClaim.Task.WaitAsync(cancellationToken);
+                return receipt;
+            }
+
+            if (claimOrder == 2)
+            {
+                var claimTask = _inner.ClaimAsync(candidate, cancellationToken);
+                _barrier.SecondDatabaseClaimSubmitted.TrySetResult(true);
+                return await claimTask;
+            }
+
+            return await _inner.ClaimAsync(candidate, cancellationToken);
+        }
+    }
 }

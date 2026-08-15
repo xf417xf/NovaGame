@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace NovaGame.EntityFrameworkCore.Tests;
 
@@ -13,17 +14,20 @@ internal sealed class NovaGameApiFactory : WebApplicationFactory<Program>
     private readonly string _seedUserName;
     private readonly string _seedPassword;
     private readonly int _loginPermitLimit;
+    private readonly Action<IServiceCollection>? _configureTestServices;
 
     public NovaGameApiFactory(
         string connectionString,
         string seedUserName = "admin",
         string seedPassword = "Test-Administrator-Password-123!",
-        int loginPermitLimit = 100)
+        int loginPermitLimit = 100,
+        Action<IServiceCollection>? configureTestServices = null)
     {
         _connectionString = connectionString;
         _seedUserName = seedUserName;
         _seedPassword = seedPassword;
         _loginPermitLimit = loginPermitLimit;
+        _configureTestServices = configureTestServices;
     }
 
     public HttpClient CreateHttpsClient(bool handleCookies = true)
@@ -53,5 +57,9 @@ internal sealed class NovaGameApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("NovaGame:AdminAccess:Seed:DisplayName", "Test Administrator");
         builder.UseSetting("NovaCore:Web:ForwardedHeaders:IsEnabled", "true");
         builder.UseSetting("NovaCore:Web:ForwardedHeaders:KnownProxies:0", "127.0.0.1");
+        if (_configureTestServices is not null)
+        {
+            builder.ConfigureServices(_configureTestServices);
+        }
     }
 }

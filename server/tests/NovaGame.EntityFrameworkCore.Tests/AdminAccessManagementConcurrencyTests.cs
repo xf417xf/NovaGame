@@ -1,10 +1,14 @@
+using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
 using NovaGame.Application.Contracts.Operations.AdminAccess;
 using NovaGame.Domain.Operations.AdminAccess;
 using NovaGame.Domain.Shared.Operations.AdminAccess;
+using NovaGame.Host.EntityFrameworkCore.Operations.AdminAccess;
 using Xunit;
 
 namespace NovaGame.EntityFrameworkCore.Tests;
 
+[Collection(MySqlDatabaseCollection.Name)]
 public sealed class AdminAccessManagementConcurrencyTests
 {
     private static readonly Guid TargetAdministratorId =
@@ -15,6 +19,12 @@ public sealed class AdminAccessManagementConcurrencyTests
         Guid.Parse("40000000-0000-0000-0000-000000000001");
     private static readonly Guid IdempotencyKey =
         Guid.Parse("50000000-0000-0000-0000-000000000001");
+    private readonly MySqlDatabaseFixture _fixture;
+
+    public AdminAccessManagementConcurrencyTests(MySqlDatabaseFixture fixture)
+    {
+        _fixture = fixture;
+    }
 
     [Fact]
     public async Task AdministratorCreateReplayUsesCanonicalFingerprintAndFirstSecretWins()
@@ -759,6 +769,111 @@ public sealed class AdminAccessManagementConcurrencyTests
         Assert.Equal(1, fixture.ReceiptRepository.CommittedCount);
         Assert.Equal(2, fixture.UnitOfWork.CompleteCount);
         Assert.Equal(2, fixture.UnitOfWork.DisposeCount);
+    }
+
+    [Fact]
+    public async Task MySqlReceiptClaimBlocksOnTheUniqueKeyAndRollbackReleasesItForRetry()
+    {
+        var actorId = Guid.NewGuid();
+        var idempotencyKey = Guid.NewGuid();
+        var requestFingerprint = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+        var firstCandidate = new AdminAccessCommandReceipt(
+            Guid.NewGuid(),
+            actorId,
+            AdminAccessCommandKind.AdminRoleCreate,
+            idempotencyKey,
+            requestFingerprint,
+            Guid.NewGuid(),
+            resultingRevision: 1,
+            DateTime.UtcNow);
+
+        await using var firstContext = _fixture.CreateDbContext();
+        await using var firstTransaction = await firstContext.Database.BeginTransactionAsync();
+        var firstRepository = new AdminAccessCommandReceiptRepository(firstContext);
+        var firstClaim = await firstRepository.ClaimAsync(firstCandidate);
+        Assert.Equal(firstCandidate.Id, firstClaim.Id);
+
+        var competingCandidate = new AdminAccessCommandReceipt(
+            Guid.NewGuid(),
+            actorId,
+            AdminAccessCommandKind.AdminRoleCreate,
+            idempotencyKey,
+            requestFingerprint,
+            Guid.NewGuid(),
+            resultingRevision: 1,
+            DateTime.UtcNow);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var competingFailure = await Task.Run(
+            () => ClaimWithOneSecondLockWaitAsync(competingCandidate, cancellation.Token),
+            cancellation.Token).WaitAsync(cancellation.Token);
+
+        Assert.NotNull(competingFailure);
+        Assert.True(ContainsMySqlLockWaitTimeout(competingFailure));
+        await firstTransaction.RollbackAsync(cancellation.Token);
+
+        var retryCandidate = new AdminAccessCommandReceipt(
+            Guid.NewGuid(),
+            actorId,
+            AdminAccessCommandKind.AdminRoleCreate,
+            idempotencyKey,
+            requestFingerprint,
+            Guid.NewGuid(),
+            resultingRevision: 1,
+            DateTime.UtcNow);
+        await using (var retryContext = _fixture.CreateDbContext())
+        {
+            await using var retryTransaction = await retryContext.Database.BeginTransactionAsync(cancellation.Token);
+            var retryClaim = await new AdminAccessCommandReceiptRepository(retryContext)
+                .ClaimAsync(retryCandidate, cancellation.Token);
+            Assert.Equal(retryCandidate.Id, retryClaim.Id);
+            await retryTransaction.CommitAsync(cancellation.Token);
+        }
+
+        await using var verificationContext = _fixture.CreateDbContext();
+        var receipts = await verificationContext.AdminAccessCommandReceipts
+            .Where(receipt =>
+                receipt.ActorAdministratorId == actorId &&
+                receipt.CommandKind == AdminAccessCommandKind.AdminRoleCreate &&
+                receipt.IdempotencyKey == idempotencyKey)
+            .ToArrayAsync(cancellation.Token);
+        var persistedReceipt = Assert.Single(receipts);
+        Assert.Equal(retryCandidate.Id, persistedReceipt.Id);
+        Assert.True(persistedReceipt.MatchesFingerprint(requestFingerprint));
+    }
+
+    private async Task<Exception?> ClaimWithOneSecondLockWaitAsync(
+        AdminAccessCommandReceipt candidate,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = _fixture.CreateDbContext();
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            "SET SESSION innodb_lock_wait_timeout = 1",
+            cancellationToken);
+        try
+        {
+            _ = await new AdminAccessCommandReceiptRepository(dbContext)
+                .ClaimAsync(candidate, cancellationToken);
+            await transaction.RollbackAsync(cancellationToken);
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+    }
+
+    private static bool ContainsMySqlLockWaitTimeout(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is MySqlException { Number: 1205 })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static CreateAdministratorRequest CreateAdministratorRequest(

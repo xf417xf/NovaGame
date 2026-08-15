@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using NovaGame.Application.Operations.AdminAccess;
 using NovaGame.Domain.Operations.AdminAccess;
 using NovaGame.Domain.Shared.Operations.AdminAccess;
 using NovaGame.Host.EntityFrameworkCore.Operations.AdminAccess;
@@ -79,7 +80,16 @@ public sealed class AdminAccessManagementQueryTests
                     administratorId: secondAdministratorId,
                     actorAdministratorId: firstAdministratorId,
                     roleId: roleId,
-                    correlationId: matchingCorrelation.ToLowerInvariant()));
+                    correlationId: matchingCorrelation.ToLowerInvariant()),
+                new AdminAccessAuditRecord(
+                    Guid.NewGuid(),
+                    AdminAccessAuditAction.AdministratorCreated,
+                    now.AddDays(1),
+                    succeeded: true,
+                    administratorId: firstAdministratorId,
+                    actorAdministratorId: secondAdministratorId,
+                    roleId: roleId,
+                    correlationId: matchingCorrelation));
             await seedContext.SaveChangesAsync();
         }
 
@@ -113,8 +123,8 @@ public sealed class AdminAccessManagementQueryTests
                 now.AddDays(1),
                 AdminAccessAuditAction.AdministratorCreated,
                 Succeeded: true,
-                ActorAdministratorId: null,
-                SubjectAdministratorId: null,
+                ActorAdministratorId: secondAdministratorId,
+                SubjectAdministratorId: firstAdministratorId,
                 RoleId: roleId,
                 CorrelationId: matchingCorrelation),
             skipCount: 0,
@@ -131,6 +141,109 @@ public sealed class AdminAccessManagementQueryTests
         var audit = Assert.Single(auditPage.Items);
         Assert.Equal(matchingCorrelation, audit.CorrelationId);
         Assert.Equal(firstAdministratorId, audit.SubjectAdministratorId);
+    }
+
+    [Fact]
+    public async Task PermissionChecksAndRoleSnapshotsUseOnlyActiveRegisteredPersistedGrants()
+    {
+        var now = new DateTime(2026, 8, 15, 5, 30, 0, DateTimeKind.Utc);
+        var suffix = Guid.NewGuid().ToString("N");
+        var administratorId = Guid.NewGuid();
+        var activeRoleId = Guid.NewGuid();
+        var inactiveRoleId = Guid.NewGuid();
+        var unregisteredPermission = "Operations.AdminAccess.LegacyStored";
+        var activeRole = new AdminRole(activeRoleId, $"permission-active-{suffix}", now);
+        var inactiveRole = new AdminRole(inactiveRoleId, $"permission-inactive-{suffix}", now);
+        _ = inactiveRole.SetActiveState(1, false, now.AddMinutes(1));
+        var administrator = new Administrator(
+            administratorId,
+            AdministratorUserName.Create($"permission-{suffix}"),
+            "Permission projection administrator",
+            "test-password-hash",
+            now,
+            [
+                new AdministratorRoleTarget(Guid.NewGuid(), activeRoleId),
+                new AdministratorRoleTarget(Guid.NewGuid(), inactiveRoleId)
+            ]);
+
+        await using (var seedContext = _fixture.CreateDbContext())
+        {
+            await seedContext.AdminRoles.AddRangeAsync(activeRole, inactiveRole);
+            await seedContext.Administrators.AddAsync(administrator);
+            await seedContext.SaveChangesAsync();
+            await seedContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO `admin_role_permissions` (
+                    `Id`,
+                    `RoleId`,
+                    `Name`,
+                    `GrantedAtUtc`,
+                    `GrantedByAdministratorId`)
+                VALUES (
+                    {Guid.NewGuid().ToString("D")},
+                    {activeRoleId.ToString("D")},
+                    {AdminAccessPermissions.Access},
+                    {now},
+                    NULL)
+                """);
+            await seedContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO `admin_role_permissions` (
+                    `Id`,
+                    `RoleId`,
+                    `Name`,
+                    `GrantedAtUtc`,
+                    `GrantedByAdministratorId`)
+                VALUES (
+                    {Guid.NewGuid().ToString("D")},
+                    {activeRoleId.ToString("D")},
+                    {unregisteredPermission},
+                    {now},
+                    NULL)
+                """);
+            await seedContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO `admin_role_permissions` (
+                    `Id`,
+                    `RoleId`,
+                    `Name`,
+                    `GrantedAtUtc`,
+                    `GrantedByAdministratorId`)
+                VALUES (
+                    {Guid.NewGuid().ToString("D")},
+                    {inactiveRoleId.ToString("D")},
+                    {AdminAccessPermissions.AdministratorsManage},
+                    {now},
+                    NULL)
+                """);
+        }
+
+        await using var dbContext = _fixture.CreateDbContext();
+        var permissionChecker = new DatabasePermissionChecker(
+            new TestCurrentUser(true, administratorId, "permission-projection"),
+            new CountingPermissionDefinitionManager(
+            [
+                AdminAccessPermissions.Access,
+                AdminAccessPermissions.AdministratorsManage
+            ]),
+            new AdministratorRepository(dbContext));
+        var repository = new AdminAccessManagementRepository(
+            dbContext,
+            new RefreshTokenFamilyPolicy());
+
+        Assert.True(await permissionChecker.IsGrantedAsync(AdminAccessPermissions.Access));
+        Assert.False(await permissionChecker.IsGrantedAsync(AdminAccessPermissions.AdministratorsManage));
+        Assert.False(await permissionChecker.IsGrantedAsync(unregisteredPermission));
+
+        var rolePage = await repository.GetRolePageAsync(
+            activeRole.NormalizedName,
+            isActive: true,
+            isBuiltIn: false,
+            registeredPermissionNames: [AdminAccessPermissions.Access],
+            skipCount: 0,
+            maxResultCount: 10);
+
+        var role = Assert.Single(rolePage.Items);
+        Assert.Equal(activeRoleId, role.Id);
+        Assert.Equal([AdminAccessPermissions.Access], role.PermissionNames);
+        Assert.Equal(1, rolePage.TotalCount);
     }
 
     [Fact]
@@ -223,6 +336,168 @@ public sealed class AdminAccessManagementQueryTests
         var committedCount = await verificationContext.Administrators.LongCountAsync(
             administrator => administrator.NormalizedUserName.StartsWith(normalizedPrefix));
         Assert.Equal(2, committedCount);
+    }
+
+    [Fact]
+    public async Task RoleSessionAndAuditPagesKeepOneSnapshotAcrossAConcurrentCommit()
+    {
+        var now = new DateTime(2026, 8, 15, 7, 30, 0, DateTimeKind.Utc);
+        var suffix = Guid.NewGuid().ToString("N");
+        var rolePrefix = $"snapshot-role-{suffix}";
+        var normalizedRolePrefix = rolePrefix.ToUpperInvariant();
+        var administratorId = Guid.NewGuid();
+        var firstRoleId = Guid.NewGuid();
+        var secondRoleId = Guid.NewGuid();
+        var firstFamilyId = Guid.NewGuid();
+        var secondFamilyId = Guid.NewGuid();
+        var correlationId = $"snapshot-correlation-{suffix}";
+        var firstRole = new AdminRole(firstRoleId, $"{rolePrefix}-first", now);
+        var administrator = new Administrator(
+            administratorId,
+            AdministratorUserName.Create($"snapshot-query-{suffix}"),
+            "Snapshot query administrator",
+            "test-password-hash",
+            now,
+            [new AdministratorRoleTarget(Guid.NewGuid(), firstRoleId)]);
+        var firstSession = new RefreshTokenSession(
+            Guid.NewGuid(),
+            administratorId,
+            firstFamilyId,
+            CreateHash(193),
+            now.AddMinutes(-2),
+            now.AddDays(1),
+            "203.0.113.60");
+
+        await using (var seedContext = _fixture.CreateDbContext())
+        {
+            await seedContext.AdminRoles.AddAsync(firstRole);
+            await seedContext.Administrators.AddAsync(administrator);
+            await seedContext.RefreshTokenSessions.AddAsync(firstSession);
+            await seedContext.AdminAccessAuditRecords.AddAsync(new AdminAccessAuditRecord(
+                Guid.NewGuid(),
+                AdminAccessAuditAction.AdministratorCreated,
+                now,
+                succeeded: true,
+                administratorId: administratorId,
+                actorAdministratorId: administratorId,
+                roleId: firstRoleId,
+                correlationId: correlationId));
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using var readerContext = _fixture.CreateDbContext();
+        var repository = new AdminAccessManagementRepository(
+            readerContext,
+            new RefreshTokenFamilyPolicy());
+        var auditQuery = new AdminAccessAuditQuery(
+            now.AddHours(-1),
+            now.AddHours(1),
+            AdminAccessAuditAction.AdministratorCreated,
+            Succeeded: true,
+            ActorAdministratorId: administratorId,
+            SubjectAdministratorId: administratorId,
+            RoleId: firstRoleId,
+            CorrelationId: correlationId);
+        var snapshotResult = await repository.ExecuteAsync(async cancellationToken =>
+        {
+            var initialRolePage = await repository.GetRolePageAsync(
+                normalizedRolePrefix,
+                isActive: true,
+                isBuiltIn: false,
+                registeredPermissionNames: [],
+                skipCount: 0,
+                maxResultCount: 10,
+                cancellationToken: cancellationToken);
+            var initialSessionPage = await repository.GetSessionFamilyPageAsync(
+                administratorId,
+                AdminSessionFamilyStateSnapshot.Active,
+                now,
+                skipCount: 0,
+                maxResultCount: 10,
+                cancellationToken: cancellationToken);
+            var initialAuditPage = await repository.GetAuditPageAsync(
+                auditQuery,
+                skipCount: 0,
+                maxResultCount: 10,
+                cancellationToken: cancellationToken);
+
+            await using (var writerContext = _fixture.CreateDbContext())
+            {
+                await writerContext.AdminRoles.AddAsync(new AdminRole(
+                    secondRoleId,
+                    $"{rolePrefix}-second",
+                    now.AddMinutes(1)), cancellationToken);
+                await writerContext.RefreshTokenSessions.AddAsync(new RefreshTokenSession(
+                    Guid.NewGuid(),
+                    administratorId,
+                    secondFamilyId,
+                    CreateHash(225),
+                    now.AddMinutes(1),
+                    now.AddDays(1),
+                    "203.0.113.61"), cancellationToken);
+                await writerContext.AdminAccessAuditRecords.AddAsync(new AdminAccessAuditRecord(
+                    Guid.NewGuid(),
+                    AdminAccessAuditAction.AdministratorCreated,
+                    now.AddMinutes(1),
+                    succeeded: true,
+                    administratorId: administratorId,
+                    actorAdministratorId: administratorId,
+                    roleId: firstRoleId,
+                    correlationId: correlationId), cancellationToken);
+                await writerContext.SaveChangesAsync(cancellationToken);
+            }
+
+            var rolePage = await repository.GetRolePageAsync(
+                normalizedRolePrefix,
+                isActive: true,
+                isBuiltIn: false,
+                registeredPermissionNames: [],
+                skipCount: 0,
+                maxResultCount: 10,
+                cancellationToken: cancellationToken);
+            var sessionPage = await repository.GetSessionFamilyPageAsync(
+                administratorId,
+                AdminSessionFamilyStateSnapshot.Active,
+                now,
+                skipCount: 0,
+                maxResultCount: 10,
+                cancellationToken: cancellationToken);
+            var auditPage = await repository.GetAuditPageAsync(
+                auditQuery,
+                skipCount: 0,
+                maxResultCount: 10,
+                cancellationToken: cancellationToken);
+            return (initialRolePage, initialSessionPage, initialAuditPage, rolePage, sessionPage, auditPage);
+        });
+
+        Assert.Equal(1, snapshotResult.initialRolePage.TotalCount);
+        Assert.Equal(firstRoleId, Assert.Single(snapshotResult.initialRolePage.Items).Id);
+        Assert.Equal(1, snapshotResult.initialSessionPage.TotalCount);
+        Assert.Equal(firstFamilyId, Assert.Single(snapshotResult.initialSessionPage.Items).FamilyId);
+        Assert.Equal(1, snapshotResult.initialAuditPage.TotalCount);
+        Assert.Single(snapshotResult.initialAuditPage.Items);
+        Assert.Equal(1, snapshotResult.rolePage.TotalCount);
+        Assert.Equal(firstRoleId, Assert.Single(snapshotResult.rolePage.Items).Id);
+        Assert.Equal(1, snapshotResult.sessionPage.TotalCount);
+        Assert.Equal(firstFamilyId, Assert.Single(snapshotResult.sessionPage.Items).FamilyId);
+        Assert.Equal(1, snapshotResult.auditPage.TotalCount);
+        Assert.Single(snapshotResult.auditPage.Items);
+
+        await using var verificationContext = _fixture.CreateDbContext();
+        Assert.Equal(
+            2,
+            await verificationContext.AdminRoles.LongCountAsync(role =>
+                role.NormalizedName.StartsWith(normalizedRolePrefix)));
+        Assert.Equal(
+            2,
+            await verificationContext.RefreshTokenSessions
+                .Select(session => session.FamilyId)
+                .Distinct()
+                .LongCountAsync(familyId => familyId == firstFamilyId || familyId == secondFamilyId));
+        Assert.Equal(
+            2,
+            await verificationContext.AdminAccessAuditRecords.LongCountAsync(record =>
+                record.CorrelationId == correlationId));
     }
 
     [Fact]

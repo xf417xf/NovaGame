@@ -199,6 +199,252 @@ public sealed class AdminAccessManagementSessionTests
         Assert.Equal(expiresAtUtc, auditRepository.Records[0].OccurredAtUtc);
     }
 
+    [Fact]
+    public async Task SessionFamilyPagesProjectActiveExpiredAndRevokedTerminalStates()
+    {
+        var now = new DateTime(2026, 8, 15, 8, 0, 0, DateTimeKind.Utc);
+        var administratorId = Guid.NewGuid();
+        var activeFamilyId = Guid.NewGuid();
+        var expiredFamilyId = Guid.NewGuid();
+        var revokedFamilyId = Guid.NewGuid();
+        var activeRootId = Guid.NewGuid();
+        var activeTerminalId = Guid.NewGuid();
+        var activeRoot = new RefreshTokenSession(
+            activeRootId,
+            administratorId,
+            activeFamilyId,
+            CreateHash(21),
+            now.AddHours(-2),
+            now.AddDays(1),
+            "203.0.113.40");
+        activeRoot.Rotate(activeTerminalId, now.AddHours(-1), "203.0.113.41");
+        var activeTerminal = new RefreshTokenSession(
+            activeTerminalId,
+            administratorId,
+            activeFamilyId,
+            CreateHash(53),
+            now.AddHours(-1),
+            now.AddDays(1),
+            "203.0.113.42");
+        var expiredTerminal = new RefreshTokenSession(
+            Guid.NewGuid(),
+            administratorId,
+            expiredFamilyId,
+            CreateHash(85),
+            now.AddDays(-2),
+            now.AddMinutes(-1),
+            "203.0.113.43");
+        var revokedTerminal = new RefreshTokenSession(
+            Guid.NewGuid(),
+            administratorId,
+            revokedFamilyId,
+            CreateHash(117),
+            now.AddHours(-3),
+            now.AddDays(1),
+            "203.0.113.44");
+        var revokedAtUtc = now.AddMinutes(-30);
+        revokedTerminal.Revoke(
+            RefreshTokenRevocationReason.Logout,
+            revokedAtUtc,
+            "203.0.113.45");
+
+        await using (var seedContext = _fixture.CreateDbContext())
+        {
+            await seedContext.Administrators.AddAsync(new Administrator(
+                administratorId,
+                AdministratorUserName.Create($"session-states-{Guid.NewGuid():N}"),
+                "Session-state projection administrator",
+                "test-password-hash",
+                now.AddDays(-3)));
+            await seedContext.RefreshTokenSessions.AddRangeAsync(
+                activeRoot,
+                activeTerminal,
+                expiredTerminal,
+                revokedTerminal);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using var dbContext = _fixture.CreateDbContext();
+        var repository = new AdminAccessManagementRepository(
+            dbContext,
+            new RefreshTokenFamilyPolicy());
+
+        var active = Assert.Single((await repository.GetSessionFamilyPageAsync(
+            administratorId,
+            AdminSessionFamilyStateSnapshot.Active,
+            now,
+            skipCount: 0,
+            maxResultCount: 10)).Items);
+        var expired = Assert.Single((await repository.GetSessionFamilyPageAsync(
+            administratorId,
+            AdminSessionFamilyStateSnapshot.Expired,
+            now,
+            skipCount: 0,
+            maxResultCount: 10)).Items);
+        var revoked = Assert.Single((await repository.GetSessionFamilyPageAsync(
+            administratorId,
+            AdminSessionFamilyStateSnapshot.Revoked,
+            now,
+            skipCount: 0,
+            maxResultCount: 10)).Items);
+
+        Assert.Equal(activeFamilyId, active.FamilyId);
+        Assert.Equal(administratorId, active.AdministratorId);
+        Assert.Equal(now.AddHours(-2), active.FirstCreatedAtUtc);
+        Assert.Equal(now.AddHours(-1), active.LastActivityAtUtc);
+        Assert.Equal("203.0.113.41", active.LastIpAddress);
+        Assert.Equal(now.AddDays(1), active.ExpiresAtUtc);
+        Assert.Equal(AdminSessionFamilyStateSnapshot.Active, active.State);
+        Assert.Null(active.RevokedAtUtc);
+        Assert.Null(active.RevocationReason);
+
+        Assert.Equal(expiredFamilyId, expired.FamilyId);
+        Assert.Equal(now.AddDays(-2), expired.FirstCreatedAtUtc);
+        Assert.Equal(now.AddDays(-2), expired.LastActivityAtUtc);
+        Assert.Equal(now.AddMinutes(-1), expired.ExpiresAtUtc);
+        Assert.Equal("203.0.113.43", expired.LastIpAddress);
+        Assert.Equal(AdminSessionFamilyStateSnapshot.Expired, expired.State);
+        Assert.Null(expired.RevokedAtUtc);
+        Assert.Null(expired.RevocationReason);
+
+        Assert.Equal(revokedFamilyId, revoked.FamilyId);
+        Assert.Equal(now.AddHours(-3), revoked.FirstCreatedAtUtc);
+        Assert.Equal(revokedAtUtc, revoked.LastActivityAtUtc);
+        Assert.Equal("203.0.113.45", revoked.LastIpAddress);
+        Assert.Equal(AdminSessionFamilyStateSnapshot.Revoked, revoked.State);
+        Assert.Equal(revokedAtUtc, revoked.RevokedAtUtc);
+        Assert.Equal(RefreshTokenRevocationReason.Logout, revoked.RevocationReason);
+    }
+
+    [Fact]
+    public async Task ExactFamilyRevocationPersistsOnceAndLeavesOtherFamiliesUntouched()
+    {
+        var now = new DateTime(2026, 8, 15, 8, 30, 0, DateTimeKind.Utc);
+        var administratorId = Guid.NewGuid();
+        var targetFamilyId = Guid.NewGuid();
+        var unrelatedExpiredFamilyId = Guid.NewGuid();
+        var targetRootId = Guid.NewGuid();
+        var targetTerminalId = Guid.NewGuid();
+        var targetRoot = new RefreshTokenSession(
+            targetRootId,
+            administratorId,
+            targetFamilyId,
+            CreateHash(149),
+            now.AddHours(-2),
+            now.AddDays(1),
+            "203.0.113.50");
+        targetRoot.Rotate(targetTerminalId, now.AddHours(-1), "203.0.113.51");
+        var targetTerminal = new RefreshTokenSession(
+            targetTerminalId,
+            administratorId,
+            targetFamilyId,
+            CreateHash(181),
+            now.AddHours(-1),
+            now.AddDays(1),
+            "203.0.113.52");
+        var unrelatedExpiredTerminal = new RefreshTokenSession(
+            Guid.NewGuid(),
+            administratorId,
+            unrelatedExpiredFamilyId,
+            CreateHash(213),
+            now.AddDays(-2),
+            now.AddMinutes(-1),
+            "203.0.113.53");
+
+        await using (var seedContext = _fixture.CreateDbContext())
+        {
+            await seedContext.Administrators.AddAsync(new Administrator(
+                administratorId,
+                AdministratorUserName.Create($"session-revoke-{Guid.NewGuid():N}"),
+                "Exact-revocation administrator",
+                "test-password-hash",
+                now.AddDays(-3)));
+            await seedContext.RefreshTokenSessions.AddRangeAsync(
+                targetRoot,
+                targetTerminal,
+                unrelatedExpiredTerminal);
+            await seedContext.SaveChangesAsync();
+        }
+
+        var firstRevokedAtUtc = now;
+        await using (var firstContext = _fixture.CreateDbContext())
+        {
+            await using var transaction = await firstContext.Database.BeginTransactionAsync();
+            var repository = new AdminAccessManagementRepository(
+                firstContext,
+                new RefreshTokenFamilyPolicy());
+            var lockedRows = await repository.GetSessionFamilyForUpdateAsync(targetFamilyId);
+            var transition = new RefreshTokenFamilyPolicy().Revoke(
+                lockedRows,
+                RefreshTokenRevocationReason.ForcedByAdministrator,
+                firstRevokedAtUtc,
+                "203.0.113.54");
+
+            Assert.True(transition.Changed);
+            Assert.Equal(targetFamilyId, transition.FamilyId);
+            Assert.Equal(administratorId, transition.AdministratorId);
+            await repository.AddAuditAsync(new AdminAccessAuditRecord(
+                Guid.NewGuid(),
+                AdminAccessAuditAction.SessionFamilyRevoked,
+                firstRevokedAtUtc,
+                succeeded: true,
+                administratorId: administratorId,
+                actorAdministratorId: administratorId,
+                sessionFamilyId: targetFamilyId,
+                correlationId: $"revoke-{Guid.NewGuid():N}"));
+            await firstContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        await using (var repeatContext = _fixture.CreateDbContext())
+        {
+            await using var transaction = await repeatContext.Database.BeginTransactionAsync();
+            var repository = new AdminAccessManagementRepository(
+                repeatContext,
+                new RefreshTokenFamilyPolicy());
+            var lockedRows = await repository.GetSessionFamilyForUpdateAsync(targetFamilyId);
+            var repeatedTransition = new RefreshTokenFamilyPolicy().Revoke(
+                lockedRows,
+                RefreshTokenRevocationReason.ForcedByAdministrator,
+                now.AddMinutes(1),
+                "203.0.113.55");
+
+            Assert.False(repeatedTransition.Changed);
+            await repeatContext.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        await using var verificationContext = _fixture.CreateDbContext();
+        var persistedTargetRows = await verificationContext.RefreshTokenSessions
+            .AsNoTracking()
+            .Where(session => session.FamilyId == targetFamilyId)
+            .OrderBy(session => session.CreatedAtUtc)
+            .ThenBy(session => session.Id)
+            .ToArrayAsync();
+        var persistedTargetTerminal = Assert.Single(
+            persistedTargetRows,
+            session => session.Id == targetTerminalId);
+        var persistedUnrelatedExpiredTerminal = await verificationContext.RefreshTokenSessions
+            .AsNoTracking()
+            .SingleAsync(session => session.FamilyId == unrelatedExpiredFamilyId);
+        var audits = await verificationContext.AdminAccessAuditRecords
+            .AsNoTracking()
+            .Where(record => record.Action == AdminAccessAuditAction.SessionFamilyRevoked &&
+                record.SessionFamilyId == targetFamilyId)
+            .ToArrayAsync();
+
+        Assert.Equal(new[] { targetRootId, targetTerminalId }, persistedTargetRows.Select(session => session.Id));
+        Assert.All(persistedTargetRows, session => Assert.True(session.IsRevoked));
+        Assert.Equal(RefreshTokenRevocationReason.Rotated, persistedTargetRows[0].RevocationReason);
+        Assert.Equal(firstRevokedAtUtc, persistedTargetTerminal.RevokedAtUtc);
+        Assert.Equal(RefreshTokenRevocationReason.ForcedByAdministrator, persistedTargetTerminal.RevocationReason);
+        Assert.Equal("203.0.113.54", persistedTargetTerminal.RevokedFromIpAddress);
+        Assert.False(persistedUnrelatedExpiredTerminal.IsRevoked);
+        Assert.Null(persistedUnrelatedExpiredTerminal.RevokedAtUtc);
+        Assert.Null(persistedUnrelatedExpiredTerminal.RevocationReason);
+        Assert.Single(audits);
+    }
+
     private static byte[] CreateHash(byte seed)
     {
         return Enumerable.Range(0, 32).Select(index => unchecked((byte)(seed + index))).ToArray();
