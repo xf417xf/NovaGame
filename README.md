@@ -33,13 +33,13 @@ player-equipment-grant capability remains SwordMaster-owned.
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
 another capability, M4, or NovaCore changes.
 
-[M3.5](docs/goals/m3.5.md) is now the only active repository milestone at `M35-05`, with only
-`M35-05-T06` executable. M35-05-T05 completed the final accessibility, responsive-layout,
-stale-response, and frontend-regression review, including a nonwrapping `Read only` state in a
-92px mobile session action cell. It advances the NovaGame-owned `Operations/AdminAccess`
-`administrator-management` vertical slice across .NET, MySQL 8.4, and the generic Vben Admin 5
-`web-ele` application. The active task authorizes only M35-05 governance verification. It does
-not authorize M35-06 or later tasks, SwordMaster, extraction, M4, or NovaCore changes; M4 remains
+[M3.5](docs/goals/m3.5.md) is now the only active repository milestone at `M35-06`, with only
+`M35-06-T01` executable. M35-05 completed the NovaGame-owned `Operations/AdminAccess`
+`administrator-management` workspace across .NET, MySQL 8.4, and the generic Vben Admin 5
+`web-ele` application, including its final management-admin, checked-contract, generic Admin,
+Documentation, Repository, and whitespace verification. The active task authorizes only freezing
+the exact real-server requirement-to-evidence matrix and ordered acceptance commands. It does not
+authorize M35-06-T02 or later tasks, SwordMaster, extraction, M4, or NovaCore changes; M4 remains
 `Unscheduled`.
 
 ## Prerequisites

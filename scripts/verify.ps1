@@ -9721,6 +9721,8 @@ function Test-Authentication {
 function Test-GameConfig {
     $domainSharedModule = Get-Content -LiteralPath `
         "server/src/NovaGame.Domain.Shared/NovaGameDomainSharedModule.cs" -Raw
+    $gameConfigPermissionDefinitionProvider = Get-Content -LiteralPath `
+        "server/src/NovaGame.Domain.Shared/Content/GameConfig/GameConfigPermissionDefinitionProvider.cs" -Raw
     $applicationModule = Get-Content -LiteralPath `
         "server/src/NovaGame.Application/NovaGameApplicationModule.cs" -Raw
     $apiModule = Get-Content -LiteralPath `
@@ -9760,13 +9762,21 @@ function Test-GameConfig {
         "server/src/NovaGame.Api/Content/GameConfig/GameConfigApiPermissions.cs")) `
         "The API must use shared GameConfig permission codes instead of local duplicates."
 
+    Assert-Condition `
+        ($administratorSeed.Contains("GetRegisteredPermissionNames") -and
+            $administratorSeed.Contains("_permissionDefinitionManager.Groups") -and
+            $administratorSeed.Contains("SynchronizeBuiltInRolePermissions")) `
+        "The Administrators seed must synchronize its built-in role from the registered runtime permission catalog."
+
     foreach ($permissionName in @(
         "GameConfigPermissions.Access",
         "GameConfigPermissions.ManageDrafts",
         "GameConfigPermissions.Publish",
         "GameConfigPermissions.Activate"
     )) {
-        Assert-Condition $administratorSeed.Contains($permissionName) "The Administrators seed is missing '$permissionName'."
+        Assert-Condition `
+            $gameConfigPermissionDefinitionProvider.Contains($permissionName) `
+            "The GameConfig permission definition is missing '$permissionName'."
     }
 
     foreach ($dbSetName in @(

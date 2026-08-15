@@ -22,7 +22,7 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 - `admin/AGENTS.md` for the operations admin.
 - `clients/cocos/AGENTS.md` for the Cocos client framework.
 
-Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-05` in `docs/goals/m3.5.md` for the separately authorized NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
+Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-06` in `docs/goals/m3.5.md` for the separately authorized NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
 
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
@@ -74,10 +74,13 @@ registered-permission workspace, including permission reconciliation and stale-c
 M35-05-T04 completed the session-family and audit-history workspaces with focused component
 coverage. M35-05-T05 completed the final accessibility, responsive-layout, stale-response, and
 frontend-regression review, including a nonwrapping `Read only` state in a 92px mobile session
-action cell. M35-05 is active only at `M35-05-T06`. Follow `docs/goals/m3.5.md`. The active task
-authorizes only M35-05 governance verification. It does not authorize M35-06 or later work,
-SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
-remains `Unscheduled`.
+action cell. M35-05-T06 completed sequential management-admin, checked-contract, generic Admin,
+Documentation, Repository, and whitespace verification after correcting a brittle static
+permission-source verifier check. M35-05 is complete. M3.5 is active only at `M35-06-T01`.
+Follow `docs/goals/m3.5.md`. The active task authorizes only freezing the exact real-server
+requirement-to-evidence matrix and ordered acceptance commands. It does not authorize M35-06-T02
+or later work, SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore
+changes. M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

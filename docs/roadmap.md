@@ -152,11 +152,14 @@ permission reconciliation and stale-catalog correction; M35-05-T04 completed the
 and audit-history workspaces, including stale invalid-filter response suppression and malformed-date
 rendering safeguards. M35-05-T05 completed the final accessibility, responsive-layout,
 stale-response, and frontend-regression review, including a nonwrapping `Read only` state in a
-92px mobile session action cell. M3.5 is active at `M35-05`, with only `M35-05-T06` executable.
-The user separately authorized the NovaGame-owned `administrator-management` capability on
-2026-08-13. M35-05-T06 authorizes only M35-05 governance verification. This authorization does
-not come from M3 and does not authorize M35-06 or later work, SwordMaster changes, extraction, M4,
-or NovaCore changes.
+92px mobile session action cell. M35-05-T06 completed sequential management-admin,
+checked-contract, generic Admin, Documentation, Repository, and whitespace verification after a
+brittle static permission-source verifier check was corrected. M35-05 is complete. M3.5 is active
+at `M35-06`, with only `M35-06-T01` executable. The user separately authorized the NovaGame-owned
+`administrator-management` capability on 2026-08-13. M35-06-T01 authorizes only freezing the
+exact real-server requirement-to-evidence matrix and ordered acceptance commands. This
+authorization does not come from M3 and does not authorize M35-06-T02 or later work, SwordMaster
+changes, extraction, M4, or NovaCore changes.
 
 ### Goal
 
