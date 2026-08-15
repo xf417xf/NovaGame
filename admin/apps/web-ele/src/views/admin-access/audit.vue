@@ -70,6 +70,7 @@ const isMobile = useMediaQuery('(max-width: 640px)');
 const administratorOptions = ref<AdministratorDto[]>([]);
 const auditRecords = ref<AdminAccessAuditRecordDto[]>([]);
 const copyMessage = ref('');
+const copyMessageType = ref<'error' | 'success'>('success');
 const errorMessage = ref('');
 const filterErrors = reactive<Record<string, string>>({});
 const forbidden = ref(false);
@@ -555,14 +556,17 @@ async function copyIdentifier(label: string, value: null | string | undefined) {
 
   if (!navigator.clipboard?.writeText) {
     copyMessage.value = `${label} could not be copied.`;
+    copyMessageType.value = 'error';
     return;
   }
 
   try {
     await navigator.clipboard.writeText(value);
     copyMessage.value = `${label} copied.`;
+    copyMessageType.value = 'success';
   } catch {
     copyMessage.value = `${label} could not be copied.`;
+    copyMessageType.value = 'error';
   }
 }
 
@@ -671,6 +675,11 @@ onBeforeUnmount(() => {
           <div class="filter-row">
             <ElInput
               v-model="query.fromUtc"
+              :aria-describedby="
+                filterErrors.range ? 'audit-range-filter-error' : undefined
+              "
+              :aria-invalid="Boolean(filterErrors.range)"
+              aria-label="From UTC"
               clearable
               data-testid="audit-from-utc"
               placeholder="From UTC (YYYY-MM-DDTHH:mm:ss.sssZ)"
@@ -680,6 +689,11 @@ onBeforeUnmount(() => {
             />
             <ElInput
               v-model="query.toUtc"
+              :aria-describedby="
+                filterErrors.range ? 'audit-range-filter-error' : undefined
+              "
+              :aria-invalid="Boolean(filterErrors.range)"
+              aria-label="To UTC"
               clearable
               data-testid="audit-to-utc"
               placeholder="To UTC (YYYY-MM-DDTHH:mm:ss.sssZ)"
@@ -689,6 +703,7 @@ onBeforeUnmount(() => {
             />
             <ElSelect
               v-model="query.action"
+              aria-label="Audit action"
               clearable
               data-testid="audit-action-filter"
               placeholder="All actions"
@@ -703,6 +718,7 @@ onBeforeUnmount(() => {
             </ElSelect>
             <ElSelect
               v-model="query.succeeded"
+              aria-label="Audit outcome"
               clearable
               data-testid="audit-success-filter"
               placeholder="All outcomes"
@@ -714,6 +730,7 @@ onBeforeUnmount(() => {
             <ElSelect
               v-if="canReadAdministrators"
               v-model="query.actorAdministratorId"
+              aria-label="Actor administrator"
               clearable
               filterable
               remote
@@ -733,6 +750,13 @@ onBeforeUnmount(() => {
             <ElInput
               v-else
               v-model="query.actorAdministratorId"
+              :aria-describedby="
+                filterErrors['Actor administrator ID']
+                  ? 'audit-actor-administrator-filter-error'
+                  : undefined
+              "
+              :aria-invalid="Boolean(filterErrors['Actor administrator ID'])"
+              aria-label="Actor administrator ID"
               clearable
               data-testid="audit-actor-id-filter"
               placeholder="Exact actor administrator GUID"
@@ -742,6 +766,7 @@ onBeforeUnmount(() => {
             <ElSelect
               v-if="canReadAdministrators"
               v-model="query.subjectAdministratorId"
+              aria-label="Subject administrator"
               clearable
               filterable
               remote
@@ -761,6 +786,13 @@ onBeforeUnmount(() => {
             <ElInput
               v-else
               v-model="query.subjectAdministratorId"
+              :aria-describedby="
+                filterErrors['Subject administrator ID']
+                  ? 'audit-subject-administrator-filter-error'
+                  : undefined
+              "
+              :aria-invalid="Boolean(filterErrors['Subject administrator ID'])"
+              aria-label="Subject administrator ID"
               clearable
               data-testid="audit-subject-id-filter"
               placeholder="Exact subject administrator GUID"
@@ -770,6 +802,7 @@ onBeforeUnmount(() => {
             <ElSelect
               v-if="canReadRoles"
               v-model="query.roleId"
+              aria-label="Role"
               clearable
               filterable
               remote
@@ -789,6 +822,11 @@ onBeforeUnmount(() => {
             <ElInput
               v-else
               v-model="query.roleId"
+              :aria-describedby="
+                filterErrors['Role ID'] ? 'audit-role-filter-error' : undefined
+              "
+              :aria-invalid="Boolean(filterErrors['Role ID'])"
+              aria-label="Role ID"
               clearable
               data-testid="audit-role-id-filter"
               placeholder="Exact role GUID"
@@ -797,6 +835,7 @@ onBeforeUnmount(() => {
             />
             <ElInput
               v-model="query.correlationId"
+              aria-label="Correlation ID"
               clearable
               data-testid="audit-correlation-filter"
               placeholder="Exact correlation ID"
@@ -811,7 +850,20 @@ onBeforeUnmount(() => {
             v-if="Object.keys(filterErrors).length > 0"
             class="filter-errors"
           >
-            <p v-for="(message, field) in filterErrors" :key="field">
+            <p
+              v-for="(message, field) in filterErrors"
+              :id="
+                field === 'range'
+                  ? 'audit-range-filter-error'
+                  : field === 'Actor administrator ID'
+                    ? 'audit-actor-administrator-filter-error'
+                    : field === 'Subject administrator ID'
+                      ? 'audit-subject-administrator-filter-error'
+                      : 'audit-role-filter-error'
+              "
+              :key="field"
+              role="alert"
+            >
               {{ message }}
             </p>
           </div>
@@ -821,7 +873,7 @@ onBeforeUnmount(() => {
           v-if="copyMessage"
           :closable="true"
           :title="copyMessage"
-          type="success"
+          :type="copyMessageType"
           @close="copyMessage = ''"
         />
 

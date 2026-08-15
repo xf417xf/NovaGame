@@ -261,6 +261,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
   min-height: 150px;
 }
 
@@ -269,7 +270,9 @@ onBeforeUnmount(() => {
 }
 
 .role-name {
+  min-width: 0;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .dialog-footer {

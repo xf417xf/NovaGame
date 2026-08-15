@@ -150,11 +150,13 @@ database, authentication, management-contract, documentation, repository, and wh
 verification. M35-05-T03 completed the custom-role and registered-permission workspace, including
 permission reconciliation and stale-catalog correction; M35-05-T04 completed the session-family
 and audit-history workspaces, including stale invalid-filter response suppression and malformed-date
-rendering safeguards. M3.5 is active at `M35-05`, with only `M35-05-T05` executable. The user
-separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13.
-M35-05-T05 authorizes only accessibility, stable responsive layout, stale-response protection, and
-focused frontend regression coverage. This authorization does not come from M3 and does not
-authorize M35-05-T06 or later work, SwordMaster changes, extraction, M4, or NovaCore changes.
+rendering safeguards. M35-05-T05 completed the final accessibility, responsive-layout,
+stale-response, and frontend-regression review, including a nonwrapping `Read only` state in a
+92px mobile session action cell. M3.5 is active at `M35-05`, with only `M35-05-T06` executable.
+The user separately authorized the NovaGame-owned `administrator-management` capability on
+2026-08-13. M35-05-T06 authorizes only M35-05 governance verification. This authorization does
+not come from M3 and does not authorize M35-06 or later work, SwordMaster changes, extraction, M4,
+or NovaCore changes.
 
 ### Goal
 

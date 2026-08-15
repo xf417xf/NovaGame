@@ -180,6 +180,7 @@ defineExpose({ reloadCatalog });
     <template v-else>
       <ElInput
         v-model="search"
+        aria-label="Search registered permissions"
         :disabled="disabled"
         data-testid="role-permission-search"
         placeholder="Search registered permissions"
@@ -274,16 +275,20 @@ defineExpose({ reloadCatalog });
   flex: 1;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
   padding: 4px 8px;
+  overflow-wrap: anywhere;
 }
 
 .permission-name {
   color: var(--el-text-color-primary);
+  overflow-wrap: anywhere;
 }
 
 .permission-group small,
 .empty-catalog {
   color: var(--el-text-color-secondary);
+  overflow-wrap: anywhere;
 }
 
 .empty-catalog {

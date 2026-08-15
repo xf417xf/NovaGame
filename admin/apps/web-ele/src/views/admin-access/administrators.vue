@@ -138,14 +138,28 @@ const paginationLayout = computed(() =>
 const paginationPagerCount = computed(() => (isMobile.value ? 5 : 7));
 
 function formatDate(value: null | string | undefined): string {
-  return value
-    ? new Date(value).toISOString().replace('T', ' ').replace('Z', ' UTC')
-    : 'Never';
+  if (!value) {
+    return 'Never';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unavailable';
+  }
+
+  return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
 }
 
 function isCurrentAdministrator(administrator: AdministratorDto): boolean {
   return Boolean(
     administrator.id && administrator.id === currentAdministratorId.value,
+  );
+}
+
+function hasAdministratorRowCommand(administrator: AdministratorDto): boolean {
+  return (
+    canManage.value ||
+    (canResetPassword.value && !isCurrentAdministrator(administrator))
   );
 }
 
@@ -500,6 +514,7 @@ onBeforeUnmount(() => {
           <div class="filter-row">
             <ElInput
               v-model="query.search"
+              aria-label="Search administrators"
               clearable
               data-testid="administrator-search"
               placeholder="Search user names"
@@ -508,6 +523,7 @@ onBeforeUnmount(() => {
             />
             <ElSelect
               v-model="query.isActive"
+              aria-label="Administrator account state"
               clearable
               data-testid="administrator-active-filter"
               placeholder="All account states"
@@ -519,6 +535,7 @@ onBeforeUnmount(() => {
             <ElSelect
               v-if="canReadRoles"
               v-model="query.roleId"
+              aria-label="Administrator role"
               clearable
               filterable
               remote
@@ -612,23 +629,25 @@ onBeforeUnmount(() => {
               align="right"
               fixed="right"
               label="Actions"
-              :width="isMobile ? 68 : 204"
+              :width="isMobile ? 92 : 204"
             >
               <template #default="scope">
                 <ElDropdown
-                  v-if="isMobile"
+                  v-if="isMobile && hasAdministratorRowCommand(scope.row)"
                   trigger="click"
                   @command="
                     handleRowCommand($event as AdministratorCommand, scope.row)
                   "
                 >
-                  <ElButton
-                    :aria-label="`Actions for ${scope.row.userName}`"
-                    circle
-                    data-testid="administrator-mobile-actions"
-                  >
-                    <Ellipsis :size="17" />
-                  </ElButton>
+                  <ElTooltip content="Administrator actions" placement="top">
+                    <ElButton
+                      :aria-label="`Actions for ${scope.row.userName}`"
+                      circle
+                      data-testid="administrator-mobile-actions"
+                    >
+                      <Ellipsis :size="17" />
+                    </ElButton>
+                  </ElTooltip>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem v-if="canManage" command="display-name">
@@ -665,6 +684,9 @@ onBeforeUnmount(() => {
                     </ElDropdownMenu>
                   </template>
                 </ElDropdown>
+                <span v-else-if="isMobile" class="read-only-state">
+                  Read only
+                </span>
                 <div v-else class="icon-actions">
                   <ElTooltip
                     v-if="canManage"
@@ -900,6 +922,13 @@ onBeforeUnmount(() => {
 .muted-value {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.read-only-state {
+  display: inline-block;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
 }
 
 .icon-actions {

@@ -65,6 +65,7 @@ const isMobile = useMediaQuery('(max-width: 640px)');
 
 const administratorOptions = ref<AdministratorDto[]>([]);
 const copyMessage = ref('');
+const copyMessageType = ref<'error' | 'success'>('success');
 const errorMessage = ref('');
 const forbidden = ref(false);
 const loading = ref(false);
@@ -483,14 +484,17 @@ async function copyIdentifier(label: string, value: null | string | undefined) {
 
   if (!navigator.clipboard?.writeText) {
     copyMessage.value = `${label} could not be copied.`;
+    copyMessageType.value = 'error';
     return;
   }
 
   try {
     await navigator.clipboard.writeText(value);
     copyMessage.value = `${label} copied.`;
+    copyMessageType.value = 'success';
   } catch {
     copyMessage.value = `${label} could not be copied.`;
+    copyMessageType.value = 'error';
   }
 }
 
@@ -595,6 +599,7 @@ onBeforeUnmount(() => {
             <ElSelect
               v-if="canReadAdministrators"
               v-model="query.administratorId"
+              aria-label="Administrator"
               clearable
               filterable
               remote
@@ -614,6 +619,13 @@ onBeforeUnmount(() => {
             <ElInput
               v-else
               v-model="query.administratorId"
+              :aria-describedby="
+                administratorFilterError
+                  ? 'session-administrator-filter-error'
+                  : undefined
+              "
+              :aria-invalid="Boolean(administratorFilterError)"
+              aria-label="Administrator ID"
               clearable
               data-testid="session-administrator-id-filter"
               placeholder="Exact administrator GUID"
@@ -622,6 +634,7 @@ onBeforeUnmount(() => {
             />
             <ElSelect
               v-model="query.state"
+              aria-label="Session state"
               clearable
               data-testid="session-state-filter"
               placeholder="All session states"
@@ -635,7 +648,12 @@ onBeforeUnmount(() => {
               Search
             </ElButton>
           </div>
-          <p v-if="administratorFilterError" class="field-error">
+          <p
+            v-if="administratorFilterError"
+            id="session-administrator-filter-error"
+            class="field-error"
+            role="alert"
+          >
             {{ administratorFilterError }}
           </p>
         </section>
@@ -644,7 +662,7 @@ onBeforeUnmount(() => {
           v-if="copyMessage"
           :closable="true"
           :title="copyMessage"
-          type="success"
+          :type="copyMessageType"
           @close="copyMessage = ''"
         />
 
@@ -754,10 +772,13 @@ onBeforeUnmount(() => {
               align="right"
               fixed="right"
               label="Actions"
-              :width="isMobile ? 68 : 116"
+              :width="isMobile ? 92 : 116"
             >
               <template #default="scope">
-                <ElDropdown v-if="isMobile" trigger="click">
+                <ElDropdown
+                  v-if="isMobile && canRevokeSessionWorkspace"
+                  trigger="click"
+                >
                   <ElTooltip content="Session actions" placement="top">
                     <ElButton
                       :aria-label="`Actions for session ${scope.row.familyId}`"
@@ -769,10 +790,7 @@ onBeforeUnmount(() => {
                   </ElTooltip>
                   <template #dropdown>
                     <ElDropdownMenu>
-                      <ElDropdownItem
-                        v-if="canRevokeSessionWorkspace"
-                        @click="openRevokeDialog(scope.row)"
-                      >
+                      <ElDropdownItem @click="openRevokeDialog(scope.row)">
                         Revoke session
                       </ElDropdownItem>
                     </ElDropdownMenu>
@@ -917,6 +935,10 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+.filter-row {
+  flex-wrap: wrap;
+}
+
 .filter-row :deep(.el-input),
 .filter-row :deep(.el-select) {
   width: min(280px, 100%);
@@ -965,8 +987,10 @@ onBeforeUnmount(() => {
 }
 
 .read-only-state {
+  display: inline-block;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  white-space: nowrap;
 }
 
 .workspace-pagination {

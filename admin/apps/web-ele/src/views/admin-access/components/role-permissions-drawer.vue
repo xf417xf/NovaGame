@@ -318,6 +318,7 @@ onBeforeUnmount(() => {
           <ElTag
             v-for="permissionName in detail.data.permissionNames ?? []"
             :key="permissionName"
+            class="long-value-tag"
             size="small"
             type="info"
           >
@@ -376,6 +377,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
   min-height: 280px;
 }
 
@@ -383,6 +385,16 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
+}
+
+.long-value-tag {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .drawer-footer {

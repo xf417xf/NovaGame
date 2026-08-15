@@ -123,9 +123,16 @@ const roleWorkspaceForbidden = computed(
 );
 
 function formatDate(value: null | string | undefined): string {
-  return value
-    ? new Date(value).toISOString().replace('T', ' ').replace('Z', ' UTC')
-    : 'Never';
+  if (!value) {
+    return 'Never';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unavailable';
+  }
+
+  return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
 }
 
 function clearRoleResults() {
@@ -454,6 +461,7 @@ onBeforeUnmount(() => {
           <div class="filter-row">
             <ElInput
               v-model="query.search"
+              aria-label="Search roles"
               clearable
               data-testid="role-search"
               placeholder="Search role names"
@@ -462,6 +470,7 @@ onBeforeUnmount(() => {
             />
             <ElSelect
               v-model="query.isActive"
+              aria-label="Role state"
               clearable
               data-testid="role-active-filter"
               placeholder="All role states"
@@ -472,6 +481,7 @@ onBeforeUnmount(() => {
             </ElSelect>
             <ElSelect
               v-model="query.isBuiltIn"
+              aria-label="Role kind"
               clearable
               data-testid="role-built-in-filter"
               placeholder="All role kinds"
@@ -575,13 +585,15 @@ onBeforeUnmount(() => {
                   trigger="click"
                   @command="handleRowCommand($event as RoleCommand, scope.row)"
                 >
-                  <ElButton
-                    :aria-label="`Actions for ${scope.row.name}`"
-                    circle
-                    data-testid="role-mobile-actions"
-                  >
-                    <Ellipsis :size="17" />
-                  </ElButton>
+                  <ElTooltip content="Role actions" placement="top">
+                    <ElButton
+                      :aria-label="`Actions for ${scope.row.name}`"
+                      circle
+                      data-testid="role-mobile-actions"
+                    >
+                      <Ellipsis :size="17" />
+                    </ElButton>
+                  </ElTooltip>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem command="name">
@@ -638,6 +650,7 @@ onBeforeUnmount(() => {
                     </ElButton>
                   </ElTooltip>
                 </div>
+                <span v-else class="read-only-state">Read only</span>
               </template>
             </ElTableColumn>
             <template #empty>
@@ -749,7 +762,8 @@ onBeforeUnmount(() => {
 }
 
 .table-shell {
-  overflow: hidden;
+  min-height: 360px;
+  overflow: auto;
   border: 1px solid var(--el-border-color-light);
 }
 
@@ -779,6 +793,13 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+@media (max-width: 900px) {
+  .workspace-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 @media (max-width: 640px) {
   .workspace-header,
   .workspace-body {
@@ -787,6 +808,12 @@ onBeforeUnmount(() => {
 
   .workspace-header {
     align-items: flex-start;
+  }
+
+  .header-actions {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
   }
 
   .filter-row {
@@ -801,6 +828,23 @@ onBeforeUnmount(() => {
 
   .filter-row :deep(.el-button) {
     min-height: 44px;
+  }
+
+  .header-actions :deep(.el-button) {
+    min-height: 44px;
+    margin-left: 0;
+  }
+
+  .header-actions :deep(.el-button.is-circle) {
+    align-self: flex-end;
+    width: 44px;
+  }
+
+  .el-pagination {
+    --el-pagination-button-height: 44px;
+    --el-pagination-button-width: 44px;
+
+    justify-content: center;
   }
 }
 </style>

@@ -246,6 +246,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
   min-height: 150px;
 }
 
@@ -257,13 +258,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .administrator-name span {
+  min-width: 0;
   font-size: 12px;
   font-weight: 400;
   color: var(--el-text-color-secondary);
+  overflow-wrap: anywhere;
 }
 
 .dialog-footer {

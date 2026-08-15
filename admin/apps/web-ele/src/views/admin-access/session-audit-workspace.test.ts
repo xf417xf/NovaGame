@@ -39,6 +39,10 @@ const router = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
 
+const viewport = vi.hoisted(() => ({
+  mobile: false,
+}));
+
 vi.mock('#/api', () => api);
 
 vi.mock('#/store', () => ({
@@ -76,7 +80,7 @@ vi.mock('@vben/stores', async () => {
 });
 
 vi.mock('@vueuse/core', () => ({
-  useMediaQuery: () => ref(false),
+  useMediaQuery: () => ref(viewport.mobile),
 }));
 
 vi.mock('element-plus', () => {
@@ -193,6 +197,9 @@ vi.mock('element-plus', () => {
   const ElPagination = defineComponent({
     name: 'ElPagination',
     inheritAttrs: false,
+    props: {
+      layout: { default: '', type: String },
+    },
     emits: [
       'current-change',
       'size-change',
@@ -266,9 +273,11 @@ vi.mock('element-plus', () => {
     },
   });
   const ElTableColumn = defineComponent({
+    name: 'ElTableColumn',
     inheritAttrs: false,
     props: {
       label: { default: '', type: String },
+      width: { default: undefined, type: [Number, String] },
     },
     setup(props, { attrs, slots }) {
       const rows = inject(
@@ -479,6 +488,7 @@ function mountAudit() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  viewport.mobile = false;
   getAccessStore().accessCodes = [
     accessPermission,
     administratorsReadPermission,
@@ -515,6 +525,7 @@ afterEach(() => {
     wrapper.unmount();
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('session and audit workspaces', () => {
@@ -558,6 +569,16 @@ describe('session and audit workspaces', () => {
     expect(
       wrapper.find('[data-testid="session-administrator-id-filter"]').exists(),
     ).toBe(true);
+    expect(
+      wrapper
+        .get('[data-testid="session-administrator-id-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Administrator ID');
+    expect(
+      wrapper
+        .get('[data-testid="session-state-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Session state');
     expect(wrapper.text()).toContain(
       'No session families match the current filters.',
     );
@@ -566,6 +587,19 @@ describe('session and audit workspaces', () => {
     await wrapper
       .get('[data-testid="session-administrator-id-filter"]')
       .setValue(` ${administratorId} `);
+    await wrapper
+      .get('[data-testid="session-administrator-id-filter"]')
+      .trigger('keyup.enter');
+    await flushPromises();
+    expect(api.listSessionFamilies).toHaveBeenLastCalledWith(
+      {
+        AdministratorId: administratorId,
+        Page: 1,
+        PageSize: 20,
+        State: undefined,
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     await wrapper.get('[data-testid="session-state-filter"]').setValue('3');
     await wrapper.get('[data-testid="search-sessions"]').trigger('click');
     await flushPromises();
@@ -604,6 +638,44 @@ describe('session and audit workspaces', () => {
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('keeps mobile session controls labelled and uses a read-only state when revoke access is absent', async () => {
+    viewport.mobile = true;
+    getAccessStore().accessCodes = [
+      accessPermission,
+      sessionsReadPermission,
+      sessionsRevokePermission,
+    ];
+    api.listSessionFamilies.mockResolvedValue(sessionPage([sessionFamily()]));
+
+    const writable = mountSessions();
+    await flushPromises();
+
+    expect(
+      writable.find('[data-testid="session-mobile-actions"]').exists(),
+    ).toBe(true);
+    expect(writable.find('[content="Session actions"]').exists()).toBe(true);
+    expect(
+      writable.findComponent({ name: 'ElPagination' }).props('layout'),
+    ).toBe('prev, pager, next');
+
+    const actionsColumn = writable
+      .findAllComponents({ name: 'ElTableColumn' })
+      .find((column) => column.props('label') === 'Actions');
+    if (!actionsColumn) {
+      throw new Error('The session actions column was not rendered.');
+    }
+    expect(actionsColumn.props('width')).toBe(92);
+
+    getAccessStore().accessCodes = [accessPermission, sessionsReadPermission];
+    const readOnly = mountSessions();
+    await flushPromises();
+
+    expect(
+      readOnly.find('[data-testid="session-mobile-actions"]').exists(),
+    ).toBe(false);
+    expect(readOnly.text()).toContain('Read only');
   });
 
   it('confirms, retries, reloads, and repeats authoritative session-family revocation', async () => {
@@ -723,6 +795,19 @@ describe('session and audit workspaces', () => {
     expect(api.listSessionFamilies).toHaveBeenCalledTimes(1);
     expect(sessionOptions.signal.aborted).toBe(true);
     expect(wrapper.text()).toContain('Administrator ID must be an exact GUID.');
+    expect(
+      wrapper
+        .get('[data-testid="session-administrator-id-filter"]')
+        .attributes('aria-invalid'),
+    ).toBe('true');
+    expect(
+      wrapper
+        .get('[data-testid="session-administrator-id-filter"]')
+        .attributes('aria-describedby'),
+    ).toBe('session-administrator-filter-error');
+    expect(
+      wrapper.get('#session-administrator-filter-error').attributes('role'),
+    ).toBe('alert');
 
     pendingSessionList.resolve(sessionPage([sessionFamily()]));
     await flushPromises();
@@ -731,6 +816,67 @@ describe('session and audit workspaces', () => {
     expect(wrapper.text()).toContain(
       'No session families match the current filters.',
     );
+  });
+
+  it('does not let older valid session and administrator-selector responses replace newer state', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+      sessionsReadPermission,
+    ];
+    const firstSessionList = deferred<ReturnType<typeof sessionPage>>();
+    const secondSessionList = deferred<ReturnType<typeof sessionPage>>();
+    const firstAdministratorCatalog =
+      deferred<ReturnType<typeof administratorPage>>();
+    const secondAdministratorCatalog =
+      deferred<ReturnType<typeof administratorPage>>();
+    api.listSessionFamilies
+      .mockReturnValueOnce(firstSessionList.promise)
+      .mockReturnValueOnce(secondSessionList.promise);
+    api.listAdministrators
+      .mockReturnValueOnce(firstAdministratorCatalog.promise)
+      .mockReturnValueOnce(secondAdministratorCatalog.promise);
+
+    const wrapper = mountSessions();
+    await flushPromises();
+    const firstSessionOptions = api.listSessionFamilies.mock.calls[0]?.[1] as {
+      signal: AbortSignal;
+    };
+    const firstCatalogOptions = api.listAdministrators.mock.calls[0]?.[1] as {
+      signal: AbortSignal;
+    };
+
+    await wrapper.get('[data-testid="session-state-filter"]').setValue('2');
+    getAccessStore().accessCodes = [accessPermission, sessionsReadPermission];
+    await flushPromises();
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+      sessionsReadPermission,
+    ];
+    await flushPromises();
+
+    expect(firstSessionOptions.signal.aborted).toBe(true);
+    expect(firstCatalogOptions.signal.aborted).toBe(true);
+    secondSessionList.resolve(
+      sessionPage([sessionFamily({ userName: 'Fresh session owner' })]),
+    );
+    secondAdministratorCatalog.resolve(
+      administratorPage([administrator({ userName: 'Fresh selector owner' })]),
+    );
+    await flushPromises();
+    firstSessionList.resolve(
+      sessionPage([sessionFamily({ userName: 'Stale session owner' })]),
+    );
+    firstAdministratorCatalog.resolve(
+      administratorPage([administrator({ userName: 'Stale selector owner' })]),
+    );
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Fresh session owner');
+    expect(wrapper.text()).toContain('Fresh selector owner');
+    expect(wrapper.text()).not.toContain('Stale session owner');
+    expect(wrapper.text()).not.toContain('Stale selector owner');
   });
 
   it('uses the default seven-day audit window, exact filters, and paging parameters', async () => {
@@ -760,12 +906,43 @@ describe('session and audit workspaces', () => {
       new Date(defaultQuery.ToUtc).getTime() -
         new Date(defaultQuery.FromUtc).getTime(),
     ).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(
+      wrapper.get('[data-testid="audit-from-utc"]').attributes('aria-label'),
+    ).toBe('From UTC');
+    expect(
+      wrapper.get('[data-testid="audit-to-utc"]').attributes('aria-label'),
+    ).toBe('To UTC');
+    expect(
+      wrapper
+        .get('[data-testid="audit-action-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Audit action');
+    expect(
+      wrapper
+        .get('[data-testid="audit-success-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Audit outcome');
     expect(defaultOptions).toEqual(
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(api.listAdministrators).not.toHaveBeenCalled();
     expect(api.listAdminRoles).not.toHaveBeenCalled();
     api.listAuditRecords.mockResolvedValue(auditPage([auditRecord()]));
+
+    await wrapper
+      .get('[data-testid="audit-correlation-filter"]')
+      .setValue('keyboard-search');
+    await wrapper
+      .get('[data-testid="audit-correlation-filter"]')
+      .trigger('keyup.enter');
+    await flushPromises();
+    expect(api.listAuditRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        CorrelationId: 'keyboard-search',
+        Page: 1,
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
 
     await wrapper
       .get('[data-testid="audit-from-utc"]')
@@ -820,6 +997,26 @@ describe('session and audit workspaces', () => {
     );
   });
 
+  it('keeps mobile audit controls labelled and uses compact pagination', async () => {
+    viewport.mobile = true;
+    getAccessStore().accessCodes = [accessPermission, auditReadPermission];
+    api.listAuditRecords.mockResolvedValue(auditPage([auditRecord()]));
+
+    const wrapper = mountAudit();
+    await flushPromises();
+
+    const mobileActions = wrapper.get('[data-testid="audit-mobile-actions"]');
+    expect(mobileActions.attributes('aria-label')).toBe(
+      `Actions for audit record ${auditRecord().id}`,
+    );
+    expect(wrapper.find('[content="Audit record actions"]').exists()).toBe(
+      true,
+    );
+    expect(
+      wrapper.findComponent({ name: 'ElPagination' }).props('layout'),
+    ).toBe('prev, pager, next');
+  });
+
   it('rejects invalid audit ranges locally without issuing an invalid query', async () => {
     getAccessStore().accessCodes = [accessPermission, auditReadPermission];
     const wrapper = mountAudit();
@@ -837,6 +1034,17 @@ describe('session and audit workspaces', () => {
     expect(api.listAuditRecords).toHaveBeenCalledTimes(requestCount);
     expect(wrapper.text()).toContain(
       'Use canonical UTC ISO values with From before To.',
+    );
+    expect(
+      wrapper.get('[data-testid="audit-from-utc"]').attributes('aria-invalid'),
+    ).toBe('true');
+    expect(
+      wrapper
+        .get('[data-testid="audit-to-utc"]')
+        .attributes('aria-describedby'),
+    ).toBe('audit-range-filter-error');
+    expect(wrapper.get('#audit-range-filter-error').attributes('role')).toBe(
+      'alert',
     );
 
     await wrapper
@@ -886,6 +1094,125 @@ describe('session and audit workspaces', () => {
     );
   });
 
+  it('does not let older valid audit or selector responses replace newer state', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+      auditReadPermission,
+      rolesReadPermission,
+    ];
+    const firstAuditList = deferred<ReturnType<typeof auditPage>>();
+    const secondAuditList = deferred<ReturnType<typeof auditPage>>();
+    const firstAdministratorCatalog =
+      deferred<ReturnType<typeof administratorPage>>();
+    const secondAdministratorCatalog =
+      deferred<ReturnType<typeof administratorPage>>();
+    const firstRoleCatalog = deferred<ReturnType<typeof rolePage>>();
+    const secondRoleCatalog = deferred<ReturnType<typeof rolePage>>();
+    api.listAuditRecords
+      .mockReturnValueOnce(firstAuditList.promise)
+      .mockReturnValueOnce(secondAuditList.promise);
+    api.listAdministrators
+      .mockReturnValueOnce(firstAdministratorCatalog.promise)
+      .mockReturnValueOnce(secondAdministratorCatalog.promise);
+    api.listAdminRoles
+      .mockReturnValueOnce(firstRoleCatalog.promise)
+      .mockReturnValueOnce(secondRoleCatalog.promise);
+
+    const wrapper = mountAudit();
+    await flushPromises();
+    const firstAuditOptions = api.listAuditRecords.mock.calls[0]?.[1] as {
+      signal: AbortSignal;
+    };
+    const firstAdministratorOptions = api.listAdministrators.mock
+      .calls[0]?.[1] as {
+      signal: AbortSignal;
+    };
+    const firstRoleOptions = api.listAdminRoles.mock.calls[0]?.[1] as {
+      signal: AbortSignal;
+    };
+
+    await wrapper.get('[data-testid="audit-action-filter"]').setValue('5');
+    getAccessStore().accessCodes = [accessPermission, auditReadPermission];
+    await flushPromises();
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+      auditReadPermission,
+      rolesReadPermission,
+    ];
+    await flushPromises();
+
+    expect(firstAuditOptions.signal.aborted).toBe(true);
+    expect(firstAdministratorOptions.signal.aborted).toBe(true);
+    expect(firstRoleOptions.signal.aborted).toBe(true);
+    secondAuditList.resolve(
+      auditPage([auditRecord({ correlationId: 'fresh-audit-record' })]),
+    );
+    secondAdministratorCatalog.resolve(
+      administratorPage([administrator({ userName: 'fresh-audit-selector' })]),
+    );
+    secondRoleCatalog.resolve(rolePage([role({ name: 'Fresh audit role' })]));
+    await flushPromises();
+    firstAuditList.resolve(
+      auditPage([auditRecord({ correlationId: 'stale-audit-record' })]),
+    );
+    firstAdministratorCatalog.resolve(
+      administratorPage([administrator({ userName: 'stale-audit-selector' })]),
+    );
+    firstRoleCatalog.resolve(rolePage([role({ name: 'Stale audit role' })]));
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('fresh-audit-record');
+    expect(wrapper.text()).toContain('fresh-audit-selector');
+    expect(wrapper.text()).toContain('Fresh audit role');
+    expect(wrapper.text()).not.toContain('stale-audit-record');
+    expect(wrapper.text()).not.toContain('stale-audit-selector');
+    expect(wrapper.text()).not.toContain('Stale audit role');
+  });
+
+  it('reports clipboard failures as errors and successful copies as successes', async () => {
+    api.listSessionFamilies.mockResolvedValue(sessionPage([sessionFamily()]));
+
+    const wrapper = mountSessions();
+    await flushPromises();
+    const copyButton = wrapper.get(
+      `[aria-label="Copy administrator ID ${administratorId}"]`,
+    );
+
+    const originalClipboard = Object.getOwnPropertyDescriptor(
+      navigator,
+      'clipboard',
+    );
+    const writeText = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Clipboard permission denied.'))
+      .mockResolvedValueOnce(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      await copyButton.trigger('click');
+      await flushPromises();
+      expect(wrapper.find('[type="error"]').text()).toContain(
+        'Administrator ID could not be copied.',
+      );
+
+      await copyButton.trigger('click');
+      await flushPromises();
+      expect(wrapper.find('[type="success"]').text()).toContain(
+        'Administrator ID copied.',
+      );
+    } finally {
+      if (originalClipboard) {
+        Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      } else {
+        delete (navigator as { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
   it('renders malformed server timestamps as unavailable', async () => {
     api.listSessionFamilies.mockResolvedValue(
       sessionPage([sessionFamily({ firstCreatedAtUtc: 'not-a-timestamp' })]),
@@ -895,10 +1222,13 @@ describe('session and audit workspaces', () => {
     );
 
     const sessions = mountSessions();
-    const audit = mountAudit();
     await flushPromises();
 
     expect(sessions.text()).toContain('Unavailable');
+    sessions.unmount();
+
+    const audit = mountAudit();
+    await flushPromises();
     expect(audit.text()).toContain('Unavailable');
     await audit.get('[data-testid="view-audit-record"]').trigger('click');
     await flushPromises();

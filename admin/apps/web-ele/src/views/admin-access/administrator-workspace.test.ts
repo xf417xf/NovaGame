@@ -6,7 +6,7 @@ import type {
 } from '#/generated/admin-access/types.gen';
 
 import { flushPromises, mount } from '@vue/test-utils';
-import { defineComponent, h, ref } from 'vue';
+import { computed, defineComponent, h, inject, provide, ref } from 'vue';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -46,6 +46,10 @@ const authentication = vi.hoisted(() => ({
 const router = vi.hoisted(() => ({
   currentRoute: { value: { path: '/admin-access/administrators' } },
   replace: vi.fn(),
+}));
+
+const viewport = vi.hoisted(() => ({
+  mobile: false,
 }));
 
 vi.mock('#/api', () => api);
@@ -96,10 +100,11 @@ vi.mock('@vben/stores', async () => {
 });
 
 vi.mock('@vueuse/core', () => ({
-  useMediaQuery: () => ref(false),
+  useMediaQuery: () => ref(viewport.mobile),
 }));
 
 vi.mock('element-plus', () => {
+  const tableRowsKey = Symbol('table-rows');
   const Container = defineComponent({
     inheritAttrs: false,
     setup(_, { attrs, slots }) {
@@ -137,15 +142,20 @@ vi.mock('element-plus', () => {
     },
   });
   const ElDialog = defineComponent({
+    name: 'ElDialog',
     inheritAttrs: false,
     props: {
+      closeOnClickModal: Boolean,
+      closeOnPressEscape: Boolean,
       modelValue: Boolean,
+      showClose: { default: true, type: Boolean },
       title: { default: '', type: String },
     },
-    setup(props, { attrs, slots }) {
+    emits: ['close'],
+    setup(props, { attrs, emit, slots }) {
       return () =>
         props.modelValue
-          ? h('section', attrs, [
+          ? h('section', { ...attrs, onClose: () => emit('close') }, [
               h('h2', props.title),
               slots.default?.(),
               slots.footer?.(),
@@ -185,6 +195,19 @@ vi.mock('element-plus', () => {
         ]);
     },
   });
+  const ElDropdown = defineComponent({
+    name: 'ElDropdown',
+    inheritAttrs: false,
+    emits: ['command'],
+    setup(_, { attrs, slots }) {
+      return () =>
+        h('div', attrs, [
+          slots.default?.(),
+          slots.extra?.(),
+          slots.dropdown?.(),
+        ]);
+    },
+  });
   const ElInput = defineComponent({
     inheritAttrs: false,
     props: {
@@ -221,6 +244,9 @@ vi.mock('element-plus', () => {
   const ElPagination = defineComponent({
     name: 'ElPagination',
     inheritAttrs: false,
+    props: {
+      layout: { default: '', type: String },
+    },
     emits: [
       'current-change',
       'size-change',
@@ -268,21 +294,30 @@ vi.mock('element-plus', () => {
       data: { default: () => [], type: Array },
     },
     setup(props, { attrs, slots }) {
-      return () =>
-        h('div', attrs, [
-          slots.default?.(),
-          h('pre', JSON.stringify(props.data)),
-        ]);
+      provide(
+        tableRowsKey,
+        computed(() => props.data),
+      );
+      return () => h('div', attrs, slots.default?.());
     },
   });
   const ElTableColumn = defineComponent({
+    name: 'ElTableColumn',
     inheritAttrs: false,
     props: {
       label: { default: '', type: String },
+      width: { default: undefined, type: [Number, String] },
     },
     setup(props, { attrs, slots }) {
+      const rows = inject(
+        tableRowsKey,
+        computed(() => [] as unknown[]),
+      );
       return () =>
-        h('div', attrs, [h('span', props.label), slots.default?.({ row: {} })]);
+        h('div', attrs, [
+          h('span', props.label),
+          ...rows.value.flatMap((row) => slots.default?.({ row }) ?? []),
+        ]);
     },
   });
 
@@ -291,7 +326,7 @@ vi.mock('element-plus', () => {
     ElButton,
     ElDialog,
     ElDrawer,
-    ElDropdown: Container,
+    ElDropdown,
     ElDropdownItem: Container,
     ElDropdownMenu: Container,
     ElEmpty: Container,
@@ -493,6 +528,7 @@ function mountWorkspace() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  viewport.mobile = false;
   getAccessStore().accessCodes = [];
   operator.userId = 'current-administrator-id';
   authentication.expireSession.mockResolvedValue(undefined);
@@ -806,7 +842,11 @@ describe('administrator workspace', () => {
     const detail = administrator({
       roles: [
         { id: 'active-role-id', isActive: true, name: 'Active role' },
-        { id: 'inactive-role-id', isActive: false, name: 'Retired role' },
+        {
+          id: 'inactive-role-id',
+          isActive: false,
+          name: 'A'.repeat(64),
+        },
       ],
     });
     api.getAdministrator.mockResolvedValue(administratorDetail(detail, '"7"'));
@@ -821,7 +861,9 @@ describe('administrator workspace', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('Inactive assigned roles require review');
-    expect(wrapper.text()).toContain('Retired role (inactive)');
+    expect(wrapper.get('.long-value-tag').text()).toBe(
+      `${'A'.repeat(64)} (inactive)`,
+    );
     await wrapper
       .get('[data-testid="administrator-role-ids"]')
       .setValue(['next-role-id']);
@@ -860,6 +902,34 @@ describe('administrator workspace', () => {
       { isActive: false },
       '"7"',
     );
+  });
+
+  it('keeps an administrator state confirmation open when Escape is requested while pending', async () => {
+    const pendingCommand = deferred<ReturnType<typeof administratorDetail>>();
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.setAdministratorActiveState.mockReturnValueOnce(pendingCommand.promise);
+
+    const wrapper = mountStateDialog();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="confirm-administrator-state"]')
+      .trigger('click');
+    await flushPromises();
+
+    const dialog = wrapper.findComponent({ name: 'ElDialog' });
+    expect(dialog.props('closeOnPressEscape')).toBe(false);
+    expect(dialog.props('showClose')).toBe(false);
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined();
+
+    dialog.vm.$emit('close');
+    await flushPromises();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+
+    pendingCommand.resolve(
+      administratorDetail(administrator({ isActive: false }), '"8"'),
+    );
+    await flushPromises();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
   });
 
   it('clears a password after conflict and requires reload and review before a new reset', async () => {
@@ -1107,6 +1177,99 @@ describe('administrator workspace', () => {
       wrapper.find('[data-testid="administrator-role-filter"]').exists(),
     ).toBe(true);
     expect(wrapper.text()).not.toContain('Stale role');
+  });
+
+  it('keeps filters labelled, renders malformed timestamps safely, and compacts row commands on mobile', async () => {
+    viewport.mobile = true;
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+      rolesReadPermission,
+    ];
+    api.listAdministrators.mockResolvedValue(
+      administratorPage([
+        administrator({
+          lastLoginAtUtc: 'not-a-timestamp',
+          updatedAtUtc: 'also-not-a-timestamp',
+        }),
+      ]),
+    );
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+
+    expect(
+      wrapper
+        .get('[data-testid="administrator-search"]')
+        .attributes('aria-label'),
+    ).toBe('Search administrators');
+    expect(
+      wrapper
+        .get('[data-testid="administrator-active-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Administrator account state');
+    expect(
+      wrapper
+        .get('[data-testid="administrator-role-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Administrator role');
+    expect(wrapper.text()).toContain('Unavailable');
+    expect(
+      wrapper.find('[data-testid="administrator-mobile-actions"]').exists(),
+    ).toBe(true);
+    expect(wrapper.find('[content="Administrator actions"]').exists()).toBe(
+      true,
+    );
+    expect(
+      wrapper.find('[aria-label="Edit display name for operator"]').exists(),
+    ).toBe(false);
+    expect(
+      wrapper.findComponent({ name: 'ElPagination' }).props('layout'),
+    ).toBe('prev, pager, next');
+
+    const actionsColumn = wrapper
+      .findAllComponents({ name: 'ElTableColumn' })
+      .find((column) => column.props('label') === 'Actions');
+    if (!actionsColumn) {
+      throw new Error('The administrator actions column was not rendered.');
+    }
+    expect(actionsColumn.props('width')).toBe(92);
+
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+    ];
+    const readOnly = mountWorkspace();
+    await flushPromises();
+    expect(
+      readOnly.find('[data-testid="administrator-mobile-actions"]').exists(),
+    ).toBe(false);
+    expect(readOnly.text()).toContain('Read only');
+  });
+
+  it('routes a mobile administrator row-menu command to the matching drawer', async () => {
+    viewport.mobile = true;
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+    ];
+    api.listAdministrators.mockResolvedValue(
+      administratorPage([administrator()]),
+    );
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+
+    const rowMenu = wrapper.findComponent({ name: 'ElDropdown' });
+    expect(rowMenu.exists()).toBe(true);
+    rowMenu.vm.$emit('command', 'display-name');
+    await flushPromises();
+
+    const drawer = wrapper.findComponent(AdministratorDisplayNameDrawer);
+    expect(drawer.props('administratorId')).toBe('administrator-id');
+    expect(drawer.props('modelValue')).toBe(true);
   });
 
   it('refreshes permissions and removes management controls after a child reports forbidden', async () => {

@@ -44,6 +44,10 @@ const router = vi.hoisted(() => ({
   replace: vi.fn(),
 }));
 
+const viewport = vi.hoisted(() => ({
+  mobile: false,
+}));
+
 vi.mock('#/api', () => api);
 
 vi.mock('#/store', () => ({
@@ -85,7 +89,7 @@ vi.mock('@vben/stores', async () => {
 });
 
 vi.mock('@vueuse/core', () => ({
-  useMediaQuery: () => ref(false),
+  useMediaQuery: () => ref(viewport.mobile),
 }));
 
 vi.mock('element-plus', () => {
@@ -147,15 +151,20 @@ vi.mock('element-plus', () => {
     },
   });
   const ElDialog = defineComponent({
+    name: 'ElDialog',
     inheritAttrs: false,
     props: {
+      closeOnClickModal: Boolean,
+      closeOnPressEscape: Boolean,
       modelValue: Boolean,
+      showClose: { default: true, type: Boolean },
       title: { default: '', type: String },
     },
-    setup(props, { attrs, slots }) {
+    emits: ['close'],
+    setup(props, { attrs, emit, slots }) {
       return () =>
         props.modelValue
-          ? h('section', attrs, [
+          ? h('section', { ...attrs, onClose: () => emit('close') }, [
               h('h2', props.title),
               slots.default?.(),
               slots.footer?.(),
@@ -195,6 +204,19 @@ vi.mock('element-plus', () => {
         ]);
     },
   });
+  const ElDropdown = defineComponent({
+    name: 'ElDropdown',
+    inheritAttrs: false,
+    emits: ['command'],
+    setup(_, { attrs, slots }) {
+      return () =>
+        h('div', attrs, [
+          slots.default?.(),
+          slots.extra?.(),
+          slots.dropdown?.(),
+        ]);
+    },
+  });
   const ElInput = defineComponent({
     inheritAttrs: false,
     props: {
@@ -229,6 +251,9 @@ vi.mock('element-plus', () => {
   const ElPagination = defineComponent({
     name: 'ElPagination',
     inheritAttrs: false,
+    props: {
+      layout: { default: '', type: String },
+    },
     emits: [
       'current-change',
       'size-change',
@@ -308,7 +333,7 @@ vi.mock('element-plus', () => {
     ElCheckboxGroup,
     ElDialog,
     ElDrawer,
-    ElDropdown: Container,
+    ElDropdown,
     ElDropdownItem: Container,
     ElDropdownMenu: Container,
     ElEmpty: Container,
@@ -484,6 +509,7 @@ function mountStateDialog(
 }
 
 beforeEach(() => {
+  viewport.mobile = false;
   getAccessStore().accessCodes = [
     accessPermission,
     rolesManagePermission,
@@ -906,6 +932,28 @@ describe('roles and permissions workspace', () => {
     ).toBeUndefined();
   });
 
+  it('keeps long built-in role and permission values in wrapping tags', async () => {
+    const longRoleName = 'R'.repeat(64);
+    const longPermissionName = `Operations.${'Permission'.repeat(12)}`;
+    api.getAdminRole.mockResolvedValue(
+      roleDetail(
+        role({
+          isBuiltIn: true,
+          name: longRoleName,
+          permissionNames: [longPermissionName],
+        }),
+      ),
+    );
+
+    const rename = mountRenameDrawer();
+    await flushPromises();
+    expect(rename.get('.long-value-tag').text()).toBe(longRoleName);
+
+    const permissions = mountPermissionsDrawer();
+    await flushPromises();
+    expect(permissions.get('.long-value-tag').text()).toBe(longPermissionName);
+  });
+
   it('uses the loaded ETag for an explicit custom-role active-state confirmation', async () => {
     const wrapper = mountStateDialog();
     await flushPromises();
@@ -917,6 +965,30 @@ describe('roles and permissions workspace', () => {
       { isActive: false },
       '"7"',
     );
+  });
+
+  it('keeps a role state confirmation open when Escape is requested while pending', async () => {
+    const pendingCommand = deferred<ReturnType<typeof roleDetail>>();
+    api.getAdminRole.mockResolvedValue(roleDetail());
+    api.setAdminRoleActiveState.mockReturnValueOnce(pendingCommand.promise);
+
+    const wrapper = mountStateDialog();
+    await flushPromises();
+    await wrapper.get('[data-testid="confirm-role-state"]').trigger('click');
+    await flushPromises();
+
+    const dialog = wrapper.findComponent({ name: 'ElDialog' });
+    expect(dialog.props('closeOnPressEscape')).toBe(false);
+    expect(dialog.props('showClose')).toBe(false);
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined();
+
+    dialog.vm.$emit('close');
+    await flushPromises();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+
+    pendingCommand.resolve(roleDetail(role({ isActive: false }), '"8"'));
+    await flushPromises();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
   });
 
   it('reconciles permissions after a role change and removes controls that were revoked', async () => {
@@ -1054,5 +1126,59 @@ describe('roles and permissions workspace', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('New result');
     expect(wrapper.text()).not.toContain('Old result');
+  });
+
+  it('keeps filters labelled, renders malformed timestamps safely, and compacts row commands on mobile', async () => {
+    viewport.mobile = true;
+    api.listAdminRoles.mockResolvedValue(
+      rolePage([
+        roleSummary({ name: 'Operators', updatedAtUtc: 'not-a-timestamp' }),
+      ]),
+    );
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+
+    expect(
+      wrapper.get('[data-testid="role-search"]').attributes('aria-label'),
+    ).toBe('Search roles');
+    expect(
+      wrapper
+        .get('[data-testid="role-active-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Role state');
+    expect(
+      wrapper
+        .get('[data-testid="role-built-in-filter"]')
+        .attributes('aria-label'),
+    ).toBe('Role kind');
+    expect(wrapper.text()).toContain('Unavailable');
+    expect(wrapper.find('[data-testid="role-mobile-actions"]').exists()).toBe(
+      true,
+    );
+    expect(wrapper.find('[content="Role actions"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="Rename Operators"]').exists()).toBe(
+      false,
+    );
+    expect(
+      wrapper.findComponent({ name: 'ElPagination' }).props('layout'),
+    ).toBe('prev, pager, next');
+  });
+
+  it('routes a mobile role row-menu command to the matching drawer', async () => {
+    viewport.mobile = true;
+    api.listAdminRoles.mockResolvedValue(rolePage([roleSummary()]));
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+
+    const rowMenu = wrapper.findComponent({ name: 'ElDropdown' });
+    expect(rowMenu.exists()).toBe(true);
+    rowMenu.vm.$emit('command', 'name');
+    await flushPromises();
+
+    const drawer = wrapper.findComponent(RoleRenameDrawer);
+    expect(drawer.props('modelValue')).toBe(true);
+    expect(drawer.props('roleId')).toBe('role-id');
   });
 });

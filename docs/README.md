@@ -21,13 +21,13 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone at
-`M35-05`, and only `M35-05-T05` is executable after T04 completed the session-family and
-audit-history workspaces, including stale invalid-filter response suppression and malformed-date
-rendering safeguards. The authorized `administrator-management` capability extends the existing
-NovaGame-owned `Operations/AdminAccess` capability through administrator, role and permission,
-session, audit, and generic Vben `web-ele` operations. The active task authorizes only
-accessibility, stable responsive layout, stale-response protection, and focused frontend regression
-coverage. It does not authorize M35-05-T06 or later work, SwordMaster changes, extraction, M4, or
+`M35-05`, and only `M35-05-T06` is executable. M35-05-T05 completed the final accessibility,
+responsive-layout, stale-response, and frontend-regression review, including a nonwrapping
+`Read only` state in a 92px mobile session action cell. The authorized
+`administrator-management` capability extends the existing NovaGame-owned
+`Operations/AdminAccess` capability through administrator, role and permission, session, audit,
+and generic Vben `web-ele` operations. The active task authorizes only M35-05 governance
+verification. It does not authorize M35-06 or later work, SwordMaster changes, extraction, M4, or
 NovaCore changes. M4 remains `Unscheduled`.
 
 When sources appear to conflict, stop and resolve the conflict before implementation. Do not silently weaken a repository rule or an active goal acceptance criterion.

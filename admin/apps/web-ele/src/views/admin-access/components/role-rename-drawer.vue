@@ -256,7 +256,9 @@ onBeforeUnmount(() => {
           title="Built-in roles are read-only."
           type="info"
         />
-        <ElTag type="info">{{ detail.data.name }}</ElTag>
+        <ElTag class="long-value-tag" type="info">
+          {{ detail.data.name }}
+        </ElTag>
       </template>
 
       <ElForm v-else-if="detail" label-position="top">
@@ -295,7 +297,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
   min-height: 220px;
+}
+
+.long-value-tag {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .drawer-footer {

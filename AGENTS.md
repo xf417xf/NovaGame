@@ -72,10 +72,12 @@ M35-04 is complete after final sequential server, database, authentication, mana
 documentation, repository, and whitespace verification. M35-05-T03 completed the custom-role and
 registered-permission workspace, including permission reconciliation and stale-catalog correction;
 M35-05-T04 completed the session-family and audit-history workspaces with focused component
-coverage. M35-05 is active only at `M35-05-T05`. Follow `docs/goals/m3.5.md`. The active task
-authorizes only accessibility, stable responsive layout, stale-response protection, and focused
-frontend regression coverage. It does not authorize M35-05-T06 or later work, SwordMaster changes,
-an admin-shell extraction, another capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
+coverage. M35-05-T05 completed the final accessibility, responsive-layout, stale-response, and
+frontend-regression review, including a nonwrapping `Read only` state in a 92px mobile session
+action cell. M35-05 is active only at `M35-05-T06`. Follow `docs/goals/m3.5.md`. The active task
+authorizes only M35-05 governance verification. It does not authorize M35-06 or later work,
+SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
+remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

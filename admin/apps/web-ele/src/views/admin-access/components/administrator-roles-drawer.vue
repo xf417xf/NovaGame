@@ -338,6 +338,7 @@ onBeforeUnmount(() => {
             <ElTag
               v-for="role in inactiveAssignedRoles"
               :key="role.id"
+              class="long-value-tag"
               type="warning"
             >
               {{ role.name ?? role.id }} (inactive)
@@ -411,6 +412,19 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+.long-value-tag,
+.read-only-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.long-value-tag {
+  max-width: 100%;
+  height: auto;
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .read-only-value {
