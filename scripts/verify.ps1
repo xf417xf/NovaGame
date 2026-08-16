@@ -4442,6 +4442,160 @@ function Test-Documentation {
         }
     }
 
+    if ($m35TaskStatuses["M35-06-T01"] -in @(
+            "in_progress", "blocked", "complete")) {
+        $m356EvidenceHeading = "## M35-06 Real Server Acceptance Evidence Record"
+        $m356EvidenceMatches = [regex]::Matches(
+            $m35Goal.Content,
+            '(?ms)^## M35-06 Real Server Acceptance Evidence Record\r?\n(?<body>.*?)(?=^##\s+|\z)')
+        Assert-Condition `
+            ($m356EvidenceMatches.Count -eq 1) `
+            "M35-06-T01 requires exactly one real-server acceptance evidence record."
+        $m356Evidence = $m356EvidenceMatches[0].Groups["body"].Value
+        $m35VerificationContractIndex = $m35Goal.Content.IndexOf(
+            "## M35-02 Frozen Verification Contract",
+            [StringComparison]::Ordinal)
+        $m356EvidenceIndex = $m35Goal.Content.IndexOf(
+            $m356EvidenceHeading,
+            [StringComparison]::Ordinal)
+        $m35StageStatusIndex = $m35Goal.Content.IndexOf(
+            "## Stage Status",
+            [StringComparison]::Ordinal)
+        Assert-Condition `
+            ($m35VerificationContractIndex -ge 0 -and
+            $m356EvidenceIndex -gt $m35VerificationContractIndex -and
+            $m35StageStatusIndex -gt $m356EvidenceIndex) `
+            "M35-06 real-server evidence must follow the frozen M35-02 verification contract and precede Stage Status."
+
+        $expectedM356Headings = @(
+            "### Evidence Rules",
+            "### Requirement-To-Evidence Matrix",
+            "### Exact M35-06 Acceptance Commands",
+            "### Frozen T02 Boundary"
+        )
+        $actualM356Headings = @(
+            [regex]::Matches(
+                $m356Evidence,
+                '(?m)^### [^\r\n]+$') |
+                ForEach-Object { $_.Value })
+        Assert-Condition `
+            ($actualM356Headings.Count -eq $expectedM356Headings.Count) `
+            "M35-06 real-server evidence must contain exactly four subsections."
+        for ($m356HeadingIndex = 0;
+            $m356HeadingIndex -lt $expectedM356Headings.Count;
+            $m356HeadingIndex++) {
+            Assert-Condition `
+                ($actualM356Headings[$m356HeadingIndex] -eq
+                    $expectedM356Headings[$m356HeadingIndex]) `
+                "M35-06 real-server evidence subsections must remain exact and ordered."
+        }
+
+        Assert-Condition `
+            $m356Evidence.Contains(
+                "| ID | Acceptance requirement | Required boundary | Planned evidence | Exact verification command | Owning task |") `
+            "M35-06 real-server evidence must retain its exact matrix header."
+        $m356EvidenceRows = @(
+            [regex]::Matches(
+                $m356Evidence,
+                '(?m)^\|[ \t]*(?<id>M356-AE-\d{2})[ \t]*\|[ \t]*(?<requirement>[^|\r\n]+?)[ \t]*\|[ \t]*(?<boundary>[^|\r\n]+?)[ \t]*\|[ \t]*(?<evidence>[^|\r\n]+?)[ \t]*\|[ \t]*(?<command>[^|\r\n]+?)[ \t]*\|[ \t]*(?<owner>[^|\r\n]+?)[ \t]*\|[ \t]*$'))
+        $expectedM356EvidenceIds = @(
+            "M356-AE-01", "M356-AE-02", "M356-AE-03",
+            "M356-AE-04", "M356-AE-05", "M356-AE-06")
+        Assert-Condition `
+            ($m356EvidenceRows.Count -eq $expectedM356EvidenceIds.Count) `
+            "M35-06 real-server evidence must define exactly six matrix rows."
+        for ($m356EvidenceIndex = 0;
+            $m356EvidenceIndex -lt $expectedM356EvidenceIds.Count;
+            $m356EvidenceIndex++) {
+            $m356EvidenceRow = $m356EvidenceRows[$m356EvidenceIndex]
+            Assert-Condition `
+                ($m356EvidenceRow.Groups["id"].Value -eq
+                    $expectedM356EvidenceIds[$m356EvidenceIndex]) `
+                "M35-06 real-server evidence rows must remain M356-AE-01 through M356-AE-06 in order."
+            foreach ($m356EvidenceField in @(
+                    "requirement", "boundary", "evidence", "command", "owner")) {
+                Assert-Condition `
+                    (-not [string]::IsNullOrWhiteSpace(
+                        $m356EvidenceRow.Groups[$m356EvidenceField].Value)) `
+                    "M35-06 evidence '$($m356EvidenceRow.Groups['id'].Value)' has an empty '$m356EvidenceField' field."
+            }
+            Assert-Condition `
+                ($m356EvidenceRow.Groups["command"].Value.Trim() -eq
+                    '`pwsh -NoProfile -File scripts/verify.ps1 -Scope AdminManagement`') `
+                "M35-06 evidence '$($m356EvidenceRow.Groups['id'].Value)' must use the qualifying AdminManagement command."
+            Assert-Condition `
+                ($m356EvidenceRow.Groups["owner"].Value.Trim() -eq "M35-06-T02") `
+                "M35-06 evidence '$($m356EvidenceRow.Groups['id'].Value)' must remain owned by M35-06-T02."
+        }
+
+        $expectedM356EvidenceTokens = @(
+            [pscustomobject]@{ Tokens = @("MySQL 8.4", "NovaGame.DbMigrator", "/api/auth/login", "NovaGame.Api") },
+            [pscustomobject]@{ Tokens = @("custom role", "registered permissions", "administrator", "ETags") },
+            [pscustomobject]@{ Tokens = @("/api/auth/codes", "/api/user/info", "protected management route", "immediately") },
+            [pscustomobject]@{ Tokens = @("Password reset", "deactivation", "refresh families", "redacted", "15-minute") },
+            [pscustomobject]@{ Tokens = @("created by HTTP", "bounded filters", "ordering", "paging", "durable MySQL reload", "audit evidence") },
+            [pscustomobject]@{ Tokens = @("redacted", "17 routes", "envelopes", "ETags", "idempotency", "OpenAPI") }
+        )
+        for ($m356EvidenceIndex = 0;
+            $m356EvidenceIndex -lt $expectedM356EvidenceTokens.Count;
+            $m356EvidenceIndex++) {
+            $m356EvidenceRowText = $m356EvidenceRows[$m356EvidenceIndex].Value
+            foreach ($requiredM356EvidenceToken in
+                $expectedM356EvidenceTokens[$m356EvidenceIndex].Tokens) {
+                Assert-Condition `
+                    $m356EvidenceRowText.Contains($requiredM356EvidenceToken) `
+                    "M35-06 evidence row '$($m356EvidenceRows[$m356EvidenceIndex].Groups['id'].Value)' is missing '$requiredM356EvidenceToken'."
+            }
+        }
+
+        $m356NormalizedEvidence = $m356Evidence.Replace("`r`n", "`n")
+        $expectedM356T01CommandBlock = @'
+pwsh -NoProfile -File scripts/verify.ps1 -Scope Documentation
+pwsh -NoProfile -File scripts/verify.ps1 -Scope Repository
+pwsh -NoProfile -Command "[scriptblock]::Create((Get-Content -Raw scripts/verify.ps1)) | Out-Null"
+git diff --check
+'@
+        Assert-Condition `
+            $m356NormalizedEvidence.Contains($expectedM356T01CommandBlock) `
+            "M35-06-T01 must retain its exact ordered documentation-governance commands."
+        foreach ($requiredM356EvidenceText in @(
+                'Existing focused Domain, Application, persistence, API, and `WebApplicationFactory` tests remain',
+                'real out-of-process `NovaGame.Api` Kestrel',
+                "production registrations",
+                "disposable MySQL 8.4",
+                "Only the configured bootstrap administrator may be seeded.",
+                "WebApplicationFactory",
+                "mock backend",
+                "response interception",
+                "synthesized permissions",
+                "repository replacement",
+                "second DbContext",
+                "direct MySQL management-state mutation",
+                "Browser or Vben evidence is not T02 evidence.",
+                "Raw MySQL is read-only for durable-state assertions after the relevant HTTP command.",
+                "Test-only fault injection is reserved for T03",
+                "denial order and",
+                "self-lockout and built-in-role protection",
+                "stale revisions and",
+                "replay, fingerprint conflict, and concurrent commands",
+                "secret/log redaction",
+                "transactional audit-failure rollback",
+                "AdminAccessManagementComposedApiAcceptanceTests",
+                "M35-06-T02 adds this qualifying composed-server command")) {
+            Assert-Condition `
+                $m356Evidence.Contains($requiredM356EvidenceText) `
+                "M35-06 real-server evidence is missing '$requiredM356EvidenceText'."
+        }
+
+        $m356T02AcceptancePath = `
+            "server/tests/NovaGame.EntityFrameworkCore.Tests/AdminAccessManagementComposedApiAcceptanceTests.cs"
+        if ($m35TaskStatuses["M35-06-T02"] -eq "pending") {
+            Assert-Condition `
+                (-not (Test-Path -LiteralPath $m356T02AcceptancePath)) `
+                "M35-06-T02 acceptance source appeared before T02 activation."
+        }
+    }
+
     $m35ImmutableConsumerPaths = @(
         "clients/cocos",
         "samples/SwordMaster",

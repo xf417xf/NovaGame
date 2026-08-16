@@ -154,12 +154,14 @@ rendering safeguards. M35-05-T05 completed the final accessibility, responsive-l
 stale-response, and frontend-regression review, including a nonwrapping `Read only` state in a
 92px mobile session action cell. M35-05-T06 completed sequential management-admin,
 checked-contract, generic Admin, Documentation, Repository, and whitespace verification after a
-brittle static permission-source verifier check was corrected. M35-05 is complete. M3.5 is active
-at `M35-06`, with only `M35-06-T01` executable. The user separately authorized the NovaGame-owned
-`administrator-management` capability on 2026-08-13. M35-06-T01 authorizes only freezing the
-exact real-server requirement-to-evidence matrix and ordered acceptance commands. This
-authorization does not come from M3 and does not authorize M35-06-T02 or later work, SwordMaster
-changes, extraction, M4, or NovaCore changes.
+brittle static permission-source verifier check was corrected. M35-05 is complete. M35-06-T01
+froze and verified the exact real-server requirement-to-evidence matrix, ordered acceptance
+commands, T02 boundary, and premature-source guard. M3.5 is active at `M35-06`, with only
+`M35-06-T02` executable. The user separately authorized the NovaGame-owned
+`administrator-management` capability on 2026-08-13. M35-06-T02 authorizes only its non-mock
+composed API and disposable-MySQL acceptance fixture. This authorization does not come from M3
+and does not authorize M35-06-T03 or later work, SwordMaster changes, extraction, M4, or NovaCore
+changes.
 
 ### Goal
 

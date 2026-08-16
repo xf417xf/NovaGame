@@ -34,13 +34,14 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5](docs/goals/m3.5.md) is now the only active repository milestone at `M35-06`, with only
-`M35-06-T01` executable. M35-05 completed the NovaGame-owned `Operations/AdminAccess`
+`M35-06-T02` executable. M35-05 completed the NovaGame-owned `Operations/AdminAccess`
 `administrator-management` workspace across .NET, MySQL 8.4, and the generic Vben Admin 5
 `web-ele` application, including its final management-admin, checked-contract, generic Admin,
-Documentation, Repository, and whitespace verification. The active task authorizes only freezing
-the exact real-server requirement-to-evidence matrix and ordered acceptance commands. It does not
-authorize M35-06-T02 or later tasks, SwordMaster, extraction, M4, or NovaCore changes; M4 remains
-`Unscheduled`.
+Documentation, Repository, and whitespace verification. M35-06-T01 froze and verified the exact
+real-server requirement-to-evidence matrix, ordered acceptance commands, T02 boundary, and
+premature-source guard. The active task authorizes only its non-mock composed API and
+disposable-MySQL acceptance fixture. It does not authorize M35-06-T03 or later tasks, SwordMaster,
+extraction, M4, or NovaCore changes; M4 remains `Unscheduled`.
 
 ## Prerequisites
 
