@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
 using NovaCore.BuildingBlocks.Correlation;
+using NovaCore.BuildingBlocks.Exceptions;
 using NovaCore.Shared.Results;
 using NovaGame.Application.Contracts.Operations.AdminAccess;
 using NovaGame.Domain.Shared.Operations.AdminAccess;
@@ -9,6 +11,8 @@ namespace NovaGame.Api.Operations.AdminAccess;
 
 public sealed class AdminAccessManagementExceptionFilter : IExceptionFilter
 {
+    private const string UnexpectedFailureMessage = "An internal server error occurred.";
+
     private readonly ILogger<AdminAccessManagementExceptionFilter> _logger;
     private readonly ICorrelationIdAccessor _correlationIdAccessor;
 
@@ -22,8 +26,23 @@ public sealed class AdminAccessManagementExceptionFilter : IExceptionFilter
 
     public void OnException(ExceptionContext context)
     {
+        if (context.ActionDescriptor is not ControllerActionDescriptor actionDescriptor ||
+            actionDescriptor.ControllerTypeInfo.AsType() != typeof(AdminAccessManagementController))
+        {
+            return;
+        }
+
         if (context.Exception is not AdminAccessManagementException exception)
         {
+            _logger.LogError(
+                "Administrator management request failed unexpectedly at correlation {CorrelationId}.",
+                _correlationIdAccessor.CorrelationId);
+            context.Result = new ObjectResult(
+                ApiResponse.Failure(NovaCoreErrorCodes.InternalServerError, UnexpectedFailureMessage))
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+            context.ExceptionHandled = true;
             return;
         }
 

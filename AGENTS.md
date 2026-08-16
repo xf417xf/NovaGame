@@ -79,10 +79,11 @@ Documentation, Repository, and whitespace verification after correcting a brittl
 permission-source verifier check. M35-05 is complete. M35-06-T01 froze and verified the exact
 real-server requirement-to-evidence matrix, ordered acceptance commands, T02 boundary, and
 premature-source guard. M35-06-T02 completed the real composed API and disposable-MySQL
-acceptance. M3.5 is active only at `M35-06-T03`. Follow `docs/goals/m3.5.md`. The active task
-authorizes only the frozen security-acceptance evidence defined by that record. It does not
-authorize M35-06-T04 or later work, SwordMaster changes, an admin-shell extraction, another
-capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
+acceptance, and M35-06-T03 completed the frozen real-server security acceptance. M3.5 is active
+only at `M35-06-T04`. Follow `docs/goals/m3.5.md`. The active task authorizes only cumulative
+server verification and cleanup governance. It does not authorize M35-07 or later work,
+SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
+remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

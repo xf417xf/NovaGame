@@ -9558,6 +9558,8 @@ function Invoke-AdminManagementComposedApiAcceptance {
     $connectionString = $null
     $bootstrapUserName = $null
     $bootstrapPassword = $null
+    $dbMigratorStandardOutputPath = $null
+    $dbMigratorStandardErrorPath = $null
     $apiStandardOutputPath = $null
     $apiStandardErrorPath = $null
     $safeApiFailureTypes = @()
@@ -9584,7 +9586,11 @@ function Invoke-AdminManagementComposedApiAcceptance {
         "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_PROJECT_NAME",
         "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DISPOSABLE_MARKER",
         "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_USER_NAME",
-        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_PASSWORD"
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_PASSWORD",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_API_STDOUT_PATH",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_API_STDERR_PATH",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DBMIGRATOR_STDOUT_PATH",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DBMIGRATOR_STDERR_PATH"
     )
     $previousRuntimeEnvironment = Get-NovaGameProcessEnvironmentSnapshot `
         -Names $runtimeEnvironmentNames
@@ -9758,6 +9764,10 @@ function Invoke-AdminManagementComposedApiAcceptance {
             NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DISPOSABLE_MARKER = $composedMarker
             NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_USER_NAME = $bootstrapUserName
             NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_PASSWORD = $bootstrapPassword
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_API_STDOUT_PATH = $apiStandardOutputPath
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_API_STDERR_PATH = $apiStandardErrorPath
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DBMIGRATOR_STDOUT_PATH = $dbMigratorStandardOutputPath
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DBMIGRATOR_STDERR_PATH = $dbMigratorStandardErrorPath
         }
         foreach ($entry in $composedTestEnvironment.GetEnumerator()) {
             [Environment]::SetEnvironmentVariable(
