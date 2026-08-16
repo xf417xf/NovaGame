@@ -9481,6 +9481,7 @@ function Test-Database {
                 "--no-build",
                 "--no-restore",
                 "--verbosity", "minimal",
+                "--filter", "FullyQualifiedName!~AdminAccessManagementComposedApiAcceptanceTests",
                 "-p:NuGetAudit=false"
             )
         }

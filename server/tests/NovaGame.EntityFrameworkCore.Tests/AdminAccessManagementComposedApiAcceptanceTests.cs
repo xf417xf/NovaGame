@@ -977,7 +977,7 @@ public sealed class AdminAccessManagementComposedApiAcceptanceTests
         sensitiveValues.Add(new MySqlConnectionStringBuilder(_mySqlConnectionString).Password);
         sensitiveValues.AddRange(await ReadStoredSensitiveRepresentationsAsync());
         AssertManagementResponsesAreRedacted(sensitiveValues);
-        await AssertComposedLogsAreRedactedAsync(sensitiveValues);
+        await AssertComposedLogsAreRedactedAsync(sensitiveValues, faultCorrelationId);
     }
 
     private static void RecordAuthenticationSecrets(
@@ -1606,8 +1606,11 @@ public sealed class AdminAccessManagementComposedApiAcceptanceTests
         return values;
     }
 
-    private async Task AssertComposedLogsAreRedactedAsync(IReadOnlyCollection<string> sensitiveValues)
+    private async Task AssertComposedLogsAreRedactedAsync(
+        IReadOnlyCollection<string> sensitiveValues,
+        string faultCorrelationId)
     {
+        var foundFaultCorrelationContext = false;
         foreach (var logPath in _composedLogPaths)
         {
             Assert.True(File.Exists(logPath), "A composed process log is missing.");
@@ -1642,7 +1645,17 @@ public sealed class AdminAccessManagementComposedApiAcceptanceTests
                     content,
                     @"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
                 "A composed process log exposed a JWT-shaped token.");
+
+            foundFaultCorrelationContext |= normalizedContent.Contains(
+                "Administrator management request failed unexpectedly at correlation",
+                StringComparison.Ordinal) && normalizedContent.Contains(
+                faultCorrelationId,
+                StringComparison.Ordinal);
         }
+
+        Assert.True(
+            foundFaultCorrelationContext,
+            "The composed API logs did not include the fault correlation context.");
     }
 
     private void AssertManagementResponsesAreRedacted(IReadOnlyCollection<string> sensitiveValues)
