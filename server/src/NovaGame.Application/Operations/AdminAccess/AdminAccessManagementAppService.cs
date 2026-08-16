@@ -663,6 +663,10 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
 
         EnsureRoleSetMatches(affectedRoleIds, lockedRoles);
         var role = lockedRoles.Single(candidate => candidate.Id == roleId);
+        var permissions = await _repository.GetRolePermissionsForUpdateAsync(
+            role.Id,
+            cancellationToken);
+        EnsurePermissionRowsMatch(role, permissions);
         var revalidatedRole = await _repository.FindRoleByNormalizedNameAsync(
             roleName.NormalizedValue,
             cancellationToken);
@@ -708,7 +712,7 @@ public sealed class AdminAccessManagementAppService : IAdminAccessManagementAppS
         var now = GetUtcNow();
 
         await using var unitOfWork = await BeginUnitOfWorkAsync(cancellationToken);
-        var role = await GetRoleForUpdateAsync(roleId, lockPermissions: false, cancellationToken);
+        var role = await GetRoleForUpdateAsync(roleId, lockPermissions: true, cancellationToken);
         var changed = TranslateDomain(() => role.SetActiveState(
             expectedRevision,
             request.IsActive,

@@ -11,7 +11,9 @@ public sealed class AdministratorRoleConfiguration : IEntityTypeConfiguration<Ad
         builder.ToTable("admin_role_memberships");
         builder.HasKey(membership => membership.Id);
 
-        builder.Property(membership => membership.Id).HasColumnType("char(36)");
+        builder.Property(membership => membership.Id)
+            .HasColumnType("char(36)")
+            .ValueGeneratedNever();
         builder.Property(membership => membership.AdministratorId).HasColumnType("char(36)");
         builder.Property(membership => membership.RoleId).HasColumnType("char(36)");
         builder.Property(membership => membership.AssignedByAdministratorId).HasColumnType("char(36)");

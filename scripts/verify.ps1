@@ -8767,13 +8767,13 @@ function Test-Repository {
     Assert-Condition `
         ([regex]::Matches(
             $verifyScript,
-            '(?m)^\s*\$previous(?:Seed|Runtime)?Environment\s*=\s*Get-NovaGameProcessEnvironmentSnapshot\s*`?$').Count -eq 4) `
-        "Verification must use null-preserving snapshots in all four local lifecycles."
+            '(?m)^\s*\$previous(?:Seed|Runtime)?Environment\s*=\s*Get-NovaGameProcessEnvironmentSnapshot\s*`?$').Count -eq 5) `
+        "Verification must use null-preserving snapshots in all five local lifecycles."
     Assert-Condition `
         ([regex]::Matches(
             $verifyScript,
-            '(?m)^\s*Restore-NovaGameProcessEnvironmentSnapshot(?:\s|$)').Count -eq 4) `
-        "Verification must use null-preserving restoration in all four local lifecycles."
+            '(?m)^\s*Restore-NovaGameProcessEnvironmentSnapshot(?:\s|$)').Count -eq 5) `
+        "Verification must use null-preserving restoration in all five local lifecycles."
 
     $readme = Get-Content -LiteralPath "README.md" -Raw
     foreach ($requiredCommand in @(
@@ -9527,6 +9527,450 @@ function Test-Database {
     Write-Output "Database verification passed."
 }
 
+function Invoke-AdminManagementComposedApiAcceptance {
+    param(
+        [Parameter(Mandatory)][string]$TestProject,
+        [Parameter(Mandatory)][string]$Filter,
+        [Parameter(Mandatory)][string]$ResultName
+    )
+
+    Invoke-CheckedCommand "docker" @("compose", "version")
+    Invoke-CheckedCommand "docker" @("info", "--format", "{{.ServerVersion}}")
+
+    $projectName = "novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $adminManagementRoot = Join-Path $repositoryRoot ".local\admin-management"
+    $runRoot = Join-Path $adminManagementRoot $projectName
+    $testEnvironmentFile = Join-Path $runRoot "database.env"
+    $composedMarker = "novagame-admin-management-composed-v1"
+    $operationError = $null
+    $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+    $cleanupRequired = $false
+    $processJobHandle = [IntPtr]::Zero
+    $ownedProcessIdentities = @()
+    $dbMigratorProcess = $null
+    $apiProcess = $null
+    $previousAdminAccessEnvironment = $null
+    $previousDatabaseEnvironment = $null
+    $testEnvironment = $null
+    $composeArguments = @()
+    $publishedPort = 0
+    $apiPort = 0
+    $connectionString = $null
+    $bootstrapUserName = $null
+    $bootstrapPassword = $null
+    $apiStandardOutputPath = $null
+    $apiStandardErrorPath = $null
+    $safeApiFailureTypes = @()
+    $adminAccessEnvironment = [ordered]@{}
+    $previousConnectionValues = [ordered]@{
+        NOVAGAME_TEST_MYSQL_CONNECTION_STRING = $env:NOVAGAME_TEST_MYSQL_CONNECTION_STRING
+        NOVAGAME_MYSQL_MIGRATION_CONNECTION_STRING = $env:NOVAGAME_MYSQL_MIGRATION_CONNECTION_STRING
+        ConnectionStrings__Default = $env:ConnectionStrings__Default
+    }
+    $runtimeEnvironmentNames = @(
+        "ASPNETCORE_URLS",
+        "ASPNETCORE_ENVIRONMENT",
+        "DOTNET_ENVIRONMENT",
+        "NovaCore__Web__ForwardedHeaders__IsEnabled",
+        "NovaCore__Web__ForwardedHeaders__KnownProxies__0",
+        "NovaGame__AdminAccess__Jwt__Issuer",
+        "NovaGame__AdminAccess__Jwt__Audience",
+        "NovaGame__AdminAccess__Jwt__ClockSkew",
+        "NovaGame__AdminAccess__LoginRateLimit__PermitLimit",
+        "NovaGame__AdminAccess__LoginRateLimit__Window",
+        "NovaGame__AdminAccess__LoginRateLimit__QueueLimit",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_API_URL",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_MYSQL_CONNECTION_STRING",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_PROJECT_NAME",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DISPOSABLE_MARKER",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_USER_NAME",
+        "NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_PASSWORD"
+    )
+    $previousRuntimeEnvironment = Get-NovaGameProcessEnvironmentSnapshot `
+        -Names $runtimeEnvironmentNames
+
+    try {
+        New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+        $processJobHandle = New-NovaGameProcessJob
+        Write-NovaGameDatabaseEnvironmentFile `
+            -Path $testEnvironmentFile `
+            -Database "novagame_composed" `
+            -User "novagame_composed" `
+            -Port 0 `
+            -AllowEphemeralPort
+        $testEnvironment = Read-NovaGameDatabaseEnvironment `
+            -Path $testEnvironmentFile `
+            -AllowEphemeralPort
+        $composeArguments = Get-NovaGameComposeArguments `
+            -RepositoryRoot $repositoryRoot `
+            -EnvironmentFile $testEnvironmentFile `
+            -ProjectName $projectName
+        $previousDatabaseEnvironment = Set-NovaGameDatabaseProcessEnvironment `
+            -Values $testEnvironment
+
+        Invoke-CheckedCommand "docker" ($composeArguments + @("config", "--quiet"))
+        $cleanupRequired = $true
+        Invoke-CheckedCommand "docker" ($composeArguments + @(
+            "up", "--detach", "--wait", "--wait-timeout", "180", "mysql"
+        ))
+
+        $portOutput = Invoke-CheckedCommandCapture "docker" `
+            ($composeArguments + @("port", "mysql", "3306"))
+        $publishedEndpoint = @(
+            $portOutput |
+                Where-Object { $_ -match ":\d+\s*$" } |
+                Select-Object -Last 1)
+        Assert-Condition `
+            ($publishedEndpoint.Count -eq 1) `
+            "Unable to resolve the composed API MySQL host port."
+        $publishedPort = [int]([regex]::Match(
+                [string]$publishedEndpoint[0],
+                ":(\d+)\s*$").Groups[1].Value)
+        Assert-Condition `
+            ($publishedPort -gt 0) `
+            "Docker did not allocate a valid composed API MySQL host port."
+
+        $connectionString = New-NovaGameMySqlConnectionString `
+            -Environment $testEnvironment `
+            -Port $publishedPort
+        $env:NOVAGAME_TEST_MYSQL_CONNECTION_STRING = $connectionString
+        $env:NOVAGAME_MYSQL_MIGRATION_CONNECTION_STRING = $connectionString
+        $env:ConnectionStrings__Default = $connectionString
+
+        $bootstrapUserName = "composed-admin"
+        $bootstrapPassword = "Composed-$projectName-Password-123!"
+        $adminAccessEnvironment = [ordered]@{
+            NovaGame__AdminAccess__Jwt__SigningKey = New-NovaGameAdminAccessSigningKey
+            NovaGame__AdminAccess__Seed__UserName = $bootstrapUserName
+            NovaGame__AdminAccess__Seed__Password = $bootstrapPassword
+            NovaGame__AdminAccess__Seed__DisplayName = "Composed Administrator"
+        }
+        $previousAdminAccessEnvironment = Set-NovaGameAdminAccessProcessEnvironment `
+            -Values $adminAccessEnvironment
+        $runtimeSettings = [ordered]@{
+            ASPNETCORE_ENVIRONMENT = "Development"
+            DOTNET_ENVIRONMENT = "Development"
+            NovaCore__Web__ForwardedHeaders__IsEnabled = "true"
+            NovaCore__Web__ForwardedHeaders__KnownProxies__0 = "127.0.0.1"
+            NovaGame__AdminAccess__Jwt__Issuer = "NovaGame.AdminManagement.Composed"
+            NovaGame__AdminAccess__Jwt__Audience = "NovaGame.AdminManagement.Composed"
+            NovaGame__AdminAccess__Jwt__ClockSkew = "00:00:00"
+            NovaGame__AdminAccess__LoginRateLimit__PermitLimit = "100"
+            NovaGame__AdminAccess__LoginRateLimit__Window = "00:01:00"
+            NovaGame__AdminAccess__LoginRateLimit__QueueLimit = "0"
+        }
+        foreach ($runtimeSetting in $runtimeSettings.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable(
+                [string]$runtimeSetting.Key,
+                [string]$runtimeSetting.Value,
+                "Process")
+        }
+
+        $dbMigratorStandardOutputPath = Join-Path $runRoot "dbmigrator.stdout.log"
+        $dbMigratorStandardErrorPath = Join-Path $runRoot "dbmigrator.stderr.log"
+        $dbMigratorStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $dbMigratorStartInfo.WorkingDirectory = $repositoryRoot
+        $dbMigratorStartInfo.UseShellExecute = $false
+        $dbMigratorStartInfo.CreateNoWindow = $true
+        $dbMigratorStartInfo.RedirectStandardOutput = $false
+        $dbMigratorStartInfo.RedirectStandardError = $false
+        $dbMigratorStartInfo.Environment["NOVAGAME_VERIFICATION_STDOUT_PATH"] =
+            $dbMigratorStandardOutputPath
+        $dbMigratorStartInfo.Environment["NOVAGAME_VERIFICATION_STDERR_PATH"] =
+            $dbMigratorStandardErrorPath
+        $dbMigratorStartInfo.FileName = (Get-Command "pwsh" -ErrorAction Stop).Source
+        foreach ($dbMigratorArgument in @(
+                "-NoProfile",
+                "-Command",
+                '$stdoutPath = $env:NOVAGAME_VERIFICATION_STDOUT_PATH; ' +
+                '$stderrPath = $env:NOVAGAME_VERIFICATION_STDERR_PATH; ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDOUT_PATH", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDERR_PATH", $null, "Process"); ' +
+                '& dotnet run --project server/src/NovaGame.DbMigrator/NovaGame.DbMigrator.csproj --no-build --no-restore ' +
+                '1> $stdoutPath 2> $stderrPath; exit $LASTEXITCODE'
+            )) {
+            $null = $dbMigratorStartInfo.ArgumentList.Add([string]$dbMigratorArgument)
+        }
+        $dbMigratorProcess = Start-NovaGameJobProcess `
+            -JobHandle $processJobHandle `
+            -TargetStartInfo $dbMigratorStartInfo
+        $dbMigratorCompleted = $dbMigratorProcess.WaitForExit(300000)
+        if (-not $dbMigratorCompleted) {
+            $dbMigratorProcess.Kill($true)
+        }
+        $dbMigratorProcess.WaitForExit()
+        $dbMigratorProcess.Refresh()
+        $dbMigratorExitCode = $dbMigratorProcess.ExitCode
+        if (-not $dbMigratorCompleted) {
+            throw "NovaGame DbMigrator exceeded 300 seconds."
+        }
+        if ($dbMigratorExitCode -ne 0) {
+            throw "NovaGame DbMigrator failed with exit code $dbMigratorExitCode."
+        }
+
+        $apiPort = Get-AvailableLoopbackPort
+        $apiUrl = "http://127.0.0.1:$apiPort"
+        $env:ASPNETCORE_URLS = $apiUrl
+        $apiStandardOutputPath = Join-Path $runRoot "api.stdout.log"
+        $apiStandardErrorPath = Join-Path $runRoot "api.stderr.log"
+        $apiStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $apiStartInfo.WorkingDirectory = $repositoryRoot
+        $apiStartInfo.UseShellExecute = $false
+        $apiStartInfo.CreateNoWindow = $true
+        $apiStartInfo.RedirectStandardOutput = $false
+        $apiStartInfo.RedirectStandardError = $false
+        $apiStartInfo.Environment["NOVAGAME_VERIFICATION_STDOUT_PATH"] =
+            $apiStandardOutputPath
+        $apiStartInfo.Environment["NOVAGAME_VERIFICATION_STDERR_PATH"] =
+            $apiStandardErrorPath
+        $apiStartInfo.FileName = (Get-Command "pwsh" -ErrorAction Stop).Source
+        foreach ($apiArgument in @(
+                "-NoProfile",
+                "-Command",
+                '$stdoutPath = $env:NOVAGAME_VERIFICATION_STDOUT_PATH; ' +
+                '$stderrPath = $env:NOVAGAME_VERIFICATION_STDERR_PATH; ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDOUT_PATH", $null, "Process"); ' +
+                '[Environment]::SetEnvironmentVariable("NOVAGAME_VERIFICATION_STDERR_PATH", $null, "Process"); ' +
+                '& dotnet run --project server/src/NovaGame.Api/NovaGame.Api.csproj --no-build --no-restore --no-launch-profile ' +
+                '1> $stdoutPath 2> $stderrPath; exit $LASTEXITCODE'
+            )) {
+            $null = $apiStartInfo.ArgumentList.Add([string]$apiArgument)
+        }
+        $apiProcess = Start-NovaGameJobProcess `
+            -JobHandle $processJobHandle `
+            -TargetStartInfo $apiStartInfo
+
+        Wait-HttpEndpoint `
+            -Uri ([Uri]"$apiUrl/health/live") `
+            -Process $apiProcess `
+            -StandardOutputPath $apiStandardOutputPath `
+            -StandardErrorPath $apiStandardErrorPath `
+            -Headers @{
+                "X-Forwarded-For" = "127.0.0.1"
+                "X-Forwarded-Proto" = "https"
+                "X-Forwarded-Host" = "localhost"
+            }
+
+        $composedTestEnvironment = [ordered]@{
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_API_URL = $apiUrl
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_MYSQL_CONNECTION_STRING = $connectionString
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_PROJECT_NAME = $projectName
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_DISPOSABLE_MARKER = $composedMarker
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_USER_NAME = $bootstrapUserName
+            NOVAGAME_ADMIN_MANAGEMENT_COMPOSED_BOOTSTRAP_PASSWORD = $bootstrapPassword
+        }
+        foreach ($entry in $composedTestEnvironment.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable(
+                [string]$entry.Key,
+                [string]$entry.Value,
+                "Process")
+        }
+
+        Invoke-DotNetFilteredTestWithExecutionCount `
+            -ProjectPath $TestProject `
+            -Filter $Filter `
+            -ResultName $ResultName `
+            -ResultsRoot (Join-Path $runRoot "test-results")
+    }
+    catch {
+        $operationError = $_
+        try {
+            $safeApiFailureTypes = @(
+                & {
+                    foreach ($apiDiagnosticPath in @($apiStandardOutputPath, $apiStandardErrorPath)) {
+                        if ([string]::IsNullOrWhiteSpace($apiDiagnosticPath) -or
+                            -not (Test-Path -LiteralPath $apiDiagnosticPath -PathType Leaf)) {
+                            continue
+                        }
+
+                        foreach ($line in Get-Content -LiteralPath $apiDiagnosticPath) {
+                            foreach ($match in [regex]::Matches(
+                                    [string]$line,
+                                    '\b(?<type>[A-Za-z][A-Za-z0-9_.]*(?:Exception|Error))\b')) {
+                                $match.Groups["type"].Value
+                            }
+                        }
+                    }
+                } |
+                    Sort-Object -Unique |
+                    Select-Object -First 4)
+        }
+        catch {
+            $safeApiFailureTypes = @()
+        }
+    }
+    finally {
+        try {
+            if ($processJobHandle -ne [IntPtr]::Zero) {
+                $ownedProcessIdentities = @(
+                    Get-NovaGameJobProcessIdentities -JobHandle $processJobHandle)
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to capture the composed API process job: $($_.Exception.Message)")
+        }
+
+        try {
+            if ($processJobHandle -ne [IntPtr]::Zero) {
+                Close-NovaGameProcessJob -JobHandle $processJobHandle
+                $processJobHandle = [IntPtr]::Zero
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to close the composed API process job: $($_.Exception.Message)")
+        }
+
+        if ($processJobHandle -ne [IntPtr]::Zero) {
+            try {
+                Close-NovaGameProcessJob -JobHandle $processJobHandle
+                $processJobHandle = [IntPtr]::Zero
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to force-close the composed API process job handle.")
+            }
+        }
+
+        foreach ($process in @($dbMigratorProcess, $apiProcess)) {
+            if ($null -eq $process) {
+                continue
+            }
+            try {
+                $process.Dispose()
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to dispose a composed API process handle.")
+            }
+        }
+
+        try {
+            Restore-NovaGameProcessEnvironmentSnapshot `
+                -Snapshot $previousRuntimeEnvironment
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to restore the composed API runtime environment.")
+        }
+        if ($null -ne $previousAdminAccessEnvironment) {
+            try {
+                Restore-NovaGameAdminAccessProcessEnvironment `
+                    -PreviousValues $previousAdminAccessEnvironment
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to restore the composed API administrator-access environment.")
+            }
+        }
+        try {
+            $env:NOVAGAME_TEST_MYSQL_CONNECTION_STRING = `
+                $previousConnectionValues.NOVAGAME_TEST_MYSQL_CONNECTION_STRING
+            $env:NOVAGAME_MYSQL_MIGRATION_CONNECTION_STRING = `
+                $previousConnectionValues.NOVAGAME_MYSQL_MIGRATION_CONNECTION_STRING
+            $env:ConnectionStrings__Default = $previousConnectionValues.ConnectionStrings__Default
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to restore composed API database connection environment variables.")
+        }
+
+        try {
+            if ($cleanupRequired) {
+                if ($projectName -notmatch "^novagame-test-[a-f0-9]{12}$") {
+                    $null = $cleanupErrors.Add(
+                        "Refusing to remove Docker resources for invalid project '$projectName'.")
+                }
+                else {
+                    & docker @($composeArguments + @("down", "--volumes", "--remove-orphans"))
+                    if ($LASTEXITCODE -ne 0) {
+                        $null = $cleanupErrors.Add(
+                            "Failed to remove disposable Docker project '$projectName'.")
+                    }
+                }
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to remove disposable Docker project '$projectName'.")
+        }
+
+        if ($null -ne $previousDatabaseEnvironment) {
+            try {
+                Restore-NovaGameDatabaseProcessEnvironment `
+                    -PreviousValues $previousDatabaseEnvironment
+            }
+            catch {
+                $null = $cleanupErrors.Add(
+                    "Failed to restore the composed API MySQL process environment.")
+            }
+        }
+
+        try {
+            if (Test-Path -LiteralPath $testEnvironmentFile -PathType Leaf) {
+                $resolvedRunRoot = Resolve-AdminManagementRunRoot -RunRoot $runRoot
+                $resolvedEnvironmentFile = [System.IO.Path]::GetFullPath($testEnvironmentFile)
+                if (-not $resolvedEnvironmentFile.StartsWith(
+                        $resolvedRunRoot.TrimEnd('\') + '\',
+                        [StringComparison]::OrdinalIgnoreCase)) {
+                    $null = $cleanupErrors.Add(
+                        "Refusing to remove temporary environment file outside '$resolvedRunRoot'.")
+                }
+                else {
+                    Remove-Item -LiteralPath $resolvedEnvironmentFile -Force
+                }
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to remove temporary environment file '$testEnvironmentFile'.")
+        }
+
+        try {
+            Assert-AdminManagementCleanup `
+                -ProjectName $projectName `
+                -Ports @($apiPort, $publishedPort) `
+                -OwnedProcessIdentities $ownedProcessIdentities `
+                -TemporarySecretPaths @($testEnvironmentFile)
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Composed API final cleanup assertion failed: $($_.Exception.Message)")
+        }
+
+        try {
+            if (Test-Path -LiteralPath $runRoot -PathType Container) {
+                Remove-AdminManagementRunRootVerified `
+                    -RunRoot $runRoot `
+                    -MaximumAttempts 6
+            }
+        }
+        catch {
+            $null = $cleanupErrors.Add(
+                "Failed to remove composed API run root '$runRoot'.")
+        }
+    }
+
+    if ($null -ne $operationError) {
+        $safeFailureDetail = if ($safeApiFailureTypes.Count -gt 0) {
+            "`nSafe API exception types: $($safeApiFailureTypes -join ', ')."
+        }
+        else {
+            ""
+        }
+        if ($cleanupErrors.Count -gt 0) {
+            throw "$operationError$safeFailureDetail`nCleanup errors:`n$($cleanupErrors -join "`n")"
+        }
+        throw "$operationError$safeFailureDetail"
+    }
+    if ($cleanupErrors.Count -gt 0) {
+        throw "Composed API acceptance cleanup failed:`n$($cleanupErrors -join "`n")"
+    }
+
+    Write-Output "Admin management composed API acceptance passed."
+}
+
 function Test-AdminManagement {
     $testProject =
         "server/tests/NovaGame.EntityFrameworkCore.Tests/NovaGame.EntityFrameworkCore.Tests.csproj"
@@ -9601,18 +10045,25 @@ function Test-AdminManagement {
         ($selectedManifest.Count -gt 0) `
         "AdminManagement has no active focused test family."
 
+    Invoke-CheckedCommand "dotnet" @(
+        "build",
+        "server/NovaGame.sln",
+        "--configuration", "Release",
+        "--no-restore",
+        "--disable-build-servers",
+        "--verbosity", "minimal",
+        "-warnaserror",
+        "-p:NuGetAudit=false"
+    )
+
+    $composedApiManifest = @(
+        $selectedManifest | Where-Object { $_.Task -eq "M35-06-T02" }
+    )
+    $databaseManifest = @(
+        $selectedManifest | Where-Object { $_.Task -ne "M35-06-T02" }
+    )
     $focusedVerification = {
-        Invoke-CheckedCommand "dotnet" @(
-            "build",
-            "server/NovaGame.sln",
-            "--configuration", "Release",
-            "--no-restore",
-            "--disable-build-servers",
-            "--verbosity", "minimal",
-            "-warnaserror",
-            "-p:NuGetAudit=false"
-        )
-        foreach ($entry in $selectedManifest) {
+        foreach ($entry in $databaseManifest) {
             Invoke-DotNetFilteredTestWithExecutionCount `
                 -ProjectPath $testProject `
                 -Filter $entry.Filter `
@@ -9620,10 +10071,18 @@ function Test-AdminManagement {
         }
     }.GetNewClosure()
 
-    Test-Database `
-        -RunDbMigratorSeed `
-        -AdditionalVerification $focusedVerification `
-        -SkipSolutionTests
+    if ($databaseManifest.Count -gt 0) {
+        Test-Database `
+            -RunDbMigratorSeed `
+            -AdditionalVerification $focusedVerification `
+            -SkipSolutionTests
+    }
+    foreach ($entry in $composedApiManifest) {
+        Invoke-AdminManagementComposedApiAcceptance `
+            -TestProject $testProject `
+            -Filter $entry.Filter `
+            -ResultName $entry.ResultName
+    }
     Write-Output `
         "AdminManagement verification passed for $($selectedManifest.Count) focused test families."
 }
@@ -15598,12 +16057,18 @@ function Invoke-DotNetFilteredTestWithExecutionCount {
         [Parameter(Mandatory)][string]$ProjectPath,
         [Parameter(Mandatory)][string]$Filter,
         [Parameter(Mandatory)][string]$ResultName,
-        [ValidateRange(0, 100000)][int]$ExpectedTestCount = 0
+        [ValidateRange(0, 100000)][int]$ExpectedTestCount = 0,
+        [string]$ResultsRoot
     )
 
-    $resultsRoot = Join-Path `
-        $localRoot `
-        ("test-results\focused-" + [Guid]::NewGuid().ToString("N"))
+    $resultsRoot = if ([string]::IsNullOrWhiteSpace($ResultsRoot)) {
+        Join-Path `
+            $localRoot `
+            ("test-results\focused-" + [Guid]::NewGuid().ToString("N"))
+    }
+    else {
+        [System.IO.Path]::GetFullPath($ResultsRoot)
+    }
     $resolvedResultsRoot = [System.IO.Path]::GetFullPath($resultsRoot)
     $resolvedLocalRoot = [System.IO.Path]::GetFullPath($localRoot).TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
@@ -15614,6 +16079,15 @@ function Invoke-DotNetFilteredTestWithExecutionCount {
             $resolvedLocalRoot,
             [StringComparison]::OrdinalIgnoreCase) `
         "Focused test results must remain under the repository-local '.local' directory."
+    Assert-Condition `
+        (-not $resolvedResultsRoot.TrimEnd(
+                [System.IO.Path]::DirectorySeparatorChar,
+                [System.IO.Path]::AltDirectorySeparatorChar).Equals(
+                $resolvedLocalRoot.TrimEnd(
+                    [System.IO.Path]::DirectorySeparatorChar,
+                    [System.IO.Path]::AltDirectorySeparatorChar),
+                [StringComparison]::OrdinalIgnoreCase)) `
+        "Focused test results must not use the repository-local '.local' root itself."
 
     New-Item -ItemType Directory -Path $resolvedResultsRoot -Force | Out-Null
     $trxPath = Join-Path $resolvedResultsRoot $ResultName

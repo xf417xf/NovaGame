@@ -157,11 +157,11 @@ checked-contract, generic Admin, Documentation, Repository, and whitespace verif
 brittle static permission-source verifier check was corrected. M35-05 is complete. M35-06-T01
 froze and verified the exact real-server requirement-to-evidence matrix, ordered acceptance
 commands, T02 boundary, and premature-source guard. M3.5 is active at `M35-06`, with only
-`M35-06-T02` executable. The user separately authorized the NovaGame-owned
-`administrator-management` capability on 2026-08-13. M35-06-T02 authorizes only its non-mock
-composed API and disposable-MySQL acceptance fixture. This authorization does not come from M3
-and does not authorize M35-06-T03 or later work, SwordMaster changes, extraction, M4, or NovaCore
-changes.
+`M35-06-T03` executable. The user separately authorized the NovaGame-owned
+`administrator-management` capability on 2026-08-13. M35-06-T02 completed its non-mock composed
+API and disposable-MySQL acceptance fixture. M35-06-T03 authorizes only its frozen
+security-acceptance evidence. This authorization does not come from M3 and does not authorize
+M35-06-T04 or later work, SwordMaster changes, extraction, M4, or NovaCore changes.
 
 ### Goal
 
