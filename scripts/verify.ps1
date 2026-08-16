@@ -11624,9 +11624,57 @@ function Get-AdminManagementScreenshotSpecifications {
         [string]$Mode
     )
 
-    Assert-Condition `
-        ($Mode -eq "LegacyGameConfig") `
-        "AdminE2E is unavailable until M35-07-T01 registers the exact management screenshot manifest."
+    if ($Mode -eq "M35Management") {
+        $m35BrowserTaskStatus = Get-M35TaskStatus -TaskId "M35-07-T01"
+        Assert-Condition `
+            ($m35BrowserTaskStatus -in @("in_progress", "blocked", "complete")) `
+            "AdminE2E is unavailable before M35-07-T01 is active."
+        return @(
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/game-config-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/game-config-desktop-1440x900.png"
+                Width = 1440
+                MinimumHeight = 900
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-administrators-desktop-1440x900.png"
+                Width = 1440
+                MinimumHeight = 900
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-roles-desktop-1440x900.png"
+                Width = 1440
+                MinimumHeight = 900
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-sessions-desktop-1440x900.png"
+                Width = 1440
+                MinimumHeight = 900
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-audit-desktop-1440x900.png"
+                Width = 1440
+                MinimumHeight = 900
+                MaximumHeight = 10000
+            }
+        )
+    }
+
     return @(
         [pscustomobject]@{
             RelativePath =
@@ -11655,7 +11703,7 @@ function Get-AdminManagementResponseAuditManifest {
     $manifest = [System.Collections.Generic.List[object]]::new()
     $null = $manifest.Add([pscustomobject]@{
             ExactContextCount = 1
-            ExactDirectRequestCount = 6
+            ExactDirectRequestCount = 8
             ExpectedNetworkFailureCount = 0
             ExpectedNetworkFailureMethod = $null
             ExpectedNetworkFailurePathAndQuery = $null

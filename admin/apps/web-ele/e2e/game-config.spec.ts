@@ -22,6 +22,11 @@ interface AccessTokenResponse {
   accessToken: string;
 }
 
+interface AdminRole {
+  id: string;
+  permissionNames: string[];
+}
+
 interface Draft {
   id: string;
   name: string;
@@ -53,7 +58,9 @@ interface Version {
 
 const configurationSet = 'default';
 const environmentName = 'development';
+const gameConfigAccessPermission = 'Content.GameConfig.Access';
 const loginPageReadyTimeoutMs = 120_000;
+const operationsAdminAccessPermission = 'Operations.AdminAccess.Access';
 const schemaVersion = '1';
 const visualOutputDirectory = 'output/playwright/visual';
 
@@ -65,12 +72,6 @@ function requireEnvironment(name: string): string {
     throw new Error(`Required E2E environment variable '${name}' is missing.`);
   }
   return value;
-}
-
-function normalizeError(error: unknown, fallbackMessage: string): Error {
-  return error instanceof Error
-    ? error
-    : new Error(fallbackMessage, { cause: error });
 }
 
 function apiUrl(baseURL: string, path: string): string {
@@ -310,6 +311,9 @@ test('operator completes the GameConfig lifecycle against the real API', async (
   const firstDraftName = `E2E first ${runId}`;
   const secondDraftName = `E2E second ${runId}`;
   const permissionDraftName = `E2E permissions ${runId}`;
+  const permissionRoleName = `E2E GameConfig viewer ${runId}`;
+  const permissionUserName = `e2e-game-config-viewer-${runId}`;
+  const permissionPassword = `E2E-GameConfig-${crypto.randomUUID()}!`;
   const validContent = JSON.stringify({
     collections: {
       items: [{ id: 'starter-item', name: 'Starter item' }],
@@ -579,137 +583,146 @@ test('operator completes the GameConfig lifecycle against the real API', async (
     'POST',
   );
 
-  acceptanceEvidence.prepareLegacyGameConfigPermissionFixture(username);
-  let permissionsMayNeedRestoration = false;
-  let permissionPhaseError: Error | undefined;
-  try {
-    permissionsMayNeedRestoration = true;
-    acceptanceEvidence.revokeLegacyGameConfigMutationPermissions();
-    await logout(page);
-    accessToken = await login(page, username, password, acceptanceEvidence);
-
-    await expect(page).toHaveURL(/\/game-config(?:[/?#].*)?$/);
-    await expect(
-      page.getByRole('heading', { name: 'Game configuration' }),
-    ).toBeVisible();
-    await expect(
-      page.locator('a[role="menuitem"][href="/game-config"]'),
-    ).toBeVisible();
-    await expect(page.getByTestId('create-draft')).toHaveCount(0);
-    const permissionDraftRow = page
-      .getByTestId('draft-table')
-      .getByRole('row')
-      .filter({ hasText: permissionDraftName });
-    await expect(permissionDraftRow).toContainText('Validated');
-    await permissionDraftRow
-      .getByRole('button', { name: `Open ${permissionDraftName}` })
-      .click();
-    await expect(page.getByTestId('save-draft')).toHaveCount(0);
-    await expect(page.getByTestId('validate-draft')).toHaveCount(0);
-    await closeDrawer(page, 'draft-editor');
-
-    await permissionDraftRow.getByTestId('review-from-table').click();
-    await expect(page.getByTestId('publish-draft')).toHaveCount(0);
-    await closeDrawer(page, 'review-drawer');
-
-    await page.getByRole('tab', { name: 'Published versions' }).click();
-    await expect(page.getByTestId('activate-version')).toHaveCount(0);
-    await page.getByRole('tab', { name: 'Environment' }).click();
-    await expect(page.getByTestId('open-rollback')).toHaveCount(0);
-
-    const forbiddenCreate = await acceptanceEvidence.apiRequest(
+  acceptanceEvidence.registerSensitiveValue(permissionPassword);
+  const permissionRole = await readApiData<AdminRole>(
+    await acceptanceEvidence.apiRequest(
       page.request,
       'POST',
-      apiUrl(apiBaseURL, '/game-config/drafts'),
+      apiUrl(apiBaseURL, '/admin-access/roles'),
       {
         data: {
-          configurationSet,
-          content: validContent,
-          name: `${permissionDraftName} forbidden`,
-          schemaVersion,
+          name: permissionRoleName,
+          permissionNames: [
+            gameConfigAccessPermission,
+            operationsAdminAccessPermission,
+          ],
         },
-        headers: authorizationHeaders(accessToken),
+        headers: {
+          ...authorizationHeaders(accessToken),
+          'Idempotency-Key': crypto.randomUUID(),
+        },
       },
-    );
-    await acceptanceEvidence.auditResponse(forbiddenCreate, 'POST');
-    expect(forbiddenCreate.status()).toBe(403);
+    ),
+    acceptanceEvidence,
+    'POST',
+  );
+  expect(permissionRole.permissionNames).toEqual([
+    gameConfigAccessPermission,
+    operationsAdminAccessPermission,
+  ]);
 
-    const forbiddenPublish = await acceptanceEvidence.apiRequest(
+  await readApiData<{ id: string }>(
+    await acceptanceEvidence.apiRequest(
       page.request,
       'POST',
-      apiUrl(apiBaseURL, `/game-config/drafts/${permissionDraft.id}/publish`),
+      apiUrl(apiBaseURL, '/admin-access/administrators'),
       {
         data: {
-          expectedRevision: permissionDraft.revision,
-          releaseNotes: 'This must be rejected.',
+          displayName: 'E2E GameConfig viewer',
+          initialPassword: permissionPassword,
+          roleIds: [permissionRole.id],
+          userName: permissionUserName,
         },
-        headers: authorizationHeaders(accessToken),
-      },
-    );
-    await acceptanceEvidence.auditResponse(forbiddenPublish, 'POST');
-    expect(forbiddenPublish.status()).toBe(403);
-
-    const forbiddenActivation = await acceptanceEvidence.apiRequest(
-      page.request,
-      'POST',
-      apiUrl(
-        apiBaseURL,
-        `/game-config/environments/${environmentName}/activate`,
-      ),
-      {
-        data: {
-          configurationSet,
-          expectedRevision: rolledBackEnvironment.revision,
-          versionId: secondVersion.id,
+        headers: {
+          ...authorizationHeaders(accessToken),
+          'Idempotency-Key': crypto.randomUUID(),
         },
-        headers: authorizationHeaders(accessToken),
       },
-    );
-    await acceptanceEvidence.auditResponse(forbiddenActivation, 'POST');
-    expect(forbiddenActivation.status()).toBe(403);
+    ),
+    acceptanceEvidence,
+    'POST',
+  );
 
-    await logout(page);
-    const loggedOutCookies = await page.context().cookies();
-    expect(
-      loggedOutCookies.some(
-        (cookie) => cookie.name === 'novagame.admin.refresh_token',
-      ),
-    ).toBe(false);
-  } catch (error) {
-    permissionPhaseError = normalizeError(
-      error,
-      'The permission verification phase failed with a non-Error value.',
-    );
-  }
+  await logout(page);
+  accessToken = await login(
+    page,
+    permissionUserName,
+    permissionPassword,
+    acceptanceEvidence,
+  );
 
-  let restorationError: Error | undefined;
-  if (permissionsMayNeedRestoration) {
-    try {
-      acceptanceEvidence.restoreLegacyGameConfigMutationPermissions();
-    } catch (error) {
-      restorationError = normalizeError(
-        error,
-        'Permission restoration failed with a non-Error value.',
-      );
-    }
-  }
-  if (permissionPhaseError && restorationError) {
-    throw new AggregateError(
-      [permissionPhaseError, restorationError],
-      'The permission phase and its restoration both failed.',
-      { cause: restorationError },
-    );
-  }
-  if (permissionPhaseError) {
-    throw normalizeError(
-      permissionPhaseError,
-      'The permission verification phase failed with a non-Error value.',
-    );
-  }
-  if (restorationError) {
-    throw normalizeError(
-      restorationError,
-      'Permission restoration failed with a non-Error value.',
-    );
-  }
+  await expect(page).toHaveURL(/\/game-config(?:[/?#].*)?$/);
+  await expect(
+    page.getByRole('heading', { name: 'Game configuration' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('a[role="menuitem"][href="/game-config"]'),
+  ).toBeVisible();
+  await expect(page.getByTestId('create-draft')).toHaveCount(0);
+  const permissionDraftRow = page
+    .getByTestId('draft-table')
+    .getByRole('row')
+    .filter({ hasText: permissionDraftName });
+  await expect(permissionDraftRow).toContainText('Validated');
+  await permissionDraftRow
+    .getByRole('button', { name: `Open ${permissionDraftName}` })
+    .click();
+  await expect(page.getByTestId('save-draft')).toHaveCount(0);
+  await expect(page.getByTestId('validate-draft')).toHaveCount(0);
+  await closeDrawer(page, 'draft-editor');
+
+  await permissionDraftRow.getByTestId('review-from-table').click();
+  await expect(page.getByTestId('publish-draft')).toHaveCount(0);
+  await closeDrawer(page, 'review-drawer');
+
+  await page.getByRole('tab', { name: 'Published versions' }).click();
+  await expect(page.getByTestId('activate-version')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Environment' }).click();
+  await expect(page.getByTestId('open-rollback')).toHaveCount(0);
+
+  const forbiddenCreate = await acceptanceEvidence.apiRequest(
+    page.request,
+    'POST',
+    apiUrl(apiBaseURL, '/game-config/drafts'),
+    {
+      data: {
+        configurationSet,
+        content: validContent,
+        name: `${permissionDraftName} forbidden`,
+        schemaVersion,
+      },
+      headers: authorizationHeaders(accessToken),
+    },
+  );
+  await acceptanceEvidence.auditResponse(forbiddenCreate, 'POST');
+  expect(forbiddenCreate.status()).toBe(403);
+
+  const forbiddenPublish = await acceptanceEvidence.apiRequest(
+    page.request,
+    'POST',
+    apiUrl(apiBaseURL, `/game-config/drafts/${permissionDraft.id}/publish`),
+    {
+      data: {
+        expectedRevision: permissionDraft.revision,
+        releaseNotes: 'This must be rejected.',
+      },
+      headers: authorizationHeaders(accessToken),
+    },
+  );
+  await acceptanceEvidence.auditResponse(forbiddenPublish, 'POST');
+  expect(forbiddenPublish.status()).toBe(403);
+
+  const forbiddenActivation = await acceptanceEvidence.apiRequest(
+    page.request,
+    'POST',
+    apiUrl(apiBaseURL, `/game-config/environments/${environmentName}/activate`),
+    {
+      data: {
+        configurationSet,
+        expectedRevision: rolledBackEnvironment.revision,
+        versionId: secondVersion.id,
+      },
+      headers: authorizationHeaders(accessToken),
+    },
+  );
+  await acceptanceEvidence.auditResponse(forbiddenActivation, 'POST');
+  expect(forbiddenActivation.status()).toBe(403);
+
+  await logout(page);
+  const loggedOutCookies = await page.context().cookies();
+  expect(
+    loggedOutCookies.some(
+      (cookie) => cookie.name === 'novagame.admin.refresh_token',
+    ),
+  ).toBe(false);
 });
