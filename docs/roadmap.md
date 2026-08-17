@@ -156,11 +156,13 @@ stale-response, and frontend-regression review, including a nonwrapping `Read on
 checked-contract, generic Admin, Documentation, Repository, and whitespace verification after a
 brittle static permission-source verifier check was corrected. M35-05 is complete. M35-06 completed
 the frozen real-server acceptance, security evidence, serial cumulative verification, and
-zero-residue cleanup audit. M3.5 is active at `M35-07`, with only `M35-07-T01` executable. The
-user separately authorized the NovaGame-owned `administrator-management` capability on
-2026-08-13. M35-07-T01 authorizes only the frozen real-browser acceptance foundation. This
-authorization does not come from M3 and does not authorize M35-07-T02 or later work, SwordMaster
-changes, extraction, M4, or NovaCore changes.
+zero-residue cleanup audit. M35-07-T01 completed the frozen real-browser acceptance foundation
+through the real Vben/API/DbMigrator/MySQL path, visual evidence, secret scanning, and cleanup.
+M3.5 is active at `M35-07`, with only `M35-07-T02` executable. The user separately authorized the
+NovaGame-owned `administrator-management` capability on 2026-08-13. M35-07-T02 authorizes only
+route/action permission and authoritative `401`/`403` acceptance. This authorization does not come
+from M3 and does not authorize M35-07-T03 or later work, SwordMaster changes, extraction, M4, or
+NovaCore changes.
 
 ### Goal
 

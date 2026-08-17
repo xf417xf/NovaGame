@@ -21,15 +21,16 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone at
-`M35-07`, and only `M35-07-T01` is executable. M35-05 completed the authorized
+`M35-07`, and only `M35-07-T02` is executable. M35-05 completed the authorized
 `administrator-management` capability through administrator, role and permission, session, audit,
 and generic Vben `web-ele` operations, including final management-admin, checked-contract,
 generic Admin, Documentation, Repository, and whitespace verification. M35-06-T01 froze and
 verified the exact real-server requirement-to-evidence matrix, ordered acceptance commands, T02
 boundary, and premature-source guard. M35-06 then completed the real composed API, frozen
-security, serial cumulative verification, and zero-residue cleanup paths. The active task
-authorizes only the frozen real-browser acceptance foundation. It does not authorize M35-07-T02 or
-later work, SwordMaster changes, extraction, M4, or NovaCore changes. M4 remains `Unscheduled`.
+security, serial cumulative verification, and zero-residue cleanup paths. M35-07-T01 completed the
+frozen real-browser acceptance foundation. The active task authorizes only route/action permission
+and authoritative `401`/`403` acceptance. It does not authorize M35-07-T03 or later work,
+SwordMaster changes, extraction, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 When sources appear to conflict, stop and resolve the conflict before implementation. Do not silently weaken a repository rule or an active goal acceptance criterion.
 

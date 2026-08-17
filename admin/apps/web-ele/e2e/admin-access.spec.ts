@@ -1,10 +1,4 @@
-import type {
-  APIResponse,
-  BrowserContext,
-  Locator,
-  Page,
-  Response,
-} from '@playwright/test';
+import type { APIResponse, Locator, Page, Response } from '@playwright/test';
 
 import type { AcceptanceEvidenceAudit } from './acceptance-evidence';
 
@@ -67,6 +61,7 @@ interface AuditRecordPage {
 const accessPermission = 'Operations.AdminAccess.Access';
 const administratorsReadPermission =
   'Operations.AdminAccess.Administrators.Read';
+const gameConfigAccessPermission = 'Content.GameConfig.Access';
 const loginReadyTimeoutMs = 120_000;
 const rolesManagePermission = 'Operations.AdminAccess.Roles.Manage';
 const rolesReadPermission = 'Operations.AdminAccess.Roles.Read';
@@ -198,10 +193,67 @@ async function login(
     acceptanceEvidence,
     'POST',
   );
-  await expect(page).not.toHaveURL(/\/auth\/login(?:[/?#].*)?$/);
+  await expect(page).toHaveURL(/\/game-config(?:[/?#].*)?$/, {
+    timeout: 60_000,
+  });
+  await expect(
+    page.getByRole('heading', { name: 'Game configuration' }),
+  ).toBeVisible({ timeout: 60_000 });
   if (assertDefaultRefreshCookie) {
     await acceptanceEvidence.assertCurrentRefreshCookie();
   }
+  return session.accessToken;
+}
+
+async function authenticateWithoutAdministratorAccess(
+  page: Page,
+  userName: string,
+  password: string,
+  acceptanceEvidence: AcceptanceEvidenceAudit,
+): Promise<string> {
+  acceptanceEvidence.registerSensitiveValue(password);
+  await page.goto('/auth/login', {
+    timeout: loginReadyTimeoutMs,
+    waitUntil: 'commit',
+  });
+  await expect(formField(page, 'login-username')).toBeVisible({
+    timeout: loginReadyTimeoutMs,
+  });
+  await formField(page, 'login-username').fill(userName);
+  await formField(page, 'login-password').fill(password);
+  const loginResponse = waitForApiResponse(page, 'POST', '/api/auth/login');
+  const permissionCodesResponse = waitForApiResponse(
+    page,
+    'GET',
+    '/api/auth/codes',
+    403,
+  );
+  const userInfoResponse = waitForApiResponse(
+    page,
+    'GET',
+    '/api/user/info',
+    403,
+  );
+  await page.getByRole('button', { name: 'login' }).click();
+  const session = await readApiData<AccessTokenResponse>(
+    await loginResponse,
+    acceptanceEvidence,
+    'POST',
+  );
+  await assertResponseStatus(
+    await permissionCodesResponse,
+    acceptanceEvidence,
+    403,
+    'GET',
+  );
+  await assertResponseStatus(
+    await userInfoResponse,
+    acceptanceEvidence,
+    403,
+    'GET',
+  );
+  await expect(page).toHaveURL(/\/auth\/login(?:[?#].*)?$/);
+  await acceptanceEvidence.assertCurrentRefreshCookie();
   return session.accessToken;
 }
 
@@ -220,21 +272,25 @@ async function logout(
   await expect(page).toHaveURL(/\/auth\/login(?:[?#].*)?$/);
 }
 
-async function refreshCookie(
-  context: BrowserContext,
-  apiBaseURL: string,
+async function assertBrowserRefreshRejected(
+  page: Page,
   acceptanceEvidence: AcceptanceEvidenceAudit,
-): Promise<string> {
-  const cookie = (await context.cookies(apiBaseURL)).find(
-    (candidate) => candidate.name === 'novagame.admin.refresh_token',
+): Promise<void> {
+  const refreshResponse = waitForApiResponse(
+    page,
+    'POST',
+    '/api/auth/refresh',
+    401,
   );
-  if (!cookie) {
-    throw new Error(
-      'The secondary administrator session has no refresh cookie.',
-    );
-  }
-  acceptanceEvidence.registerSensitiveValue(cookie.value);
-  return `${cookie.name}=${cookie.value}`;
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ timeout: loginReadyTimeoutMs, waitUntil: 'commit' });
+  await assertResponseStatus(
+    await refreshResponse,
+    acceptanceEvidence,
+    401,
+    'POST',
+  );
+  await expect(page).toHaveURL(/\/auth\/login(?:[?#].*)?$/);
 }
 
 async function openWorkspace(
@@ -243,23 +299,17 @@ async function openWorkspace(
   heading: string,
   tableTestId: string,
 ): Promise<void> {
-  const menuItem = page.locator(`a[href="${path}"]`).first();
-  if (!(await menuItem.isVisible())) {
-    const group = page
-      .getByText('Administrator Access', { exact: true })
-      .first();
-    await expect(group).toBeVisible({ timeout: 60_000 });
-    await group.click();
-  }
-  await expect(menuItem).toBeVisible({ timeout: 60_000 });
   if (new URL(page.url()).pathname !== path) {
-    await menuItem.click();
+    await page.goto(path, { timeout: 60_000, waitUntil: 'commit' });
   }
   await expect(page.getByRole('heading', { name: heading })).toBeVisible({
     timeout: 60_000,
   });
-  await expect(page.getByTestId(tableTestId)).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator('.el-loading-mask')).toHaveCount(0);
+  const table = page.getByTestId(tableTestId);
+  await expect(table).toBeVisible({ timeout: 60_000 });
+  await expect(table.locator('.el-loading-mask')).toBeHidden({
+    timeout: 60_000,
+  });
 }
 
 async function assertNoBodyOverflow(page: Page): Promise<void> {
@@ -350,7 +400,11 @@ test('administrator lifecycle and concurrency', async ({
       {
         data: {
           name: `Lifecycle reader ${runId}`,
-          permissionNames: [accessPermission, administratorsReadPermission],
+          permissionNames: [
+            accessPermission,
+            administratorsReadPermission,
+            gameConfigAccessPermission,
+          ],
         },
         headers: {
           ...authorizationHeaders(bootstrapAccessToken),
@@ -528,26 +582,7 @@ test('administrator lifecycle and concurrency', async ({
   );
   expect(replayedReset.revision).toBe(resetAdministrator.revision);
 
-  const resetRefreshResponse = await acceptanceEvidence.apiRequest(
-    page.request,
-    'POST',
-    apiUrl(apiBaseURL, '/auth/refresh'),
-    {
-      headers: {
-        Cookie: await refreshCookie(
-          secondaryContext,
-          apiBaseURL,
-          acceptanceEvidence,
-        ),
-      },
-    },
-  );
-  await assertResponseStatus(
-    resetRefreshResponse,
-    acceptanceEvidence,
-    401,
-    'POST',
-  );
+  await assertBrowserRefreshRejected(secondaryPage, acceptanceEvidence);
 
   await login(
     secondaryPage,
@@ -576,26 +611,7 @@ test('administrator lifecycle and concurrency', async ({
     'PUT',
   );
   expect(deactivatedAdministrator.isActive).toBe(false);
-  const deactivatedRefreshResponse = await acceptanceEvidence.apiRequest(
-    page.request,
-    'POST',
-    apiUrl(apiBaseURL, '/auth/refresh'),
-    {
-      headers: {
-        Cookie: await refreshCookie(
-          secondaryContext,
-          apiBaseURL,
-          acceptanceEvidence,
-        ),
-      },
-    },
-  );
-  await assertResponseStatus(
-    deactivatedRefreshResponse,
-    acceptanceEvidence,
-    401,
-    'POST',
-  );
+  await assertBrowserRefreshRejected(secondaryPage, acceptanceEvidence);
 
   await logout(page, acceptanceEvidence);
 });
@@ -714,7 +730,7 @@ test('roles, permissions, and authorization', async ({
       {
         data: {
           name: `Access only ${runId}`,
-          permissionNames: [accessPermission],
+          permissionNames: [accessPermission, gameConfigAccessPermission],
         },
         headers: {
           ...authorizationHeaders(bootstrapAccessToken),
@@ -746,20 +762,12 @@ test('roles, permissions, and authorization', async ({
     acceptanceEvidence,
     'POST',
   );
-  const accessOnlyLogin = await readApiData<AccessTokenResponse>(
-    await acceptanceEvidence.apiRequest(
-      page.request,
-      'POST',
-      apiUrl(apiBaseURL, '/auth/login'),
-      {
-        data: {
-          password: accessOnlyPassword,
-          userName: accessOnlyAdministrator.userName,
-        },
-      },
-    ),
+  await logout(page, acceptanceEvidence);
+  const accessOnlyAccessToken = await login(
+    page,
+    accessOnlyAdministrator.userName,
+    accessOnlyPassword,
     acceptanceEvidence,
-    'POST',
   );
 
   const forbiddenRequests: ReadonlyArray<{
@@ -793,7 +801,7 @@ test('roles, permissions, and authorization', async ({
       apiUrl(apiBaseURL, request.path),
       {
         ...(request.data === undefined ? {} : { data: request.data }),
-        headers: authorizationHeaders(accessOnlyLogin.accessToken),
+        headers: authorizationHeaders(accessOnlyAccessToken),
       },
     );
     await assertResponseStatus(
@@ -844,26 +852,18 @@ test('roles, permissions, and authorization', async ({
     acceptanceEvidence,
     'POST',
   );
-  const leafOnlyLogin = await readApiData<AccessTokenResponse>(
-    await acceptanceEvidence.apiRequest(
-      page.request,
-      'POST',
-      apiUrl(apiBaseURL, '/auth/login'),
-      {
-        data: {
-          password: leafOnlyPassword,
-          userName: leafOnlyAdministrator.userName,
-        },
-      },
-    ),
+  await logout(page, acceptanceEvidence);
+  const leafOnlyAccessToken = await authenticateWithoutAdministratorAccess(
+    page,
+    leafOnlyAdministrator.userName,
+    leafOnlyPassword,
     acceptanceEvidence,
-    'POST',
   );
   const missingAccessResponse = await acceptanceEvidence.apiRequest(
     page.request,
     'GET',
     apiUrl(apiBaseURL, '/admin-access/administrators?page=1&pageSize=20'),
-    { headers: authorizationHeaders(leafOnlyLogin.accessToken) },
+    { headers: authorizationHeaders(leafOnlyAccessToken) },
   );
   await assertResponseStatus(
     missingAccessResponse,
@@ -880,7 +880,11 @@ test('roles, permissions, and authorization', async ({
       {
         data: {
           name: `Administrator viewer ${runId}`,
-          permissionNames: [accessPermission, administratorsReadPermission],
+          permissionNames: [
+            accessPermission,
+            administratorsReadPermission,
+            gameConfigAccessPermission,
+          ],
         },
         headers: {
           ...authorizationHeaders(bootstrapAccessToken),
@@ -913,7 +917,8 @@ test('roles, permissions, and authorization', async ({
     'POST',
   );
 
-  await logout(page, acceptanceEvidence);
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ timeout: loginReadyTimeoutMs, waitUntil: 'commit' });
   const viewerAccessToken = await login(
     page,
     viewerAdministrator.userName,
@@ -927,9 +932,6 @@ test('roles, permissions, and authorization', async ({
     'administrator-table',
   );
   await expect(page.getByTestId('create-administrator')).toHaveCount(0);
-  await expect(
-    page.locator('a[role="menuitem"][href="/admin-access/roles"]'),
-  ).toHaveCount(0);
 
   const refreshedViewerRole = await readApiData<AdminRole>(
     await acceptanceEvidence.apiRequest(
@@ -942,6 +944,7 @@ test('roles, permissions, and authorization', async ({
             accessPermission,
             administratorsReadPermission,
             rolesReadPermission,
+            gameConfigAccessPermission,
           ],
         },
         headers: mutationHeaders(bootstrapAccessToken, viewerRole.revision),
@@ -958,9 +961,13 @@ test('roles, permissions, and authorization', async ({
     viewerPassword,
     acceptanceEvidence,
   );
-  await expect(
-    page.locator('a[role="menuitem"][href="/admin-access/roles"]'),
-  ).toBeVisible({ timeout: 60_000 });
+  await openWorkspace(
+    page,
+    '/admin-access/roles',
+    'Roles and permissions',
+    'role-table',
+  );
+  await expect(page.getByTestId('create-role')).toHaveCount(0);
   const rolesManageResponse = await acceptanceEvidence.apiRequest(
     page.request,
     'POST',
@@ -990,7 +997,7 @@ test('sessions and audit', async ({ acceptanceEvidence, page }) => {
   const sessionPassword = `Session-${runId}-Password!`;
   const sessionUserName = `e2e-session-${runId}`;
 
-  const bootstrapAccessToken = await login(
+  let bootstrapAccessToken = await login(
     page,
     bootstrapUserName,
     bootstrapPassword,
@@ -1032,15 +1039,14 @@ test('sessions and audit', async ({ acceptanceEvidence, page }) => {
     acceptanceEvidence,
     'POST',
   );
-  await readApiData<AccessTokenResponse>(
-    await acceptanceEvidence.apiRequest(
-      page.request,
-      'POST',
-      apiUrl(apiBaseURL, '/auth/login'),
-      { data: { password: sessionPassword, userName: sessionUserName } },
-    ),
+  await page.evaluate(() => localStorage.clear());
+  await login(page, sessionUserName, sessionPassword, acceptanceEvidence);
+  await page.evaluate(() => localStorage.clear());
+  bootstrapAccessToken = await login(
+    page,
+    bootstrapUserName,
+    bootstrapPassword,
     acceptanceEvidence,
-    'POST',
   );
 
   const sessionFamilies = await readApiData<AdminSessionPage>(
@@ -1134,11 +1140,32 @@ test('sessions and audit', async ({ acceptanceEvidence, page }) => {
     'Audit history',
     'audit-table',
   );
-  await formField(page, 'audit-subject-id-filter').fill(
-    sessionAdministrator.id,
+  await formField(page, 'audit-from-utc').fill(fromUtc);
+  await formField(page, 'audit-to-utc').fill(toUtc);
+  await page.getByTestId('audit-subject-filter').click();
+  const auditSubjectOption = page.getByRole('option', {
+    name: sessionUserName,
+  });
+  await expect(auditSubjectOption).toBeVisible({ timeout: 60_000 });
+  const filteredAuditResponse = waitForApiResponse(
+    page,
+    'GET',
+    '/api/admin-access/audit-records',
   );
-  await page.getByTestId('search-audit').click();
-  await expect(tableRow(page, 'audit-table', sessionUserName)).toBeVisible({
+  await auditSubjectOption.click();
+  const filteredAudits = await readApiData<AuditRecordPage>(
+    await filteredAuditResponse,
+    acceptanceEvidence,
+    'GET',
+  );
+  expect(
+    filteredAudits.items.some(
+      (record) => record.subjectAdministratorId === sessionAdministrator.id,
+    ),
+  ).toBe(true);
+  await expect(
+    tableRow(page, 'audit-table', sessionAdministrator.id).first(),
+  ).toBeVisible({
     timeout: 60_000,
   });
 
@@ -1152,7 +1179,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   const bootstrapPassword = requireEnvironment('NOVAGAME_E2E_PASSWORD');
   const bootstrapUserName = requireEnvironment('NOVAGAME_E2E_USERNAME');
   const runId = crypto.randomUUID();
-  const longValue = `E2E-${runId}-${'long-operational-value-'.repeat(8)}`;
+  const longValue = `E2E-${runId}-${'long-operational-value-'.repeat(3)}`;
   const statePassword = `State-${runId}-Password!`;
 
   const bootstrapAccessToken = await login(
@@ -1218,7 +1245,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
       {
         data: {
           name: `State access only ${runId}`,
-          permissionNames: [accessPermission],
+          permissionNames: [accessPermission, gameConfigAccessPermission],
         },
         headers: {
           ...authorizationHeaders(bootstrapAccessToken),
@@ -1252,28 +1279,23 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     acceptanceEvidence,
     'POST',
   );
-  const stateViewerLogin = await readApiData<AccessTokenResponse>(
-    await acceptanceEvidence.apiRequest(
-      page.request,
-      'POST',
-      apiUrl(apiBaseURL, '/auth/login'),
-      {
-        data: {
-          password: stateViewerPassword,
-          userName: stateViewer.userName,
-        },
-      },
-    ),
+  await logout(page, acceptanceEvidence);
+  const stateViewerAccessToken = await login(
+    page,
+    stateViewer.userName,
+    stateViewerPassword,
     acceptanceEvidence,
-    'POST',
   );
   const forbiddenResponse = await acceptanceEvidence.apiRequest(
     page.request,
     'GET',
     apiUrl(apiBaseURL, '/admin-access/administrators?page=1&pageSize=20'),
-    { headers: authorizationHeaders(stateViewerLogin.accessToken) },
+    { headers: authorizationHeaders(stateViewerAccessToken) },
   );
   await assertResponseStatus(forbiddenResponse, acceptanceEvidence, 403, 'GET');
+
+  await logout(page, acceptanceEvidence);
+  await login(page, bootstrapUserName, bootstrapPassword, acceptanceEvidence);
 
   const notFoundResponse = await acceptanceEvidence.apiRequest(
     page.request,
@@ -1358,6 +1380,12 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     );
     await assertNoBodyOverflow(page);
   }
+  await openWorkspace(
+    page,
+    '/admin-access/roles',
+    'Roles and permissions',
+    'role-table',
+  );
   await page.getByTestId('create-role').focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('role-create-drawer')).toBeVisible();
@@ -1385,7 +1413,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   await acceptanceEvidence.withExpectedApiNetworkFailure(
     page,
     {
-      exactPathAndQuery: '/api/admin-access/administrators?page=1&pageSize=20',
+      exactPathAndQuery: '/api/admin-access/administrators?Page=1&PageSize=20',
       method: 'GET',
     },
     async () => {

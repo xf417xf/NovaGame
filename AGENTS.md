@@ -78,10 +78,11 @@ action cell. M35-05-T06 completed sequential management-admin, checked-contract,
 Documentation, Repository, and whitespace verification after correcting a brittle static
 permission-source verifier check. M35-05 is complete. M35-06 completed its frozen real-server
 acceptance, security evidence, serial cumulative verification, and zero-residue cleanup audit.
-M3.5 is active only at `M35-07-T01`. Follow `docs/goals/m3.5.md`. The active task authorizes only
-the frozen real-browser acceptance foundation; it does not authorize M35-07-T02 or later work,
-SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
-remains `Unscheduled`.
+M3.5 completed the frozen real-browser acceptance foundation at `M35-07-T01`; it is active only at
+`M35-07-T02`. Follow `docs/goals/m3.5.md`. The active task authorizes only the frozen route/action
+permission and authoritative `401`/`403` acceptance; it does not authorize M35-07-T03 or later
+work, SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes.
+M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 
@@ -181,5 +182,8 @@ A change is complete only when:
 - persistence changes include reviewed migrations;
 - public contract changes update generated clients and documentation;
 - required validation commands were actually run.
+- when an executable goal is active, its verified task result is recorded and committed before the
+  successor task begins; after cumulative checks, each completed stage is likewise recorded and
+  committed before its successor stage begins.
 
 Do not claim completion for checks that were not run. Record blockers and failed verification in the current executable goal when one exists instead of weakening acceptance criteria.

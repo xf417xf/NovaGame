@@ -11755,7 +11755,7 @@ function Get-AdminManagementResponseAuditManifest {
                     ExpectedNetworkFailureCount = 1
                     ExpectedNetworkFailureMethod = "GET"
                     ExpectedNetworkFailurePathAndQuery =
-                        "/api/admin-access/administrators?page=1&pageSize=20"
+                        "/api/admin-access/administrators?Page=1&PageSize=20"
                     FileName =
                         "admin-access-responsive-failures-response-audit.json"
                     TestTitle = "responsive and failure states"
@@ -13177,7 +13177,7 @@ function Test-AdminManagementArtifactPolicy {
                 "operator completes the GameConfig lifecycle against the real API"
             testStatus = "passed"
             responseBodies = @(
-                0..6 | ForEach-Object {
+                0..8 | ForEach-Object {
                     [ordered]@{
                         sequence = $_
                         method = "GET"
@@ -13187,15 +13187,15 @@ function Test-AdminManagementArtifactPolicy {
                         scanned = $true
                     }
                 })
-            responseBodyCount = 7
+            responseBodyCount = 9
             contextLedger = [ordered]@{
                 closedBeforeListenerDetach = 1
                 observed = 1
             }
             directRequestLedger = [ordered]@{
-                directApiRequestsCompleted = 6
+                directApiRequestsCompleted = 8
                 directApiRequestsFailed = 0
-                directApiRequestsObserved = 6
+                directApiRequestsObserved = 8
             }
             expectedNetworkFailures = @()
             requestLedger = [ordered]@{
@@ -13398,7 +13398,7 @@ function Test-AdminManagementArtifactPolicy {
         $responseAuditProbe.requestLedger.browserResponsesObserved = 0
         $responseAuditProbe.responseBodies = @(
             $responseAuditProbe.responseBodies | Select-Object -Skip 1)
-        $responseAuditProbe.responseBodyCount = 6
+        $responseAuditProbe.responseBodyCount = 8
         & $writeResponseAuditProbe
         $unexpectedNetworkFailureRejected = $false
         try {
@@ -13420,13 +13420,13 @@ function Test-AdminManagementArtifactPolicy {
             ExpectedNetworkFailureCount = 1
             ExpectedNetworkFailureMethod = "GET"
             ExpectedNetworkFailurePathAndQuery =
-                "/api/admin-access/administrators?page=1&pageSize=20"
+                "/api/admin-access/administrators?Page=1&PageSize=20"
         }
         $correctNetworkFailureRecord = [pscustomobject]@{
             count = 1
             method = "GET"
             pathAndQuery =
-                "/api/admin-access/administrators?page=1&pageSize=20"
+                "/api/admin-access/administrators?Page=1&PageSize=20"
         }
         Assert-AdminManagementExpectedNetworkFailures `
             -Records @($correctNetworkFailureRecord) `
@@ -13439,7 +13439,7 @@ function Test-AdminManagementArtifactPolicy {
                             count = 1
                             method = "POST"
                             pathAndQuery =
-                                "/api/admin-access/administrators?page=1&pageSize=20"
+                                "/api/admin-access/administrators?Page=1&PageSize=20"
                         })
                 },
                 [pscustomobject]@{
@@ -13457,7 +13457,7 @@ function Test-AdminManagementArtifactPolicy {
                             count = 1
                             method = "GET"
                             pathAndQuery =
-                                "/api/admin-access/administrators?page=2&pageSize=20"
+                                "/api/admin-access/administrators?Page=2&PageSize=20"
                         })
                 },
                 [pscustomobject]@{
@@ -13488,7 +13488,7 @@ function Test-AdminManagementArtifactPolicy {
         }
 
         $responseAuditProbe.responseBodies = @(
-            0..6 | ForEach-Object {
+            0..8 | ForEach-Object {
                 [ordered]@{
                     sequence = $_
                     method = "GET"
@@ -13498,7 +13498,7 @@ function Test-AdminManagementArtifactPolicy {
                     scanned = $true
                 }
             })
-        $responseAuditProbe.responseBodyCount = 7
+        $responseAuditProbe.responseBodyCount = 9
         $responseAuditProbe.expectedNetworkFailures = @()
         $responseAuditProbe.requestLedger.browserRequestFailuresExpected = 0
         $responseAuditProbe.requestLedger.browserRequestsCompleted = 1
@@ -14109,6 +14109,7 @@ function Invoke-AdminEndToEnd {
     $dynamicSecretRegistryComplete = $false
     $processJobHandle = [IntPtr]::Zero
     $ownedProcessIdentities = @()
+    $processJobIdentityCaptured = $false
     $screenshotSpecifications = @()
     $screenshotInspectionRecords = @()
     $successfulScreenshotsValidated = $false
@@ -14139,6 +14140,9 @@ function Invoke-AdminEndToEnd {
         "DOTNET_ENVIRONMENT",
         "NovaCore__Web__ForwardedHeaders__IsEnabled",
         "NovaCore__Web__ForwardedHeaders__KnownProxies__0",
+        "NovaGame__AdminAccess__LoginRateLimit__PermitLimit",
+        "NovaGame__AdminAccess__LoginRateLimit__Window",
+        "NovaGame__AdminAccess__LoginRateLimit__QueueLimit",
         "VITE_GLOB_API_URL",
         "VITE_NOVAGAME_API_URL",
         "VITE_NITRO_MOCK",
@@ -14234,6 +14238,19 @@ function Invoke-AdminEndToEnd {
         }
         $previousAdminAccessEnvironment = Set-NovaGameAdminAccessProcessEnvironment `
             -Values $adminAccessEnvironment
+        $runtimeSettings = [ordered]@{
+            # The real browser suite performs multiple valid logins while preserving
+            # production's five-attempt default for its dedicated rate-limit tests.
+            NovaGame__AdminAccess__LoginRateLimit__PermitLimit = "100"
+            NovaGame__AdminAccess__LoginRateLimit__Window = "00:01:00"
+            NovaGame__AdminAccess__LoginRateLimit__QueueLimit = "0"
+        }
+        foreach ($runtimeSetting in $runtimeSettings.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable(
+                [string]$runtimeSetting.Key,
+                [string]$runtimeSetting.Value,
+                "Process")
+        }
         $env:DOTNET_ENVIRONMENT = "Testing"
         $env:ASPNETCORE_ENVIRONMENT = "Testing"
 
@@ -14467,15 +14484,21 @@ function Invoke-AdminEndToEnd {
         $playwrightProcess = Start-NovaGameJobProcess `
             -JobHandle $processJobHandle `
             -TargetStartInfo $playwrightStartInfo
-        $playwrightCompleted = $playwrightProcess.WaitForExit(600000)
+        # The frozen serial suite has five tests that can each use its 300-second
+        # Playwright budget. Keep the outer process budget above that aggregate so
+        # the runner returns its registered failure diagnostic instead of being cut off.
+        $playwrightCompleted = $playwrightProcess.WaitForExit(1800000)
         if (-not $playwrightCompleted) {
+            $ownedProcessIdentities = @(
+                Get-NovaGameJobProcessIdentities -JobHandle $processJobHandle)
+            $processJobIdentityCaptured = $true
             $playwrightProcess.Kill($true)
         }
         $playwrightProcess.WaitForExit()
         $playwrightProcess.Refresh()
         $playwrightExitCode = $playwrightProcess.ExitCode
         if (-not $playwrightCompleted) {
-            throw "Admin Playwright acceptance exceeded 600 seconds."
+            throw "Admin Playwright acceptance exceeded 1800 seconds."
         }
         if ($playwrightExitCode -ne 0) {
             $playwrightFailureDiagnostic =
@@ -14507,7 +14530,8 @@ function Invoke-AdminEndToEnd {
     }
     finally {
         try {
-            if ($processJobHandle -ne [IntPtr]::Zero) {
+            if (-not $processJobIdentityCaptured -and
+                $processJobHandle -ne [IntPtr]::Zero) {
                 $ownedProcessIdentities = @(
                     Get-NovaGameJobProcessIdentities `
                         -JobHandle $processJobHandle)
