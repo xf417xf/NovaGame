@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NovaGameApiError } from './api-result';
 
@@ -8,7 +8,22 @@ type ResponseInterceptor = {
   rejected?: (error: unknown) => unknown;
 };
 
+type AuthenticationResponseInterceptor = {
+  doReAuthenticate: () => Promise<void>;
+  doRefreshToken: () => Promise<string>;
+};
+
 const requestClientState = vi.hoisted(() => ({
+  authenticationResponseInterceptor:
+    null as AuthenticationResponseInterceptor | null,
+  authStore: {
+    expireSession: vi.fn(),
+    refreshAccessTokenForRequest: vi.fn(),
+  },
+  accessStore: {
+    accessToken: null as null | string,
+    setAccessToken: vi.fn(),
+  },
   responseInterceptors: [] as ResponseInterceptor[],
 }));
 
@@ -21,7 +36,12 @@ vi.mock('@vben/preferences', () => ({
 }));
 
 vi.mock('@vben/request', () => ({
-  authenticateResponseInterceptor: () => ({}),
+  authenticateResponseInterceptor: (
+    interceptor: AuthenticationResponseInterceptor,
+  ) => {
+    requestClientState.authenticationResponseInterceptor = interceptor;
+    return {};
+  },
   RequestClient: class {
     addRequestInterceptor() {}
 
@@ -32,10 +52,19 @@ vi.mock('@vben/request', () => ({
 }));
 
 vi.mock('@vben/stores', () => ({
-  useAccessStore: () => ({ accessToken: null, setAccessToken: vi.fn() }),
+  useAccessStore: () => requestClientState.accessStore,
+}));
+
+vi.mock('#/store', () => ({
+  useAuthStore: () => requestClientState.authStore,
 }));
 
 describe('administrator access request cancellation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requestClientState.accessStore.accessToken = null;
+  });
+
   it('rethrows cancellation from the registered production response interceptor', () => {
     const rejected = requestClientState.responseInterceptors.at(-1)?.rejected;
     expect(rejected).toBeTypeOf('function');
@@ -58,5 +87,29 @@ describe('administrator access request cancellation', () => {
 
     expect(received).toBe(cancelled);
     expect(received).not.toBeInstanceOf(NovaGameApiError);
+  });
+
+  it('delegates response refresh token application to the auth lifecycle', async () => {
+    const interceptor = requestClientState.authenticationResponseInterceptor;
+    expect(interceptor).not.toBeNull();
+    if (!interceptor) {
+      throw new Error(
+        'The request client did not register an authentication interceptor.',
+      );
+    }
+    requestClientState.authStore.refreshAccessTokenForRequest.mockResolvedValue(
+      'coordinated-access-token',
+    );
+
+    await expect(interceptor.doRefreshToken()).resolves.toBe(
+      'coordinated-access-token',
+    );
+
+    expect(
+      requestClientState.authStore.refreshAccessTokenForRequest,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      requestClientState.accessStore.setAccessToken,
+    ).not.toHaveBeenCalled();
   });
 });

@@ -78,10 +78,11 @@ action cell. M35-05-T06 completed sequential management-admin, checked-contract,
 Documentation, Repository, and whitespace verification after correcting a brittle static
 permission-source verifier check. M35-05 is complete. M35-06 completed its frozen real-server
 acceptance, security evidence, serial cumulative verification, and zero-residue cleanup audit.
-M3.5 completed the frozen real-browser acceptance foundation at `M35-07-T01`; it is active only at
-`M35-07-T02`. Follow `docs/goals/m3.5.md`. The active task authorizes only the frozen route/action
-permission and authoritative `401`/`403` acceptance; it does not authorize M35-07-T03 or later
-work, SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes.
+M3.5 completed the frozen real-browser acceptance foundation at `M35-07-T01` and the frozen
+route/action permission plus authoritative `401`/`403` acceptance at `M35-07-T02`. Follow
+`docs/goals/m3.5.md`. M3.5 is blocked at `M35-07-T03`, which requires explicit user authorization
+before any responsive acceptance work begins. It does not authorize M35-07-T04 or later work,
+SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes.
 M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.

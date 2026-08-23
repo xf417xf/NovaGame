@@ -57,6 +57,52 @@ export const authenticateResponseInterceptor = ({
   enableRefreshToken: boolean;
   formatToken: (token: string) => null | string;
 }): ResponseInterceptorConfig => {
+  let reauthenticationPromise: null | Promise<void> = null;
+  let reauthenticationSettled = false;
+
+  function clearSettledReauthentication() {
+    if (
+      reauthenticationPromise &&
+      reauthenticationSettled &&
+      !client.isRefreshing
+    ) {
+      reauthenticationPromise = null;
+      reauthenticationSettled = false;
+    }
+  }
+
+  function markReauthenticationSettled(pendingReauthentication: Promise<void>) {
+    if (reauthenticationPromise !== pendingReauthentication) {
+      return;
+    }
+
+    reauthenticationSettled = true;
+    clearSettledReauthentication();
+  }
+
+  function getReauthenticationPromise() {
+    if (!reauthenticationPromise) {
+      const pendingReauthentication = doReAuthenticate();
+      reauthenticationPromise = pendingReauthentication;
+      reauthenticationSettled = false;
+      void pendingReauthentication.then(
+        () => markReauthenticationSettled(pendingReauthentication),
+        () => markReauthenticationSettled(pendingReauthentication),
+      );
+    }
+
+    return reauthenticationPromise;
+  }
+
+  async function reauthenticate() {
+    const pendingReauthentication = getReauthenticationPromise();
+    try {
+      await pendingReauthentication;
+    } finally {
+      clearSettledReauthentication();
+    }
+  }
+
   return {
     rejected: async (error) => {
       const { config, response } = error;
@@ -67,14 +113,22 @@ export const authenticateResponseInterceptor = ({
       // 判断是否启用了 refreshToken 功能
       // 如果没有启用或者已经是重试请求了，直接跳转到重新登录
       if (!enableRefreshToken || config.__isRetryRequest) {
-        await doReAuthenticate();
+        await reauthenticate();
+        throw error;
+      }
+      if (reauthenticationPromise) {
+        await reauthenticate();
         throw error;
       }
       // 如果正在刷新 token，则将请求加入队列，等待刷新完成
       if (client.isRefreshing) {
-        return new Promise((resolve) => {
-          client.refreshTokenQueue.push((newToken: string) => {
-            config.headers.Authorization = formatToken(newToken);
+        return new Promise((resolve, reject) => {
+          client.refreshTokenQueue.push((result) => {
+            if (result.kind === 'failure') {
+              reject(result.error);
+              return;
+            }
+            config.headers.Authorization = formatToken(result.token);
             resolve(client.request(config.url, { ...config }));
           });
         });
@@ -89,21 +143,30 @@ export const authenticateResponseInterceptor = ({
         const newToken = await doRefreshToken();
 
         // 处理队列中的请求
-        client.refreshTokenQueue.forEach((callback) => callback(newToken));
+        client.refreshTokenQueue.forEach((callback) =>
+          callback({ kind: 'success', token: newToken }),
+        );
         // 清空队列
         client.refreshTokenQueue = [];
 
         return client.request(error.config.url, { ...error.config });
       } catch (refreshError) {
         // 如果刷新 token 失败，处理错误（如强制登出或跳转登录页面）
-        client.refreshTokenQueue.forEach((callback) => callback(''));
+        client.refreshTokenQueue.forEach((callback) =>
+          callback({ error: refreshError, kind: 'failure' }),
+        );
         client.refreshTokenQueue = [];
+        if (axios.isCancel(refreshError)) {
+          throw refreshError;
+        }
         console.error('Refresh token failed, please login again.');
-        await doReAuthenticate();
+        const pendingReauthentication = getReauthenticationPromise();
+        await pendingReauthentication;
 
         throw refreshError;
       } finally {
         client.isRefreshing = false;
+        clearSettledReauthentication();
       }
     },
   };

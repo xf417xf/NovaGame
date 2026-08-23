@@ -52,7 +52,7 @@ function setupAccessGuard(router: Router) {
       }
 
       if (await authStore.restoreSession()) {
-        return { ...router.resolve(to.fullPath), replace: true };
+        return { path: to.fullPath, replace: true };
       }
 
       return {
@@ -69,11 +69,37 @@ function setupAccessGuard(router: Router) {
       return true;
     }
 
-    const userInfo = userStore.userInfo || (await authStore.fetchUserInfo());
-    const { accessibleMenus, accessibleRoutes } = await refreshAccessibleRoutes(
+    let userInfo = userStore.userInfo;
+    if (!userInfo) {
+      await authStore.fetchUserInfo();
+      userInfo = userStore.userInfo;
+    }
+    const accessToken = accessStore.accessToken;
+    if (!userInfo || !accessToken) {
+      return {
+        path: LOGIN_PATH,
+        query: { redirect: encodeURIComponent(to.fullPath) },
+        replace: true,
+      };
+    }
+    const refreshedRoutes = await refreshAccessibleRoutes(
       router,
       accessStore.accessCodes,
+      () =>
+        accessStore.accessToken === accessToken &&
+        userStore.userInfo === userInfo,
     );
+    if (!refreshedRoutes) {
+      if (accessStore.accessToken) {
+        return false;
+      }
+      return {
+        path: LOGIN_PATH,
+        query: { redirect: encodeURIComponent(to.fullPath) },
+        replace: true,
+      };
+    }
+    const { accessibleMenus, accessibleRoutes } = refreshedRoutes;
 
     accessStore.setAccessMenus(accessibleMenus);
     accessStore.setAccessRoutes(accessibleRoutes);

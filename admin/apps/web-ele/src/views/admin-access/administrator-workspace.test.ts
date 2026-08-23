@@ -111,6 +111,12 @@ vi.mock('element-plus', () => {
       return () => h('div', attrs, slots.default?.());
     },
   });
+  const ElResult = defineComponent({
+    inheritAttrs: false,
+    setup(_, { attrs, slots }) {
+      return () => h('div', attrs, slots.extra?.());
+    },
+  });
   const ElAlert = defineComponent({
     inheritAttrs: false,
     props: {
@@ -335,7 +341,7 @@ vi.mock('element-plus', () => {
     ElInput,
     ElOption,
     ElPagination,
-    ElResult: Container,
+    ElResult,
     ElSelect,
     ElTable,
     ElTableColumn,
@@ -1306,5 +1312,167 @@ describe('administrator workspace', () => {
     expect(wrapper.find('[data-testid="create-administrator"]').exists()).toBe(
       false,
     );
+  });
+
+  it('avoids administrator list requests after read access is removed', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+    ];
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    const listRequestCount = api.listAdministrators.mock.calls.length;
+
+    getAccessStore().accessCodes = [accessPermission];
+    await flushPromises();
+
+    const refreshButton = wrapper.get('[data-testid="refresh-administrators"]');
+    expect(refreshButton.attributes('disabled')).toBeDefined();
+    await refreshButton.trigger('click');
+    await flushPromises();
+
+    const retryButton = wrapper.get('[data-testid="retry-administrators"]');
+    expect(retryButton.attributes('disabled')).toBeUndefined();
+    await retryButton.trigger('click');
+    await flushPromises();
+
+    expect(api.listAdministrators).toHaveBeenCalledTimes(listRequestCount);
+    expect(wrapper.find('[data-testid="administrator-table"]').exists()).toBe(
+      false,
+    );
+  });
+
+  it('keeps administrators forbidden until a failed permission reconciliation is retried successfully', async () => {
+    const refreshedState = deferred<{
+      accessibleRoutes: {
+        children: { path: string }[];
+        path: string;
+      }[];
+      userInfo: Record<string, never>;
+    }>();
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+      rolesReadPermission,
+    ];
+    authentication.refreshAuthenticatedState
+      .mockRejectedValueOnce({
+        message: 'Permission refresh is unavailable.',
+        status: 0,
+      })
+      .mockReturnValueOnce(refreshedState.promise);
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    const listCallCountBeforeReconciliation =
+      api.listAdministrators.mock.calls.length;
+    const roleListCallCountBeforeReconciliation =
+      api.listAdminRoles.mock.calls.length;
+    const refreshCallCountBeforeReconciliation =
+      authentication.refreshAuthenticatedState.mock.calls.length;
+
+    wrapper.findComponent(AdministratorCreateDrawer).vm.$emit('forbidden');
+    await flushPromises();
+
+    expect(
+      wrapper.find('[data-testid="administrators-forbidden"]').exists(),
+    ).toBe(true);
+    expect(
+      wrapper
+        .find('[data-testid="administrator-access-reconciliation-error"]')
+        .text(),
+    ).toContain('Permission refresh is unavailable.');
+    expect(wrapper.find('[data-testid="create-administrator"]').exists()).toBe(
+      false,
+    );
+    expect(
+      wrapper
+        .get('[data-testid="refresh-administrators"]')
+        .attributes('disabled'),
+    ).toBeDefined();
+    expect(api.listAdministrators).toHaveBeenCalledTimes(
+      listCallCountBeforeReconciliation,
+    );
+    expect(api.listAdminRoles).toHaveBeenCalledTimes(
+      roleListCallCountBeforeReconciliation,
+    );
+
+    await wrapper.get('[data-testid="retry-administrators"]').trigger('click');
+    await flushPromises();
+
+    expect(authentication.refreshAuthenticatedState).toHaveBeenCalledTimes(
+      refreshCallCountBeforeReconciliation + 2,
+    );
+    expect(
+      wrapper.find('[data-testid="administrators-forbidden"]').exists(),
+    ).toBe(true);
+    expect(api.listAdministrators).toHaveBeenCalledTimes(
+      listCallCountBeforeReconciliation,
+    );
+    expect(api.listAdminRoles).toHaveBeenCalledTimes(
+      roleListCallCountBeforeReconciliation,
+    );
+
+    refreshedState.resolve({
+      accessibleRoutes: [
+        {
+          children: [{ path: '/admin-access/administrators' }],
+          path: '/admin-access',
+        },
+      ],
+      userInfo: {},
+    });
+    await flushPromises();
+
+    expect(
+      wrapper.find('[data-testid="administrators-forbidden"]').exists(),
+    ).toBe(false);
+    expect(wrapper.find('[data-testid="create-administrator"]').exists()).toBe(
+      true,
+    );
+    expect(api.listAdministrators).toHaveBeenCalledTimes(
+      listCallCountBeforeReconciliation + 1,
+    );
+  });
+
+  it('blocks administrator reload controls while a forbidden response reconciles permissions', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+    ];
+    const reconciliation = deferred<{
+      accessibleRoutes: [];
+      userInfo: Record<string, never>;
+    }>();
+    authentication.refreshAuthenticatedState.mockReturnValueOnce(
+      reconciliation.promise,
+    );
+    api.listAdministrators
+      .mockRejectedValueOnce({
+        message: 'Administrator access is required.',
+        status: 403,
+      })
+      .mockResolvedValue(administratorPage());
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    const listRequestCount = api.listAdministrators.mock.calls.length;
+
+    const refreshButton = wrapper.get('[data-testid="refresh-administrators"]');
+    expect(refreshButton.attributes('disabled')).toBeDefined();
+    await refreshButton.trigger('click');
+
+    const retryButton = wrapper.get('[data-testid="retry-administrators"]');
+    expect(retryButton.attributes('disabled')).toBeDefined();
+    await retryButton.trigger('click');
+    await flushPromises();
+
+    expect(api.listAdministrators).toHaveBeenCalledTimes(listRequestCount);
+
+    reconciliation.resolve({ accessibleRoutes: [], userInfo: {} });
+    await flushPromises();
+
+    expect(api.listAdministrators).toHaveBeenCalledTimes(listRequestCount + 1);
   });
 });

@@ -86,6 +86,9 @@ const errorMessage = ref('');
 const forbidden = ref(false);
 const loading = ref(false);
 const passwordResetDialogOpen = ref(false);
+const reconciliationError = ref('');
+const reconciliationRequired = ref(false);
+const reconcilingPermissions = ref(false);
 const roleFilterOptions = ref<AdminRoleSummaryDto[]>([]);
 const rolesDrawerOpen = ref(false);
 const selectedAdministratorId = ref<null | string>(null);
@@ -129,6 +132,18 @@ const canResetPassword = computed(() =>
     AdminAccessPermission.AdministratorsResetPassword,
   ),
 );
+const canReadAdministratorWorkspace = computed(
+  () => canReadAdministrators.value && !reconciliationRequired.value,
+);
+const canManageAdministratorWorkspace = computed(
+  () => canManage.value && canReadAdministratorWorkspace.value,
+);
+const canReadRoleFilterWorkspace = computed(
+  () => canReadRoles.value && canReadAdministratorWorkspace.value,
+);
+const canResetPasswordWorkspace = computed(
+  () => canResetPassword.value && canReadAdministratorWorkspace.value,
+);
 const currentAdministratorId = computed(
   () => userStore.userInfo?.userId ?? null,
 );
@@ -136,6 +151,9 @@ const paginationLayout = computed(() =>
   isMobile.value ? 'prev, pager, next' : 'total, sizes, prev, pager, next',
 );
 const paginationPagerCount = computed(() => (isMobile.value ? 5 : 7));
+const administratorWorkspaceForbidden = computed(
+  () => forbidden.value || reconciliationRequired.value,
+);
 
 function formatDate(value: null | string | undefined): string {
   if (!value) {
@@ -158,8 +176,8 @@ function isCurrentAdministrator(administrator: AdministratorDto): boolean {
 
 function hasAdministratorRowCommand(administrator: AdministratorDto): boolean {
   return (
-    canManage.value ||
-    (canResetPassword.value && !isCurrentAdministrator(administrator))
+    canManageAdministratorWorkspace.value ||
+    (canResetPasswordWorkspace.value && !isCurrentAdministrator(administrator))
   );
 }
 
@@ -219,6 +237,7 @@ async function refreshPermissionsAfterForbidden() {
   }
 
   const refresh = (async () => {
+    reconcilingPermissions.value = true;
     closeAdministratorInteractions();
     clearRoleFilterState();
     administratorListSequence += 1;
@@ -226,7 +245,10 @@ async function refreshPermissionsAfterForbidden() {
     administratorListController = null;
     loading.value = false;
     errorMessage.value = '';
+    reconciliationError.value = '';
+    reconciliationRequired.value = true;
     forbidden.value = true;
+    clearAdministratorResults();
 
     try {
       const refreshed = await authStore.refreshAuthenticatedState();
@@ -234,6 +256,7 @@ async function refreshPermissionsAfterForbidden() {
         return;
       }
 
+      reconciliationError.value = '';
       if (!canReadRoles.value) {
         clearRoleFilterState();
       }
@@ -251,12 +274,15 @@ async function refreshPermissionsAfterForbidden() {
         return;
       }
 
+      reconciliationRequired.value = false;
       forbidden.value = false;
       await loadAdministrators();
     } catch (error) {
       if (!isNovaGameRequestCancelled(error)) {
-        errorMessage.value = toNovaGameApiError(error).message;
+        reconciliationError.value = toNovaGameApiError(error).message;
       }
+    } finally {
+      reconcilingPermissions.value = false;
     }
   })();
 
@@ -270,12 +296,22 @@ async function refreshPermissionsAfterForbidden() {
   }
 }
 
+function refreshAdministrators() {
+  if (administratorWorkspaceForbidden.value) {
+    void refreshPermissionsAfterForbidden();
+    return;
+  }
+  void loadAdministrators();
+}
+
 function recordError(error: unknown) {
   if (isNovaGameRequestCancelled(error)) {
     return;
   }
   const apiError = toNovaGameApiError(error);
   if (apiError.status === 403) {
+    reconciliationRequired.value = true;
+    forbidden.value = true;
     void refreshPermissionsAfterForbidden();
     return;
   }
@@ -285,6 +321,15 @@ function recordError(error: unknown) {
 async function loadAdministrators() {
   const sequence = ++administratorListSequence;
   administratorListController?.abort();
+  if (!canReadAdministratorWorkspace.value) {
+    administratorListController = null;
+    loading.value = false;
+    errorMessage.value = '';
+    clearAdministratorResults();
+    forbidden.value = true;
+    return;
+  }
+
   const controller = new AbortController();
   administratorListController = controller;
   errorMessage.value = '';
@@ -304,7 +349,7 @@ async function loadAdministrators() {
     );
     if (
       sequence !== administratorListSequence ||
-      !canReadAdministrators.value
+      !canReadAdministratorWorkspace.value
     ) {
       return;
     }
@@ -323,7 +368,7 @@ async function loadAdministrators() {
 
 async function loadRoleFilterOptions(search = '') {
   const sequence = ++roleFilterSequence;
-  if (!canReadRoles.value) {
+  if (!canReadRoleFilterWorkspace.value) {
     roleFilterController?.abort();
     roleFilterController = null;
     roleFilterOptions.value = [];
@@ -342,7 +387,7 @@ async function loadRoleFilterOptions(search = '') {
       },
       { signal: controller.signal },
     );
-    if (sequence === roleFilterSequence && canReadRoles.value) {
+    if (sequence === roleFilterSequence && canReadRoleFilterWorkspace.value) {
       roleFilterOptions.value = response.data.items ?? [];
     }
   } catch (error) {
@@ -358,26 +403,44 @@ function applyFilters() {
 }
 
 function openCreateDrawer() {
+  if (!canManageAdministratorWorkspace.value) {
+    return;
+  }
   createDrawerOpen.value = true;
 }
 
 function openDisplayNameDrawer(administrator: AdministratorDto) {
+  if (!canManageAdministratorWorkspace.value) {
+    return;
+  }
   selectedAdministratorId.value = administrator.id ?? null;
   displayNameDrawerOpen.value = true;
 }
 
 function openRolesDrawer(administrator: AdministratorDto) {
+  if (
+    !canManageAdministratorWorkspace.value ||
+    !canReadRoleFilterWorkspace.value
+  ) {
+    return;
+  }
   selectedAdministratorId.value = administrator.id ?? null;
   rolesDrawerOpen.value = true;
 }
 
 function openStateDialog(administrator: AdministratorDto) {
+  if (!canManageAdministratorWorkspace.value) {
+    return;
+  }
   selectedAdministratorId.value = administrator.id ?? null;
   targetActiveState.value = administrator.isActive !== true;
   stateDialogOpen.value = true;
 }
 
 function openPasswordResetDialog(administrator: AdministratorDto) {
+  if (!canResetPasswordWorkspace.value) {
+    return;
+  }
   selectedAdministratorId.value = administrator.id ?? null;
   passwordResetDialogOpen.value = true;
 }
@@ -426,13 +489,14 @@ function handleStaleAdministrator() {
 }
 
 watch(canReadAdministrators, (canRead) => {
-  if (canRead) {
+  if (canRead && !reconciliationRequired.value) {
     return;
   }
   administratorListSequence += 1;
   administratorListController?.abort();
   administratorListController = null;
   loading.value = false;
+  closeAdministratorInteractions();
   clearAdministratorResults();
   forbidden.value = true;
 });
@@ -448,7 +512,7 @@ watch(canReadRoles, (canReadRoles, previouslyCouldReadRoles) => {
   if (
     previouslyCouldReadRoles &&
     hadRoleFilter &&
-    canReadAdministrators.value
+    canReadAdministratorWorkspace.value
   ) {
     void loadAdministrators();
   }
@@ -476,7 +540,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="header-actions">
         <ElButton
-          v-if="canManage"
+          v-if="canManageAdministratorWorkspace"
           data-testid="create-administrator"
           type="primary"
           @click="openCreateDrawer"
@@ -486,11 +550,12 @@ onBeforeUnmount(() => {
         </ElButton>
         <ElTooltip content="Refresh administrators" placement="bottom">
           <ElButton
-            :loading="loading"
+            :disabled="administratorWorkspaceForbidden"
+            :loading="loading || reconcilingPermissions"
             aria-label="Refresh administrators"
             circle
             data-testid="refresh-administrators"
-            @click="loadAdministrators"
+            @click="refreshAdministrators"
           >
             <RotateCw :size="16" />
           </ElButton>
@@ -500,12 +565,30 @@ onBeforeUnmount(() => {
 
     <main class="workspace-body">
       <ElResult
-        v-if="forbidden"
+        v-if="administratorWorkspaceForbidden"
+        data-testid="administrators-forbidden"
         sub-title="Your account does not have access to administrator accounts."
         title="Forbidden"
       >
         <template #extra>
-          <ElButton @click="loadAdministrators">Retry</ElButton>
+          <div class="forbidden-actions">
+            <ElAlert
+              v-if="reconciliationError"
+              :closable="false"
+              :title="reconciliationError"
+              data-testid="administrator-access-reconciliation-error"
+              show-icon
+              type="error"
+            />
+            <ElButton
+              :disabled="reconcilingPermissions"
+              :loading="reconcilingPermissions"
+              data-testid="retry-administrators"
+              @click="refreshPermissionsAfterForbidden"
+            >
+              Retry access check
+            </ElButton>
+          </div>
         </template>
       </ElResult>
 
@@ -533,7 +616,7 @@ onBeforeUnmount(() => {
               <ElOption label="Inactive" :value="false" />
             </ElSelect>
             <ElSelect
-              v-if="canReadRoles"
+              v-if="canReadRoleFilterWorkspace"
               v-model="query.roleId"
               aria-label="Administrator role"
               clearable
@@ -650,21 +733,27 @@ onBeforeUnmount(() => {
                   </ElTooltip>
                   <template #dropdown>
                     <ElDropdownMenu>
-                      <ElDropdownItem v-if="canManage" command="display-name">
+                      <ElDropdownItem
+                        v-if="canManageAdministratorWorkspace"
+                        command="display-name"
+                      >
                         Edit display name
                       </ElDropdownItem>
                       <ElDropdownItem
                         v-if="
-                          canManage &&
+                          canManageAdministratorWorkspace &&
                           !isCurrentAdministrator(scope.row) &&
-                          canReadRoles
+                          canReadRoleFilterWorkspace
                         "
                         command="roles"
                       >
                         Edit roles
                       </ElDropdownItem>
                       <ElDropdownItem
-                        v-if="canManage && !isCurrentAdministrator(scope.row)"
+                        v-if="
+                          canManageAdministratorWorkspace &&
+                          !isCurrentAdministrator(scope.row)
+                        "
                         command="state"
                       >
                         {{
@@ -675,7 +764,8 @@ onBeforeUnmount(() => {
                       </ElDropdownItem>
                       <ElDropdownItem
                         v-if="
-                          canResetPassword && !isCurrentAdministrator(scope.row)
+                          canResetPasswordWorkspace &&
+                          !isCurrentAdministrator(scope.row)
                         "
                         command="password-reset"
                       >
@@ -689,7 +779,7 @@ onBeforeUnmount(() => {
                 </span>
                 <div v-else class="icon-actions">
                   <ElTooltip
-                    v-if="canManage"
+                    v-if="canManageAdministratorWorkspace"
                     content="Edit display name"
                     placement="top"
                   >
@@ -704,9 +794,9 @@ onBeforeUnmount(() => {
                   </ElTooltip>
                   <ElTooltip
                     v-if="
-                      canManage &&
+                      canManageAdministratorWorkspace &&
                       !isCurrentAdministrator(scope.row) &&
-                      canReadRoles
+                      canReadRoleFilterWorkspace
                     "
                     content="Edit roles"
                     placement="top"
@@ -721,7 +811,10 @@ onBeforeUnmount(() => {
                     </ElButton>
                   </ElTooltip>
                   <ElTooltip
-                    v-if="canManage && !isCurrentAdministrator(scope.row)"
+                    v-if="
+                      canManageAdministratorWorkspace &&
+                      !isCurrentAdministrator(scope.row)
+                    "
                     :content="
                       scope.row.isActive
                         ? 'Deactivate account'
@@ -741,7 +834,8 @@ onBeforeUnmount(() => {
                   </ElTooltip>
                   <ElTooltip
                     v-if="
-                      canResetPassword && !isCurrentAdministrator(scope.row)
+                      canResetPasswordWorkspace &&
+                      !isCurrentAdministrator(scope.row)
                     "
                     content="Reset password"
                     placement="top"
@@ -785,8 +879,8 @@ onBeforeUnmount(() => {
 
     <AdministratorCreateDrawer
       v-model="createDrawerOpen"
-      :can-manage="canManage"
-      :can-read-roles="canReadRoles"
+      :can-manage="canManageAdministratorWorkspace"
+      :can-read-roles="canReadRoleFilterWorkspace"
       @conflict="handleStaleAdministrator"
       @created="handleAdministratorCreated"
       @forbidden="refreshPermissionsAfterForbidden"
@@ -794,7 +888,7 @@ onBeforeUnmount(() => {
     <AdministratorDisplayNameDrawer
       v-model="displayNameDrawerOpen"
       :administrator-id="selectedAdministratorId"
-      :can-manage="canManage"
+      :can-manage="canManageAdministratorWorkspace"
       @forbidden="refreshPermissionsAfterForbidden"
       @stale="handleStaleAdministrator"
       @updated="replaceAdministrator"
@@ -802,8 +896,8 @@ onBeforeUnmount(() => {
     <AdministratorRolesDrawer
       v-model="rolesDrawerOpen"
       :administrator-id="selectedAdministratorId"
-      :can-manage="canManage"
-      :can-read-roles="canReadRoles"
+      :can-manage="canManageAdministratorWorkspace"
+      :can-read-roles="canReadRoleFilterWorkspace"
       @forbidden="refreshPermissionsAfterForbidden"
       @stale="handleStaleAdministrator"
       @updated="replaceAdministrator"
@@ -811,7 +905,7 @@ onBeforeUnmount(() => {
     <AdministratorStateDialog
       v-model="stateDialogOpen"
       :administrator-id="selectedAdministratorId"
-      :can-manage="canManage"
+      :can-manage="canManageAdministratorWorkspace"
       :target-active="targetActiveState"
       @forbidden="refreshPermissionsAfterForbidden"
       @stale="handleStaleAdministrator"
@@ -820,7 +914,7 @@ onBeforeUnmount(() => {
     <AdministratorPasswordResetDialog
       v-model="passwordResetDialogOpen"
       :administrator-id="selectedAdministratorId"
-      :can-reset-password="canResetPassword"
+      :can-reset-password="canResetPasswordWorkspace"
       @forbidden="refreshPermissionsAfterForbidden"
       @stale="handleStaleAdministrator"
       @updated="replaceAdministrator"
@@ -876,6 +970,12 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 14px;
   padding: 20px 24px 28px;
+}
+
+.forbidden-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .table-toolbar {

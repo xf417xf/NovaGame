@@ -9,11 +9,15 @@ import {
 
 const administratorAccessRouteName = 'AdminAccess';
 
+const administratorAccessChildRouteNames = [
+  'AdminAccessAdministrators',
+  'AdminAccessAudit',
+  'AdminAccessRoles',
+  'AdminAccessSessions',
+] as const;
+
 type AdministratorAccessChildRouteName =
-  | 'AdminAccessAdministrators'
-  | 'AdminAccessAudit'
-  | 'AdminAccessRoles'
-  | 'AdminAccessSessions';
+  (typeof administratorAccessChildRouteNames)[number];
 
 const requiredPermissions = {
   AdminAccessAdministrators: AdminAccessPermission.AdministratorsRead,
@@ -115,5 +119,5 @@ export function filterAdminAccessRoutes(
   });
 }
 
-export { administratorAccessRouteName };
+export { administratorAccessChildRouteNames, administratorAccessRouteName };
 export default routes;

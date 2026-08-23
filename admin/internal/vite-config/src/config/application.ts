@@ -80,7 +80,6 @@ function defineApplicationConfig(userConfigPromise?: DefineApplicationOptions) {
         host: true,
         port,
         warmup: {
-          // 预热文件
           clientFiles: [
             './index.html',
             './src/bootstrap.ts',

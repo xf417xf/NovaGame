@@ -10520,23 +10520,31 @@ function Assert-AdminManagementTreeHasNoReparsePoints {
     if (-not (Test-Path -LiteralPath $RootPath)) {
         return
     }
-    $reparsePoints = @(
-        Get-Item -LiteralPath $RootPath -Force -ErrorAction Stop
-        if (Test-Path -LiteralPath $RootPath -PathType Container) {
-            Get-ChildItem `
-                -LiteralPath $RootPath `
-                -Recurse `
-                -Force `
-                -ErrorAction Stop
-        }
-    ) | Where-Object {
-        $_.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)
+    $rootItem = Get-Item -LiteralPath $RootPath -Force -ErrorAction Stop
+    if ($rootItem.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+        throw "Admin management artifact tree contains a reparse point: $($rootItem.FullName)."
     }
-    $reparsePointNames = @(
-        $reparsePoints | ForEach-Object { $_.FullName })
-    Assert-Condition `
-        (@($reparsePoints).Count -eq 0) `
-        "Admin management artifact tree contains a reparse point: $($reparsePointNames -join ', ')."
+    if (-not $rootItem.PSIsContainer) {
+        return
+    }
+
+    $pendingPaths = [System.Collections.Generic.Stack[string]]::new()
+    $pendingPaths.Push($rootItem.FullName)
+    while ($pendingPaths.Count -gt 0) {
+        $currentPath = $pendingPaths.Pop()
+        foreach ($childItem in @(Get-ChildItem `
+                -LiteralPath $currentPath `
+                -Force `
+                -ErrorAction Stop)) {
+            if ($childItem.Attributes.HasFlag(
+                    [System.IO.FileAttributes]::ReparsePoint)) {
+                throw "Admin management artifact tree contains a reparse point: $($childItem.FullName)."
+            }
+            if ($childItem.PSIsContainer) {
+                $pendingPaths.Push($childItem.FullName)
+            }
+        }
+    }
 }
 
 function Remove-AdminManagementRunRoot {
@@ -10859,7 +10867,10 @@ function Remove-AdminManagementNonRetainableArtifacts {
             $screenshotPolicy.Paths.ContainsKey($relativePath)
         $isRawProcessTranscript = $relativePath -cmatch
             '^(?:api|dbmigrator|playwright)\.(?:stdout|stderr)\.log$'
-        if (($isRawProcessTranscript -or
+        $isPlaywrightFailureContext = $relativePath -cmatch
+            '^playwright-output(?:/[^/]+)*/error-context\.md$'
+        if (($isPlaywrightFailureContext -or
+                $isRawProcessTranscript -or
                 -not $retainableExtensions.Contains($artifactFile.Extension)) -and
             -not $isAllowedScreenshot) {
             Remove-Item -LiteralPath $artifactFile.FullName -Force
@@ -12427,6 +12438,17 @@ function Test-AdminManagementArtifactPolicy {
                 (Join-Path $probeRunRoot $fileName),
                 [byte[]](0, 1, 2, 255))
         }
+        $playwrightFailureContextProbePath = Join-Path `
+            $probeRunRoot `
+            "playwright-output\policy-probe\error-context.md"
+        New-Item `
+            -ItemType Directory `
+            -Path (Split-Path -Parent $playwrightFailureContextProbePath) `
+            -Force | Out-Null
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureContextProbePath,
+            "Generated Playwright failure context.",
+            $utf8)
 
         $probeScreenshotRelativePath =
             "output/playwright/visual/probe.png"
@@ -12451,6 +12473,11 @@ function Test-AdminManagementArtifactPolicy {
         Remove-AdminManagementNonRetainableArtifacts `
             -ArtifactRoot $probeRunRoot `
             -AllowedScreenshotRelativePaths @($probeScreenshotRelativePath)
+        Assert-Condition `
+            (-not (Test-Path `
+                    -LiteralPath $playwrightFailureContextProbePath `
+                    -PathType Leaf)) `
+            "Admin management cleanup retained a Playwright failure context."
         $remainingFiles = @(
             Get-ChildItem `
                 -LiteralPath $probeRunRoot `
@@ -13131,6 +13158,42 @@ function Test-AdminManagementArtifactPolicy {
                 "game-config-lifecycle-not-passed@game-config.spec.ts:321:17#dynamic-secret-pipe-timeout") `
             "Admin Playwright failure diagnostics did not return an allowlisted aggregate evidence rule."
         $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].message =
+            "Acceptance evidence rule 'role-permission-api-wait-restored-access-codes-not-observed' failed."
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "game-config-lifecycle-not-passed@game-config.spec.ts:321:17#role-permission-api-wait-restored-access-codes-not-observed") `
+            "Admin Playwright failure diagnostics did not return a source-safe API wait result."
+        $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].message =
+            "Acceptance evidence rule 'role-permission-api-wait-restored-access-codes-request-started-no-response' failed."
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "game-config-lifecycle-not-passed@game-config.spec.ts:321:17#role-permission-api-wait-restored-access-codes-request-started-no-response") `
+            "Admin Playwright failure diagnostics did not return a source-safe started-request result."
+        $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].message =
+            "Acceptance evidence rule 'role-permission-api-wait-untrusted-not-observed' failed."
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "game-config-lifecycle-not-passed@game-config.spec.ts:321:17") `
+            "Admin Playwright failure diagnostics accepted an unregistered API wait result."
+        $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].message =
             "exact-probe-secret Acceptance evidence rule 'opaque-base64url-32-byte' failed."
         $playwrightFailureProbe.suites[0].specs[0].tests[0].results[0].errors[0].location =
             $null
@@ -13159,8 +13222,131 @@ function Test-AdminManagementArtifactPolicy {
             ((Get-AdminPlaywrightFailureDiagnostic `
                     -ResultPath $playwrightFailureProbePath `
                     -Mode "LegacyGameConfig") -ceq
-                "result-manifest-invalid") `
+                "result-manifest-game-config-lifecycle-not-passed-missing") `
             "Admin Playwright failure diagnostics trusted an unknown test title."
+        $playwrightFailureProbe.suites[0].specs = @(
+            $playwrightFailureProbe.suites[0].specs[0],
+            $playwrightFailureProbe.suites[0].specs[0])
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "result-manifest-record-count-nonzero") `
+            "Admin Playwright failure diagnostics did not classify a nonzero invalid result count."
+        $playwrightFailureProbe.suites[0].specs = @()
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "result-manifest-zero-records-no-top-level-errors") `
+            "Admin Playwright failure diagnostics did not classify an empty error-free result manifest."
+        $topLevelErrorSentinel = "top-level-error-sentinel"
+        $playwrightFailureProbe.errors = @([ordered]@{
+                message = $topLevelErrorSentinel
+            })
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        $topLevelErrorDiagnostic =
+            Get-AdminPlaywrightFailureDiagnostic `
+                -ResultPath $playwrightFailureProbePath `
+                -Mode "LegacyGameConfig"
+        Assert-Condition `
+            ($topLevelErrorDiagnostic -ceq
+                "result-manifest-zero-records-top-level-errors") `
+            "Admin Playwright failure diagnostics did not classify top-level result errors."
+        Assert-Condition `
+            (-not $topLevelErrorDiagnostic.Contains(
+                    $topLevelErrorSentinel,
+                    [StringComparison]::Ordinal)) `
+            "Admin Playwright failure diagnostics exposed a top-level error value."
+        $playwrightFailureProbe.errors = @()
+        $playwrightFailureProbe.stats.expected = "invalid"
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "result-manifest-zero-records-stats-invalid") `
+            "Admin Playwright failure diagnostics did not reject invalid zero-record statistics."
+        $playwrightFailureProbe.stats.expected = 0
+        $null = $playwrightFailureProbe.Remove("errors")
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "result-manifest-zero-records-errors-invalid") `
+            "Admin Playwright failure diagnostics did not reject a missing error collection."
+        $playwrightFailureProbe["errors"] = @()
+        $null = $playwrightFailureProbe.Remove("stats")
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "LegacyGameConfig") -ceq
+                "result-manifest-zero-records-stats-invalid") `
+            "Admin Playwright failure diagnostics did not reject missing zero-record statistics."
+        $playwrightFailureProbe = [ordered]@{
+            suites = @(
+                [ordered]@{
+                    file = "D:\probe\admin-access.spec.ts"
+                    specs = @(
+                        [ordered]@{
+                            title = "administrator lifecycle and concurrency"
+                            tests = @([ordered]@{})
+                        },
+                        [ordered]@{
+                            title = "roles, permissions, and authorization"
+                            tests = @([ordered]@{})
+                        },
+                        [ordered]@{
+                            title = "sessions and audit"
+                            tests = @([ordered]@{})
+                        },
+                        [ordered]@{
+                            title = "sessions and audit"
+                            tests = @([ordered]@{})
+                        })
+                },
+                [ordered]@{
+                    file = "D:\probe\game-config.spec.ts"
+                    specs = @(
+                        [ordered]@{
+                            title =
+                                "operator completes the GameConfig lifecycle against the real API"
+                            tests = @([ordered]@{})
+                        })
+                })
+        }
+        [System.IO.File]::WriteAllText(
+            $playwrightFailureProbePath,
+            ($playwrightFailureProbe | ConvertTo-Json -Depth 12),
+            $utf8)
+        Assert-Condition `
+            ((Get-AdminPlaywrightFailureDiagnostic `
+                    -ResultPath $playwrightFailureProbePath `
+                    -Mode "M35Management") -ceq
+                "result-manifest-sessions-audit-not-passed-duplicate") `
+            "Admin Playwright failure diagnostics did not classify a duplicated expected record."
         Remove-Item -LiteralPath $playwrightFailureProbePath -Force
 
         $responseAuditRoot = Join-Path `
@@ -13891,7 +14077,32 @@ function Get-AdminPlaywrightFailureDiagnostic {
             )
         }
         if ($testRecords.Count -ne $expectedTests.Count) {
-            return "result-manifest-invalid"
+            if ($testRecords.Count -eq 0) {
+                if ($null -eq $report.PSObject.Properties["errors"]) {
+                    return "result-manifest-zero-records-errors-invalid"
+                }
+                if (@($report.errors).Count -gt 0) {
+                    return "result-manifest-zero-records-top-level-errors"
+                }
+                if ($null -eq $report.PSObject.Properties["stats"] -or
+                    $null -eq $report.stats) {
+                    return "result-manifest-zero-records-stats-invalid"
+                }
+                foreach ($statName in @(
+                        "expected",
+                        "flaky",
+                        "skipped",
+                        "unexpected")) {
+                    $statValue = $report.stats.PSObject.Properties[$statName]
+                    if ($null -eq $statValue -or
+                        -not (Test-AdminManagementJsonInteger $statValue.Value) -or
+                        [int64]$statValue.Value -lt 0) {
+                        return "result-manifest-zero-records-stats-invalid"
+                    }
+                }
+                return "result-manifest-zero-records-no-top-level-errors"
+            }
+            return "result-manifest-record-count-nonzero"
         }
         foreach ($expectedTest in $expectedTests) {
             $matchingRecords = @(
@@ -13901,7 +14112,10 @@ function Get-AdminPlaywrightFailureDiagnostic {
                         $_.Title -ceq $expectedTest.Title
                     })
             if ($matchingRecords.Count -ne 1) {
-                return "result-manifest-invalid"
+                if ($matchingRecords.Count -eq 0) {
+                    return "result-manifest-$($expectedTest.Rule)-missing"
+                }
+                return "result-manifest-$($expectedTest.Rule)-duplicate"
             }
         }
 
@@ -13937,6 +14151,37 @@ function Get-AdminPlaywrightFailureDiagnostic {
                 "password-connection-string",
                 "sensitive-json-field"
             )
+            $rolePermissionApiWaitDiagnosticIds = @(
+                "access-only-game-config-drafts",
+                "access-only-game-config-environment",
+                "access-only-game-config-versions",
+                "browser-read-denial",
+                "cold-start-access-codes",
+                "cold-start-user-info",
+                "leaf-only-access-codes",
+                "leaf-only-login",
+                "leaf-only-user-info",
+                "refresh-session",
+                "refreshed-game-config-drafts",
+                "refreshed-game-config-environment",
+                "refreshed-game-config-versions",
+                "restored-access-codes",
+                "restored-game-config-drafts",
+                "restored-game-config-environment",
+                "restored-game-config-versions",
+                "restored-user-info"
+            )
+            foreach ($rolePermissionApiWaitDiagnosticId in
+                $rolePermissionApiWaitDiagnosticIds) {
+                foreach ($rolePermissionApiWaitOutcome in @(
+                        "not-observed",
+                        "request-started-no-response",
+                        "request-failed",
+                        "unexpected-response")) {
+                    $safeEvidenceRuleIds +=
+                        "role-permission-api-wait-$rolePermissionApiWaitDiagnosticId-$rolePermissionApiWaitOutcome"
+                }
+            }
             $failureTexts = @(
                 if ($null -ne $results[0].PSObject.Properties["error"] -and
                     $null -ne $results[0].error) {

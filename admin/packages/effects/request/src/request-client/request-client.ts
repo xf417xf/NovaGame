@@ -12,6 +12,10 @@ import { InterceptorManager } from './modules/interceptor';
 import { SSE } from './modules/sse';
 import { FileUploader } from './modules/uploader';
 
+type RefreshTokenQueueResult =
+  | { error: unknown; kind: 'failure' }
+  | { kind: 'success'; token: string };
+
 function getParamsSerializer(
   paramsSerializer: RequestClientOptions['paramsSerializer'],
 ) {
@@ -47,7 +51,7 @@ class RequestClient {
   public isRefreshing = false;
   public postSSE: SSE['postSSE'];
   // 刷新token队列
-  public refreshTokenQueue: ((token: string) => void)[] = [];
+  public refreshTokenQueue: ((result: RefreshTokenQueueResult) => void)[] = [];
   public requestSSE: SSE['requestSSE'];
   public upload: FileUploader['upload'];
 

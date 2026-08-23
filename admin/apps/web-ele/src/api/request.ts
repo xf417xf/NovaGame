@@ -91,6 +91,19 @@ export function refreshAccessToken(): Promise<AccessTokenResponse> {
   return refreshPromise;
 }
 
+export async function waitForRefreshAccessToken(): Promise<void> {
+  const pendingRefresh = refreshPromise;
+  if (!pendingRefresh) {
+    return;
+  }
+
+  try {
+    await pendingRefresh;
+  } catch {
+    // The logout operation still has to revoke the server-side session.
+  }
+}
+
 function createRequestClient(baseURL: string, options?: RequestClientOptions) {
   const client = new RequestClient({
     ...options,
@@ -129,10 +142,8 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
         await useAuthStore().expireSession();
       },
       doRefreshToken: async () => {
-        const accessStore = useAccessStore();
-        const session = await refreshAccessToken();
-        accessStore.setAccessToken(session.accessToken);
-        return session.accessToken;
+        const { useAuthStore } = await import('#/store');
+        return await useAuthStore().refreshAccessTokenForRequest();
       },
       enableRefreshToken: true,
       formatToken: (token) => (token ? `Bearer ${token}` : null),
