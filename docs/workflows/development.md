@@ -75,6 +75,22 @@ Regenerate clients when OpenAPI contracts change. Update architecture, workflow,
 
 Breaking public changes require an explicit version and migration notes after an API has been promoted as stable.
 
+## 9. Record And Commit Goal Progress
+
+When an executable goal is active, do not begin a successor task until the completed task's verified
+result is recorded in the active goal, the status documents that name its current state are
+synchronized, and its scoped changes are committed. Do not begin a successor stage until the same
+recording, synchronization, and dedicated commit have occurred after every task and cumulative
+stage check pass.
+
+Each goal record must identify the commands run, their result, the completed task or stage, and any
+relevant cleanup or residual risk. A failed or blocked task or stage must record its evidence and
+blocker, but must not be represented as complete or unlock its successor. Keep the commit scoped to
+the verified work; do not include unrelated user changes or disposable evidence.
+
 ## Completion Check
 
-A change is complete only when ownership is clear, layer rules hold, the vertical slice works, relevant tests pass, generated contracts are current, documentation is accurate, and the active goal records the verified result.
+A change is complete only when ownership is clear, layer rules hold, the vertical slice works,
+relevant tests pass, generated contracts are current, documentation is accurate, and the active
+goal records the verified result. A completed executable-goal task or stage also requires its
+dedicated, scoped commit before its successor becomes active.
