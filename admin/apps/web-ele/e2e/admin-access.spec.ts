@@ -4881,32 +4881,18 @@ test('roles, permissions, and authorization', async ({
   const splitRoleInitialLoginModuleRequests = new Set<Request>();
   const splitRoleInitialLoginResponseState: SplitRoleInitialLoginResponseState =
     {};
-  try {
-    const splitRoleLoginUrl = new URL(page.url());
-    if (
-      splitRoleLoginUrl.pathname !== '/auth/login' ||
-      splitRoleLoginUrl.search.length > 0 ||
-      splitRoleLoginUrl.hash.length > 0
-    ) {
-      await page.goto('/auth/login', {
-        timeout: loginReadyTimeoutMs,
-        waitUntil: 'commit',
-      });
-    }
-    await expect(formField(page, 'login-username')).toBeVisible({
-      timeout: loginReadyTimeoutMs,
-    });
-  } catch {
-    throwSplitRoleLoginFailure(
-      splitRoleResponseState,
-      await readSplitRoleLoginState(page, splitRoleStartupError),
-      splitRoleLoginSubmissionState,
-      splitRoleInitialLoginResponseState,
+  const isSplitRoleInitialLoginBareRoute = (url: string) => {
+    const parsedUrl = new URL(url);
+
+    return (
+      parsedUrl.pathname === '/auth/login' &&
+      parsedUrl.search.length === 0 &&
+      parsedUrl.hash.length === 0
     );
-  }
+  };
   const isSplitRoleInitialLoginReadinessActive = () =>
     splitRoleInitialLoginReadinessArmed &&
-    new URL(page.url()).pathname === '/auth/login';
+    isSplitRoleInitialLoginBareRoute(page.url());
   const isSplitRoleInitialLoginTargetDocumentActive = () =>
     isSplitRoleInitialLoginReadinessActive() &&
     splitRoleInitialLoginTargetDocumentCommitted;
@@ -4930,6 +4916,16 @@ test('roles, permissions, and authorization', async ({
     }
 
     if (
+      splitRoleInitialLoginReadinessArmed &&
+      request.frame() === page.mainFrame() &&
+      request.isNavigationRequest()
+    ) {
+      splitRoleInitialLoginTargetDocumentCommitted = false;
+      splitRoleInitialLoginModuleRequests.clear();
+      return;
+    }
+
+    if (
       isSplitRoleInitialLoginTargetDocumentActive() &&
       request.frame() === page.mainFrame() &&
       classifySplitRoleModuleResource(request, page)
@@ -4942,12 +4938,16 @@ test('roles, permissions, and authorization', async ({
       return;
     }
 
-    if (
-      isSplitRoleInitialLoginReadinessActive() &&
-      new URL(frame.url()).pathname === '/auth/login'
-    ) {
+    if (!splitRoleInitialLoginReadinessArmed) {
+      return;
+    }
+
+    splitRoleInitialLoginTargetDocumentCommitted = false;
+    splitRoleInitialLoginModuleRequests.clear();
+    splitRoleInitialLoginResponseState.moduleFailure = undefined;
+    splitRoleStartupError = 'none';
+    if (isSplitRoleInitialLoginBareRoute(frame.url())) {
       splitRoleInitialLoginTargetDocumentCommitted = true;
-      splitRoleInitialLoginModuleRequests.clear();
     }
   };
   const observeSplitRoleAuthenticationResponse = (response: Response) => {
@@ -5026,6 +5026,10 @@ test('roles, permissions, and authorization', async ({
     }
   };
   const observeSplitRoleStartupError = (error: Error) => {
+    if (!isSplitRoleInitialLoginTargetDocumentActive()) {
+      return;
+    }
+
     if (error.message.includes('Failed to fetch dynamically imported module')) {
       splitRoleStartupError = 'dynamic-module-fetch';
     } else if (splitRoleStartupError === 'none') {
@@ -5038,9 +5042,33 @@ test('roles, permissions, and authorization', async ({
   page.on('framenavigated', observeSplitRoleInitialLoginFrameNavigation);
   page.on('pageerror', observeSplitRoleStartupError);
   try {
+    splitRoleInitialLoginReadinessArmed = true;
+    splitRoleInitialLoginTargetDocumentCommitted =
+      isSplitRoleInitialLoginBareRoute(page.url());
+    splitRoleInitialLoginModuleRequests.clear();
+    splitRoleInitialLoginResponseState.moduleFailure = undefined;
+    splitRoleStartupError = 'none';
     try {
-      splitRoleInitialLoginReadinessArmed = true;
-      splitRoleInitialLoginTargetDocumentCommitted = false;
+      const splitRoleLoginUrl = new URL(page.url());
+      if (!isSplitRoleInitialLoginBareRoute(splitRoleLoginUrl.toString())) {
+        await page.goto('/auth/login', {
+          timeout: loginReadyTimeoutMs,
+          waitUntil: 'commit',
+        });
+      }
+      await expect(formField(page, 'login-username')).toBeVisible({
+        timeout: loginReadyTimeoutMs,
+      });
+    } catch {
+      recordSplitRoleInitialLoginPendingModule();
+      throwSplitRoleLoginFailure(
+        splitRoleResponseState,
+        await readSplitRoleLoginState(page, splitRoleStartupError),
+        splitRoleLoginSubmissionState,
+        splitRoleInitialLoginResponseState,
+      );
+    }
+    try {
       await login(
         page,
         splitRoleAdministrator.userName,
@@ -5052,6 +5080,7 @@ test('roles, permissions, and authorization', async ({
         (state) => {
           splitRoleLoginSubmissionState = state;
           splitRoleInitialLoginReadinessArmed = false;
+          splitRoleInitialLoginModuleRequests.clear();
         },
       );
     } catch {
@@ -5064,6 +5093,7 @@ test('roles, permissions, and authorization', async ({
       );
     } finally {
       splitRoleInitialLoginReadinessArmed = false;
+      splitRoleInitialLoginTargetDocumentCommitted = false;
       splitRoleInitialLoginModuleRequests.clear();
     }
     try {
@@ -5095,6 +5125,9 @@ test('roles, permissions, and authorization', async ({
       page.getByText('Administrator Access', { exact: true }),
     ).toBeVisible();
   } finally {
+    splitRoleInitialLoginReadinessArmed = false;
+    splitRoleInitialLoginTargetDocumentCommitted = false;
+    splitRoleInitialLoginModuleRequests.clear();
     page.off('pageerror', observeSplitRoleStartupError);
     page.off('framenavigated', observeSplitRoleInitialLoginFrameNavigation);
     page.off('requestfailed', observeSplitRoleRequestFailure);
@@ -5130,6 +5163,12 @@ test('roles, permissions, and authorization', async ({
       !isSplitRoleAdministratorsWorkspaceTargetActive() ||
       request.frame() !== splitRoleAdministratorsWorkspacePage.mainFrame()
     ) {
+      return;
+    }
+
+    if (request.isNavigationRequest()) {
+      splitRoleAdministratorsWorkspaceTargetDocumentActive = false;
+      splitRoleAdministratorsWorkspaceModuleRequests.clear();
       return;
     }
 
