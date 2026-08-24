@@ -193,14 +193,31 @@ interface LeafOnlyDirectRouteState extends SplitRolePersistedAccessState {
 
 interface SplitRoleLoginState extends SplitRolePersistedAccessState {
   applicationMounted: boolean;
+  applicationRootState: SplitRoleInitialLoginApplicationRootState;
+  applicationRootStateAvailable: boolean;
+  documentReadyState: SplitRoleInitialLoginDocumentReadyState;
+  documentReadyStateAvailable: boolean;
   gameConfigHeadingVisible: boolean;
+  gameConfigHeadingStateAvailable: boolean;
+  initialLoginContextClosed: boolean;
+  initialLoginMainFrameDetached: boolean;
+  initialLoginPageClosed: boolean;
+  initialLoginTargetDocumentChangedDuringProbe: boolean;
+  initialLoginTargetDocumentPhaseAfter: SplitRoleInitialLoginTargetDocumentPhase;
+  initialLoginTargetDocumentPhaseBefore: SplitRoleInitialLoginTargetDocumentPhase;
   isGameConfigRoute: boolean;
   isLoginRoute: boolean;
   loginTitleVisible: boolean;
+  loginTitleStateAvailable: boolean;
   loginUsernameFieldCount: number;
+  loginUsernameFieldCountStateAvailable: boolean;
   loginUsernameVisible: boolean;
+  loginUsernameVisibleStateAvailable: boolean;
+  persistedAccessStateAvailable: boolean;
+  routeStateAvailable: boolean;
   startupError: SplitRoleStartupError;
   startupOverlayVisible: boolean;
+  startupOverlayStateAvailable: boolean;
 }
 
 interface SplitRoleInitialLoginResponseState {
@@ -253,6 +270,33 @@ type RolePermissionApiWaitOutcome =
   | 'unexpected-response';
 
 type SplitRoleStartupError = 'dynamic-module-fetch' | 'none' | 'page-error';
+
+type SplitRoleInitialLoginApplicationRootState =
+  | 'absent'
+  | 'mounted'
+  | 'present-unmounted'
+  | 'unavailable';
+
+type SplitRoleInitialLoginDocumentReadyState =
+  | 'unavailable'
+  | DocumentReadyState;
+
+type SplitRoleInitialLoginTargetDocumentPhase =
+  | 'bare-target-active'
+  | 'navigation-pending'
+  | 'other-document-committed'
+  | 'target-not-committed';
+
+interface SplitRoleInitialLoginTargetDocumentObservation {
+  contextClosed: boolean;
+  generation: number;
+  phase: SplitRoleInitialLoginTargetDocumentPhase;
+}
+
+interface SplitRoleInitialLoginPageLifecycle {
+  mainFrameDetached: boolean;
+  pageClosed: boolean;
+}
 
 type SplitRoleWorkspacePageErrorSource =
   | 'auth-store'
@@ -2272,42 +2316,149 @@ async function readSplitRoleAdministratorsWorkspaceState(
   };
 }
 
+function readSplitRoleInitialLoginPageLifecycle(
+  page: Page,
+): SplitRoleInitialLoginPageLifecycle {
+  if (page.isClosed()) {
+    return { mainFrameDetached: false, pageClosed: true };
+  }
+
+  try {
+    return {
+      mainFrameDetached: page.mainFrame().isDetached(),
+      pageClosed: false,
+    };
+  } catch {
+    return { mainFrameDetached: true, pageClosed: false };
+  }
+}
+
+async function readSplitRoleInitialLoginApplicationRootState(
+  page: Page,
+): Promise<SplitRoleInitialLoginApplicationRootState> {
+  const applicationRoot = page.locator('#app');
+  if ((await applicationRoot.count()) === 0) {
+    return 'absent';
+  }
+
+  const mounted = await applicationRoot.evaluateAll((elements) =>
+    elements.some((element) => element.dataset.vApp !== undefined),
+  );
+
+  return mounted ? 'mounted' : 'present-unmounted';
+}
+
+async function readSplitRoleInitialLoginDocumentReadyState(
+  page: Page,
+): Promise<DocumentReadyState> {
+  return page.evaluate(() => document.readyState);
+}
+
 async function readSplitRoleLoginState(
   page: Page,
   startupError: SplitRoleStartupError,
+  readTargetDocumentObservation: () => SplitRoleInitialLoginTargetDocumentObservation,
 ): Promise<SplitRoleLoginState> {
+  const unavailablePersistedAccessState: SplitRolePersistedAccessState = {
+    hasAccessPermission: false,
+    hasAdministratorsReadPermission: false,
+    hasGameConfigAccessPermission: false,
+    hasPersistedAccessToken: false,
+    hasRolesReadPermission: false,
+  };
+  const unavailableRouteState: BootstrapLoginRouteState = {
+    isGameConfigRoute: false,
+    isLoginRoute: false,
+  };
+  const initialTargetDocumentObservation = readTargetDocumentObservation();
+  const initialPageLifecycle = readSplitRoleInitialLoginPageLifecycle(page);
   const [
     persistedAccessState,
-    applicationMounted,
+    applicationRootState,
+    documentReadyState,
     gameConfigHeadingVisible,
     loginTitleVisible,
     loginUsernameFieldCount,
     loginUsernameVisible,
+    routeState,
     startupOverlayVisible,
   ] = await Promise.all([
-    readSplitRolePersistedAccessState(page),
-    hasMountedApplication(page),
-    page
-      .getByRole('heading', { name: gameConfigLoginDestination.heading })
-      .isVisible(),
-    page.getByRole('heading', { name: 'NovaGame Operations' }).isVisible(),
-    formField(page, 'login-username').count(),
-    formField(page, 'login-username').isVisible(),
-    page.locator('#__app-loading__').isVisible(),
+    readBootstrapLoginProbe(
+      () => readSplitRolePersistedAccessState(page),
+      unavailablePersistedAccessState,
+    ),
+    readBootstrapLoginProbe(
+      () => readSplitRoleInitialLoginApplicationRootState(page),
+      'unavailable' as const,
+    ),
+    readBootstrapLoginProbe(
+      () => readSplitRoleInitialLoginDocumentReadyState(page),
+      'unavailable' as const,
+    ),
+    readBootstrapLoginProbe(
+      () =>
+        page
+          .getByRole('heading', { name: gameConfigLoginDestination.heading })
+          .isVisible(),
+      false,
+    ),
+    readBootstrapLoginProbe(
+      () =>
+        page.getByRole('heading', { name: 'NovaGame Operations' }).isVisible(),
+      false,
+    ),
+    readBootstrapLoginProbe(() => formField(page, 'login-username').count(), 0),
+    readBootstrapLoginProbe(
+      () => formField(page, 'login-username').isVisible(),
+      false,
+    ),
+    readBootstrapLoginProbe(
+      () => readBootstrapLoginRouteState(page),
+      unavailableRouteState,
+    ),
+    readBootstrapLoginProbe(
+      () => page.locator('#__app-loading__').isVisible(),
+      false,
+    ),
   ]);
-  const currentPath = new URL(page.url()).pathname;
+  const finalTargetDocumentObservation = readTargetDocumentObservation();
+  const finalPageLifecycle = readSplitRoleInitialLoginPageLifecycle(page);
 
   return {
-    ...persistedAccessState,
-    applicationMounted,
-    gameConfigHeadingVisible,
-    isGameConfigRoute: currentPath === '/game-config',
-    isLoginRoute: currentPath === '/auth/login',
-    loginTitleVisible,
-    loginUsernameFieldCount,
-    loginUsernameVisible,
+    ...persistedAccessState.value,
+    applicationMounted: applicationRootState.value === 'mounted',
+    applicationRootState: applicationRootState.value,
+    applicationRootStateAvailable: applicationRootState.available,
+    documentReadyState: documentReadyState.value,
+    documentReadyStateAvailable: documentReadyState.available,
+    gameConfigHeadingVisible: gameConfigHeadingVisible.value,
+    gameConfigHeadingStateAvailable: gameConfigHeadingVisible.available,
+    initialLoginContextClosed:
+      initialTargetDocumentObservation.contextClosed ||
+      finalTargetDocumentObservation.contextClosed,
+    initialLoginMainFrameDetached:
+      initialPageLifecycle.mainFrameDetached ||
+      finalPageLifecycle.mainFrameDetached,
+    initialLoginPageClosed:
+      initialPageLifecycle.pageClosed || finalPageLifecycle.pageClosed,
+    initialLoginTargetDocumentChangedDuringProbe:
+      initialTargetDocumentObservation.generation !==
+      finalTargetDocumentObservation.generation,
+    initialLoginTargetDocumentPhaseAfter: finalTargetDocumentObservation.phase,
+    initialLoginTargetDocumentPhaseBefore:
+      initialTargetDocumentObservation.phase,
+    ...routeState.value,
+    loginTitleVisible: loginTitleVisible.value,
+    loginTitleStateAvailable: loginTitleVisible.available,
+    loginUsernameFieldCount: loginUsernameFieldCount.value,
+    loginUsernameFieldCountStateAvailable: loginUsernameFieldCount.available,
+    loginUsernameVisible: loginUsernameVisible.value,
+    loginUsernameVisibleStateAvailable: loginUsernameVisible.available,
+    persistedAccessStateAvailable: persistedAccessState.available,
+    routeStateAvailable: routeState.available,
     startupError,
-    startupOverlayVisible,
+    startupOverlayVisible: startupOverlayVisible.value,
+    startupOverlayStateAvailable: startupOverlayVisible.available,
   };
 }
 
@@ -3447,6 +3598,51 @@ function throwSplitRoleLoginFailure(
 ): never {
   if (responseState.loginStatus === undefined) {
     if (!submissionState) {
+      if (loginState.initialLoginContextClosed) {
+        throw new Error(
+          'Split-role initial-login browser context closed during control state observation.',
+        );
+      }
+      if (loginState.initialLoginPageClosed) {
+        throw new Error(
+          'Split-role initial-login page closed during control state observation.',
+        );
+      }
+      if (loginState.initialLoginMainFrameDetached) {
+        throw new Error(
+          'Split-role initial-login main frame detached during control state observation.',
+        );
+      }
+      if (
+        loginState.initialLoginTargetDocumentPhaseBefore !==
+        'bare-target-active'
+      ) {
+        throw new Error(
+          'Split-role initial-login bare target document was not active before control state observation.',
+        );
+      }
+      if (
+        loginState.initialLoginTargetDocumentPhaseAfter !== 'bare-target-active'
+      ) {
+        throw new Error(
+          'Split-role initial-login bare target document was not active after control state observation.',
+        );
+      }
+      if (loginState.initialLoginTargetDocumentChangedDuringProbe) {
+        throw new Error(
+          'Split-role initial-login target document changed during control state observation.',
+        );
+      }
+      if (!loginState.persistedAccessStateAvailable) {
+        throw new Error(
+          'Split-role persisted authentication state was unavailable during control state observation.',
+        );
+      }
+      if (!loginState.routeStateAvailable) {
+        throw new Error(
+          'Split-role login route state was unavailable during control state observation.',
+        );
+      }
       if (
         loginState.hasPersistedAccessToken ||
         loginState.hasAccessPermission ||
@@ -3478,9 +3674,39 @@ function throwSplitRoleLoginFailure(
           'Split-role login reported a page error before control state observation.',
         );
       }
-      if (!loginState.applicationMounted) {
+      if (!loginState.applicationRootStateAvailable) {
+        throw new Error(
+          'Split-role initial-login application root state was unavailable during control state observation.',
+        );
+      }
+      if (!loginState.documentReadyStateAvailable) {
+        throw new Error(
+          'Split-role initial-login document readiness state was unavailable during control state observation.',
+        );
+      }
+      if (loginState.documentReadyState === 'loading') {
+        throw new Error(
+          'Split-role initial-login target document remained loading during control state observation.',
+        );
+      }
+      if (loginState.applicationRootState === 'absent') {
+        throw new Error(
+          'Split-role initial-login target document lacked an application root before control state observation.',
+        );
+      }
+      if (loginState.applicationRootState === 'present-unmounted') {
         throw new Error(
           'Split-role application root did not mount before control state observation.',
+        );
+      }
+      if (loginState.applicationRootState === 'unavailable') {
+        throw new Error(
+          'Split-role initial-login application root state was unavailable before control state observation.',
+        );
+      }
+      if (!loginState.startupOverlayStateAvailable) {
+        throw new Error(
+          'Split-role initial-login startup overlay state was unavailable during control state observation.',
         );
       }
       if (loginState.startupOverlayVisible) {
@@ -3493,14 +3719,29 @@ function throwSplitRoleLoginFailure(
           `Split-role login retained a pending ${initialLoginResponseState.pendingModuleResource} script module request before control state observation.`,
         );
       }
+      if (!loginState.loginUsernameFieldCountStateAvailable) {
+        throw new Error(
+          'Split-role initial-login username field count was unavailable during control state observation.',
+        );
+      }
       if (loginState.loginUsernameFieldCount === 0) {
         throw new Error(
           'Split-role login form did not render a username field before control state observation.',
         );
       }
+      if (!loginState.loginTitleStateAvailable) {
+        throw new Error(
+          'Split-role initial-login title state was unavailable during control state observation.',
+        );
+      }
       if (!loginState.loginTitleVisible) {
         throw new Error(
           'Split-role login title was not visible before control state observation.',
+        );
+      }
+      if (!loginState.loginUsernameVisibleStateAvailable) {
+        throw new Error(
+          'Split-role initial-login username visibility was unavailable during control state observation.',
         );
       }
       if (!loginState.loginUsernameVisible) {
@@ -3650,6 +3891,9 @@ function throwSplitRoleLoginFailure(
     throw new Error(
       'Split-role GameConfig environment response did not succeed.',
     );
+  }
+  if (!loginState.gameConfigHeadingStateAvailable) {
+    throw new Error('Split-role GameConfig heading state was unavailable.');
   }
   if (!loginState.gameConfigHeadingVisible) {
     throw new Error('Split-role GameConfig heading did not become visible.');
@@ -4878,6 +5122,11 @@ test('roles, permissions, and authorization', async ({
   let splitRoleStartupError: SplitRoleStartupError = 'none';
   let splitRoleInitialLoginReadinessArmed = false;
   let splitRoleInitialLoginTargetDocumentCommitted = false;
+  let splitRoleInitialLoginTargetDocumentGeneration = 0;
+  let splitRoleInitialLoginTargetDocumentPhase: SplitRoleInitialLoginTargetDocumentPhase =
+    'target-not-committed';
+  let splitRoleInitialLoginContextClosed = false;
+  const splitRoleInitialLoginContext = page.context();
   const splitRoleInitialLoginModuleRequests = new Set<Request>();
   const splitRoleInitialLoginResponseState: SplitRoleInitialLoginResponseState =
     {};
@@ -4890,11 +5139,21 @@ test('roles, permissions, and authorization', async ({
       parsedUrl.hash.length === 0
     );
   };
+  const readSplitRoleInitialLoginTargetDocumentObservation =
+    (): SplitRoleInitialLoginTargetDocumentObservation => ({
+      contextClosed: splitRoleInitialLoginContextClosed,
+      generation: splitRoleInitialLoginTargetDocumentGeneration,
+      phase: splitRoleInitialLoginTargetDocumentPhase,
+    });
+  const observeSplitRoleInitialLoginContextClose = () => {
+    splitRoleInitialLoginContextClosed = true;
+  };
   const isSplitRoleInitialLoginReadinessActive = () =>
     splitRoleInitialLoginReadinessArmed &&
     isSplitRoleInitialLoginBareRoute(page.url());
   const isSplitRoleInitialLoginTargetDocumentActive = () =>
     isSplitRoleInitialLoginReadinessActive() &&
+    splitRoleInitialLoginTargetDocumentPhase === 'bare-target-active' &&
     splitRoleInitialLoginTargetDocumentCommitted;
   const recordSplitRoleInitialLoginPendingModule = () => {
     if (splitRoleInitialLoginResponseState.pendingModuleResource) {
@@ -4921,6 +5180,8 @@ test('roles, permissions, and authorization', async ({
       request.isNavigationRequest()
     ) {
       splitRoleInitialLoginTargetDocumentCommitted = false;
+      splitRoleInitialLoginTargetDocumentGeneration += 1;
+      splitRoleInitialLoginTargetDocumentPhase = 'navigation-pending';
       splitRoleInitialLoginModuleRequests.clear();
       return;
     }
@@ -4943,11 +5204,15 @@ test('roles, permissions, and authorization', async ({
     }
 
     splitRoleInitialLoginTargetDocumentCommitted = false;
+    splitRoleInitialLoginTargetDocumentGeneration += 1;
     splitRoleInitialLoginModuleRequests.clear();
     splitRoleInitialLoginResponseState.moduleFailure = undefined;
     splitRoleStartupError = 'none';
     if (isSplitRoleInitialLoginBareRoute(frame.url())) {
       splitRoleInitialLoginTargetDocumentCommitted = true;
+      splitRoleInitialLoginTargetDocumentPhase = 'bare-target-active';
+    } else {
+      splitRoleInitialLoginTargetDocumentPhase = 'other-document-committed';
     }
   };
   const observeSplitRoleAuthenticationResponse = (response: Response) => {
@@ -5036,6 +5301,10 @@ test('roles, permissions, and authorization', async ({
       splitRoleStartupError = 'page-error';
     }
   };
+  splitRoleInitialLoginContext.on(
+    'close',
+    observeSplitRoleInitialLoginContextClose,
+  );
   page.on('request', observeSplitRoleRequest);
   page.on('response', observeSplitRoleAuthenticationResponse);
   page.on('requestfailed', observeSplitRoleRequestFailure);
@@ -5045,6 +5314,12 @@ test('roles, permissions, and authorization', async ({
     splitRoleInitialLoginReadinessArmed = true;
     splitRoleInitialLoginTargetDocumentCommitted =
       isSplitRoleInitialLoginBareRoute(page.url());
+    splitRoleInitialLoginTargetDocumentPhase =
+      splitRoleInitialLoginTargetDocumentCommitted
+        ? 'bare-target-active'
+        : 'other-document-committed';
+    splitRoleInitialLoginTargetDocumentGeneration = 0;
+    splitRoleInitialLoginContextClosed = false;
     splitRoleInitialLoginModuleRequests.clear();
     splitRoleInitialLoginResponseState.moduleFailure = undefined;
     splitRoleStartupError = 'none';
@@ -5063,7 +5338,11 @@ test('roles, permissions, and authorization', async ({
       recordSplitRoleInitialLoginPendingModule();
       throwSplitRoleLoginFailure(
         splitRoleResponseState,
-        await readSplitRoleLoginState(page, splitRoleStartupError),
+        await readSplitRoleLoginState(
+          page,
+          splitRoleStartupError,
+          readSplitRoleInitialLoginTargetDocumentObservation,
+        ),
         splitRoleLoginSubmissionState,
         splitRoleInitialLoginResponseState,
       );
@@ -5087,7 +5366,11 @@ test('roles, permissions, and authorization', async ({
       recordSplitRoleInitialLoginPendingModule();
       throwSplitRoleLoginFailure(
         splitRoleResponseState,
-        await readSplitRoleLoginState(page, splitRoleStartupError),
+        await readSplitRoleLoginState(
+          page,
+          splitRoleStartupError,
+          readSplitRoleInitialLoginTargetDocumentObservation,
+        ),
         splitRoleLoginSubmissionState,
         splitRoleInitialLoginResponseState,
       );
@@ -5127,12 +5410,17 @@ test('roles, permissions, and authorization', async ({
   } finally {
     splitRoleInitialLoginReadinessArmed = false;
     splitRoleInitialLoginTargetDocumentCommitted = false;
+    splitRoleInitialLoginTargetDocumentPhase = 'target-not-committed';
     splitRoleInitialLoginModuleRequests.clear();
     page.off('pageerror', observeSplitRoleStartupError);
     page.off('framenavigated', observeSplitRoleInitialLoginFrameNavigation);
     page.off('requestfailed', observeSplitRoleRequestFailure);
     page.off('response', observeSplitRoleAuthenticationResponse);
     page.off('request', observeSplitRoleRequest);
+    splitRoleInitialLoginContext.off(
+      'close',
+      observeSplitRoleInitialLoginContextClose,
+    );
   }
   const splitRoleAdministratorsWorkspacePage = await page.context().newPage();
   const splitRoleAdministratorsWorkspaceResponseState: Pick<
