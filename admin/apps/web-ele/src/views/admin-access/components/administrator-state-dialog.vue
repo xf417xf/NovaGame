@@ -13,6 +13,7 @@ import {
   setAdministratorActiveState,
   toNovaGameApiError,
 } from '#/api';
+import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
 
 interface Props {
   administratorId: null | string;
@@ -86,11 +87,19 @@ async function loadDetail() {
       detail.value = response;
     }
   } catch (error) {
-    if (isNovaGameRequestCancelled(error) || sequence !== loadSequence) {
+    if (
+      isNovaGameRequestCancelled(error) ||
+      sequence !== loadSequence ||
+      !props.modelValue ||
+      props.administratorId !== administratorId
+    ) {
       return;
     }
     const apiError = toNovaGameApiError(error);
-    if (apiError.status === 404) {
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.AdministratorNotFound
+    ) {
       emit('stale');
       close(true);
       return;
@@ -130,6 +139,14 @@ async function submit() {
       return;
     }
     const apiError = toNovaGameApiError(error);
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.AdministratorNotFound
+    ) {
+      emit('stale');
+      close(true);
+      return;
+    }
     if (apiError.status === 403) {
       closeForForbidden();
       return;

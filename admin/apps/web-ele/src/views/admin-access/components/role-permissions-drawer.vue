@@ -20,6 +20,7 @@ import {
   replaceAdminRolePermissions,
   toNovaGameApiError,
 } from '#/api';
+import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
 
 import { fieldErrorsFrom } from './administrator-form-utils';
 import {
@@ -35,6 +36,11 @@ interface Props {
   roleId: null | string;
 }
 
+interface StaleRolePermissionsDraft {
+  kind: 'permissions';
+  permissionNames: string[];
+}
+
 interface RolePermissionSelectorHandle {
   reloadCatalog: () => Promise<void>;
 }
@@ -42,7 +48,7 @@ interface RolePermissionSelectorHandle {
 const props = defineProps<Props>();
 const emit = defineEmits<{
   forbidden: [];
-  stale: [];
+  stale: [draft: null | StaleRolePermissionsDraft];
   'update:modelValue': [value: boolean];
   updated: [role: AdminRoleDto];
 }>();
@@ -69,6 +75,17 @@ function clearState() {
   form.permissionNames = [];
   hasLocalSelection = false;
   catalogAvailable.value = false;
+}
+
+function closeForStaleDetail() {
+  const draft = hasLocalSelection
+    ? {
+        kind: 'permissions' as const,
+        permissionNames: [...form.permissionNames],
+      }
+    : null;
+  emit('stale', draft);
+  close(true);
 }
 
 function close(force = false) {
@@ -116,13 +133,21 @@ async function loadDetail(preserveSelection = false) {
       hasLocalSelection = false;
     }
   } catch (error) {
-    if (isNovaGameRequestCancelled(error) || sequence !== loadSequence) {
+    if (
+      isNovaGameRequestCancelled(error) ||
+      sequence !== loadSequence ||
+      !props.modelValue ||
+      !props.canReadRoles ||
+      props.roleId !== roleId
+    ) {
       return;
     }
     const apiError = toNovaGameApiError(error);
-    if (apiError.status === 404) {
-      emit('stale');
-      close(true);
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.RoleNotFound
+    ) {
+      closeForStaleDetail();
       return;
     }
     if (apiError.status === 403) {
@@ -199,6 +224,13 @@ async function submit() {
       return;
     }
     const apiError = toNovaGameApiError(error);
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.RoleNotFound
+    ) {
+      closeForStaleDetail();
+      return;
+    }
     if (apiError.status === 403) {
       closeForForbidden();
       return;

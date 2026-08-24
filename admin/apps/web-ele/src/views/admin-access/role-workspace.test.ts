@@ -424,11 +424,13 @@ function permissionCatalog(): PermissionGroupDto[] {
 }
 
 function deferred<T>() {
+  let reject!: (reason?: unknown) => void;
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => {
+  const promise = new Promise<T>((resolver, rejecter) => {
+    reject = rejecter;
     resolve = resolver;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function getAccessStore() {
@@ -548,6 +550,43 @@ afterEach(() => {
 });
 
 describe('roles and permissions workspace', () => {
+  it('recovers the role list after a transient failure is retried', async () => {
+    api.listAdminRoles.mockReset();
+    api.listAdminRoles
+      .mockRejectedValueOnce({
+        message: 'Role list is temporarily unavailable.',
+        status: 503,
+      })
+      .mockResolvedValueOnce(
+        rolePage([roleSummary({ name: 'Recovered role' })]),
+      );
+
+    const wrapper = mountWorkspace();
+    try {
+      await flushPromises();
+
+      expect(api.listAdminRoles).toHaveBeenCalledTimes(1);
+      expect(wrapper.text()).toContain('Role list is temporarily unavailable.');
+      const retryButton = wrapper
+        .findAll('button')
+        .find((button) => button.text() === 'Retry');
+      if (!retryButton) {
+        throw new Error('The role list retry command was not rendered.');
+      }
+
+      await retryButton.trigger('click');
+      await flushPromises();
+
+      expect(api.listAdminRoles).toHaveBeenCalledTimes(2);
+      expect(wrapper.text()).toContain('Recovered role');
+      expect(wrapper.text()).not.toContain(
+        'Role list is temporarily unavailable.',
+      );
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('uses server filters and renders the built-in role as read-only', async () => {
     api.listAdminRoles.mockResolvedValue(
       rolePage([
@@ -604,6 +643,147 @@ describe('roles and permissions workspace', () => {
     expect(api.listAdminRoles).not.toHaveBeenCalled();
     expect(wrapper.find('[data-testid="roles-forbidden"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="create-role"]').exists()).toBe(false);
+  });
+
+  it('closes an unavailable role state confirmation and reloads roles after a 404', async () => {
+    api.listAdminRoles
+      .mockResolvedValueOnce(rolePage([roleSummary({ name: 'Stale role' })]))
+      .mockResolvedValue(rolePage([roleSummary({ name: 'Reloaded role' })]));
+    api.getAdminRole.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The role no longer exists.',
+      status: 404,
+    });
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    const listCallCountBeforeStale = api.listAdminRoles.mock.calls.length;
+    await wrapper.get('[aria-label="Deactivate Stale role"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findComponent(RoleStateDialog).props('modelValue')).toBe(
+      false,
+    );
+    expect(api.listAdminRoles.mock.calls.length).toBeGreaterThan(
+      listCallCountBeforeStale,
+    );
+    expect(wrapper.text()).toContain('Reloaded role');
+    expect(wrapper.text()).not.toContain('Stale role');
+  });
+
+  it('retains a stale role-name draft only for explicit review and discard', async () => {
+    api.listAdminRoles
+      .mockResolvedValueOnce(rolePage([roleSummary()]))
+      .mockResolvedValueOnce(
+        rolePage([roleSummary({ name: 'Reloaded role' })]),
+      );
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    const listCallCountBeforeStale = api.listAdminRoles.mock.calls.length;
+    wrapper.findComponent(RoleRenameDrawer).vm.$emit('stale', {
+      kind: 'rename',
+      name: 'Unsaved role name',
+    });
+    await flushPromises();
+
+    expect(api.listAdminRoles).toHaveBeenCalledTimes(
+      listCallCountBeforeStale + 1,
+    );
+    expect(wrapper.findComponent(RoleRenameDrawer).props('modelValue')).toBe(
+      false,
+    );
+    expect(
+      wrapper.get('[data-testid="retained-role-draft"]').text(),
+    ).not.toContain('Unsaved role name');
+
+    wrapper.findComponent(RoleRenameDrawer).vm.$emit('stale', null);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="retained-role-draft"]').exists()).toBe(
+      true,
+    );
+
+    await wrapper
+      .get('[data-testid="review-retained-role-draft"]')
+      .trigger('click');
+    await flushPromises();
+    expect(
+      wrapper.get('[data-testid="retained-role-draft-review"]').text(),
+    ).toContain('Unsaved role name');
+    expect(wrapper.find('[data-testid="save-role-name"]').exists()).toBe(false);
+
+    await wrapper
+      .get('[data-testid="discard-retained-role-draft-from-review"]')
+      .trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-testid="retained-role-draft"]').exists()).toBe(
+      false,
+    );
+  });
+
+  it('retains selected permissions in memory and clears the review draft when management access is lost', async () => {
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    wrapper.findComponent(RolePermissionsDrawer).vm.$emit('stale', {
+      kind: 'permissions',
+      permissionNames: [accessPermission, rolesManagePermission],
+    });
+    await flushPromises();
+
+    await wrapper
+      .get('[data-testid="review-retained-role-draft"]')
+      .trigger('click');
+    await flushPromises();
+    expect(
+      wrapper.get('[data-testid="retained-role-draft-review"]').text(),
+    ).toContain(accessPermission);
+    expect(
+      wrapper.get('[data-testid="retained-role-draft-review"]').text(),
+    ).toContain(rolesManagePermission);
+
+    getAccessStore().accessCodes = [accessPermission, rolesReadPermission];
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="retained-role-draft"]').exists()).toBe(
+      false,
+    );
+  });
+
+  it('retains a real stale role-name draft after the child closes and reloads roles', async () => {
+    api.listAdminRoles
+      .mockResolvedValueOnce(rolePage([roleSummary({ name: 'Stale role' })]))
+      .mockResolvedValueOnce(
+        rolePage([roleSummary({ name: 'Reloaded role' })]),
+      );
+    api.getAdminRole.mockResolvedValue(roleDetail());
+    api.renameAdminRole.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The role was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    await wrapper.get('[aria-label="Rename Stale role"]').trigger('click');
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="role-name"]')
+      .setValue('Unsaved role name');
+    await wrapper.get('[data-testid="save-role-name"]').trigger('click');
+    await flushPromises();
+
+    expect(api.listAdminRoles).toHaveBeenCalledTimes(2);
+    expect(wrapper.findComponent(RoleRenameDrawer).props('modelValue')).toBe(
+      false,
+    );
+    await wrapper
+      .get('[data-testid="review-retained-role-draft"]')
+      .trigger('click');
+    await flushPromises();
+    expect(
+      wrapper.get('[data-testid="retained-role-draft-review"]').text(),
+    ).toContain('Unsaved role name');
+    expect(wrapper.text()).toContain('Reloaded role');
   });
 
   it('groups the server catalog locally and creates a role with exact selected names only', async () => {
@@ -784,6 +964,29 @@ describe('roles and permissions workspace', () => {
     );
   });
 
+  it('captures only a locally edited role name when the role disappears during rename', async () => {
+    api.getAdminRole.mockResolvedValue(roleDetail());
+    api.renameAdminRole.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The role was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountRenameDrawer();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="role-name"]')
+      .setValue('Unsaved role name');
+    await wrapper.get('[data-testid="save-role-name"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toEqual([
+      [{ kind: 'rename', name: 'Unsaved role name' }],
+    ]);
+    expect(wrapper.emitted('updated')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+  });
+
   it('uses the loaded role ETag for a permission replacement and retains selection after conflict', async () => {
     api.getAdminRole
       .mockResolvedValueOnce(roleDetail())
@@ -831,6 +1034,35 @@ describe('roles and permissions workspace', () => {
       },
       '"8"',
     );
+  });
+
+  it('captures only selected permissions when the role disappears during replacement', async () => {
+    api.getAdminRole.mockResolvedValue(roleDetail());
+    api.replaceAdminRolePermissions.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The role was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountPermissionsDrawer();
+    await flushPromises();
+    wrapper
+      .findComponent(RolePermissionSelector)
+      .vm.$emit('update:modelValue', [accessPermission, rolesManagePermission]);
+    await flushPromises();
+    await wrapper.get('[data-testid="save-role-permissions"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toEqual([
+      [
+        {
+          kind: 'permissions',
+          permissionNames: [accessPermission, rolesManagePermission],
+        },
+      ],
+    ]);
+    expect(wrapper.emitted('updated')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
   });
 
   it('reloads and prunes a removed catalog permission before retrying a replacement', async () => {
@@ -967,6 +1199,86 @@ describe('roles and permissions workspace', () => {
     );
   });
 
+  it('closes a role state confirmation when its target disappears during submission', async () => {
+    api.setAdminRoleActiveState.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The role was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountStateDialog();
+    await flushPromises();
+    await wrapper.get('[data-testid="confirm-role-state"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toEqual([[]]);
+    expect(wrapper.emitted('updated')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+  });
+
+  it('keeps a role state confirmation open for a foreign-reference 404', async () => {
+    api.getAdminRole.mockResolvedValue(roleDetail());
+    api.setAdminRoleActiveState.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'A related administrator was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountStateDialog();
+    await flushPromises();
+    await wrapper.get('[data-testid="confirm-role-state"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(wrapper.text()).toContain('A related administrator was not found.');
+  });
+
+  it('ignores an abandoned role state-detail 404 response', async () => {
+    const delayedDetail = deferred<ReturnType<typeof roleDetail>>();
+    api.getAdminRole.mockReturnValueOnce(delayedDetail.promise);
+
+    const wrapper = mountStateDialog();
+    await wrapper.setProps({ modelValue: false });
+    delayedDetail.reject({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The role was not found.',
+      status: 404,
+    });
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+  });
+
+  it('does not close a newly selected role state confirmation for an older detail 404', async () => {
+    const firstDetail = deferred<ReturnType<typeof roleDetail>>();
+    api.getAdminRole
+      .mockReturnValueOnce(firstDetail.promise)
+      .mockResolvedValueOnce(
+        roleDetail(role({ id: 'second-role-id', name: 'Second state role' })),
+      );
+
+    const wrapper = mountStateDialog({ roleId: 'first-role-id' });
+    await wrapper.setProps({
+      roleId: 'second-role-id',
+      targetActive: true,
+    });
+    await flushPromises();
+
+    firstDetail.reject({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The first role was not found.',
+      status: 404,
+    });
+    await flushPromises();
+
+    expect(wrapper.props('modelValue')).toBe(true);
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(wrapper.text()).toContain('Second state role');
+  });
+
   it('keeps a role state confirmation open when Escape is requested while pending', async () => {
     const pendingCommand = deferred<ReturnType<typeof roleDetail>>();
     api.getAdminRole.mockResolvedValue(roleDetail());
@@ -989,6 +1301,23 @@ describe('roles and permissions workspace', () => {
     pendingCommand.resolve(roleDetail(role({ isActive: false }), '"8"'));
     await flushPromises();
     expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+  });
+
+  it('ignores an abandoned role-permissions detail 404 response', async () => {
+    const delayedDetail = deferred<ReturnType<typeof roleDetail>>();
+    api.getAdminRole.mockReturnValueOnce(delayedDetail.promise);
+
+    const wrapper = mountPermissionsDrawer();
+    await wrapper.setProps({ modelValue: false });
+    delayedDetail.reject({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'The role was not found.',
+      status: 404,
+    });
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
   });
 
   it('reconciles permissions after a role change and removes controls that were revoked', async () => {

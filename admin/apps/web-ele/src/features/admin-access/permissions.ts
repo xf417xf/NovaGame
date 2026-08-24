@@ -11,6 +11,12 @@ export const AdminAccessPermission = {
   SessionsRevoke: 'Operations.AdminAccess.Sessions.Revoke',
 } as const;
 
+export const AdminAccessErrorCode = {
+  AdministratorNotFound: 'NovaGame.AdminAccess.AdministratorNotFound',
+  RoleNotFound: 'NovaGame.AdminAccess.RoleNotFound',
+  SessionFamilyNotFound: 'NovaGame.AdminAccess.SessionFamilyNotFound',
+} as const;
+
 export type AdminAccessPermissionCode =
   (typeof AdminAccessPermission)[keyof typeof AdminAccessPermission];
 

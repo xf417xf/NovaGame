@@ -8,10 +8,20 @@ import type {
 } from '@playwright/test';
 
 import type { AcceptanceEvidenceAudit } from './acceptance-evidence';
+import type {
+  SplitRoleEffectsPackageRoot,
+  SplitRoleModuleRequestFailureOutcome,
+  SplitRoleModuleResource,
+  SplitRoleWorkspacePackageRoot,
+} from './module-request-failure-diagnostics';
 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { expect, test } from './acceptance-evidence';
+import {
+  classifySplitRoleModuleRequestFailureText,
+  describeSplitRoleUnclassifiedNetworkModuleResource,
+} from './module-request-failure-diagnostics';
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -149,6 +159,7 @@ interface SplitRoleAdministratorsWorkspaceState extends SplitRolePersistedAccess
   isGameConfigRoute: boolean;
   isLoginRoute: boolean;
   loadingMaskVisible: boolean;
+  moduleFailure?: SplitRoleModuleFailure;
   protectedHeadingVisible: boolean;
   protectedTableVisible: boolean;
   pageErrorSource: SplitRoleWorkspacePageErrorSource;
@@ -253,59 +264,10 @@ type SplitRoleWorkspacePageErrorSource =
 
 type SplitRoleModuleFailureOutcome =
   | 'client-error'
-  | 'request-aborted'
-  | 'request-connection'
-  | 'request-failed'
-  | 'request-missing-details'
-  | 'request-name-resolution'
   | 'request-network'
-  | 'request-other'
-  | 'request-policy'
-  | 'request-protocol'
-  | 'request-proxy'
-  | 'request-reachability'
-  | 'request-response'
-  | 'request-timeout'
-  | 'request-tls'
   | 'server-error'
-  | 'unexpected-status';
-
-type SplitRoleModuleResource =
-  | 'bootstrap'
-  | 'direct-node-module'
-  | 'filesystem-app-source'
-  | 'filesystem-dependency'
-  | 'filesystem-unclassified'
-  | 'filesystem-workspace-internal'
-  | 'filesystem-workspace-package'
-  | 'optimized-dependency'
-  | 'source-outside-views'
-  | 'source-view'
-  | 'unknown'
-  | 'vite-client'
-  | 'vite-virtual';
-
-type SplitRoleEffectsPackageRoot =
-  | 'access'
-  | 'common-ui'
-  | 'hooks'
-  | 'layouts'
-  | 'other'
-  | 'plugins'
-  | 'request';
-
-type SplitRoleWorkspacePackageRoot =
-  | 'constants'
-  | 'core'
-  | 'effects'
-  | 'icons'
-  | 'locales'
-  | 'other'
-  | 'preferences'
-  | 'stores'
-  | 'styles'
-  | 'types'
-  | 'utils';
+  | 'unexpected-status'
+  | SplitRoleModuleRequestFailureOutcome;
 
 interface SplitRoleModuleFailure {
   effectsPackageRoot?: SplitRoleEffectsPackageRoot;
@@ -797,94 +759,9 @@ function classifySplitRoleWorkspacePageErrorSource(
 function classifySplitRoleModuleRequestFailure(
   request: Request,
 ): SplitRoleModuleFailureOutcome {
-  const failure = request.failure();
-  if (!failure) {
-    return 'request-missing-details';
-  }
-
-  const errorText = failure.errorText;
-  switch (errorText) {
-    case 'net::ERR_ABORTED': {
-      return 'request-aborted';
-    }
-    case 'net::ERR_FAILED': {
-      return 'request-failed';
-    }
-  }
-  if (
-    [
-      'net::ERR_DNS_MALFORMED_RESPONSE',
-      'net::ERR_DNS_SERVER_FAILED',
-      'net::ERR_DNS_TIMED_OUT',
-      'net::ERR_NAME_NOT_RESOLVED',
-    ].includes(errorText)
-  ) {
-    return 'request-name-resolution';
-  }
-  if (errorText === 'net::ERR_TIMED_OUT') {
-    return 'request-timeout';
-  }
-  if (
-    [
-      'net::ERR_ADDRESS_INVALID',
-      'net::ERR_ADDRESS_UNREACHABLE',
-      'net::ERR_HOST_UNREACHABLE',
-      'net::ERR_INTERNET_DISCONNECTED',
-      'net::ERR_NETWORK_CHANGED',
-      'net::ERR_NETWORK_UNREACHABLE',
-    ].includes(errorText)
-  ) {
-    return 'request-reachability';
-  }
-  if (
-    [
-      'net::ERR_PROXY_CONNECTION_FAILED',
-      'net::ERR_SOCKS_CONNECTION_FAILED',
-      'net::ERR_SOCKS_CONNECTION_HOST_UNREACHABLE',
-      'net::ERR_TUNNEL_CONNECTION_FAILED',
-    ].includes(errorText)
-  ) {
-    return 'request-proxy';
-  }
-  if (
-    [
-      'net::ERR_ALPN_NEGOTIATION_FAILED',
-      'net::ERR_HTTP2_PROTOCOL_ERROR',
-      'net::ERR_QUIC_PROTOCOL_ERROR',
-      'net::ERR_SPDY_PROTOCOL_ERROR',
-    ].includes(errorText)
-  ) {
-    return 'request-protocol';
-  }
-  if (
-    [
-      'net::ERR_CONTENT_DECODING_FAILED',
-      'net::ERR_CONTENT_LENGTH_MISMATCH',
-      'net::ERR_EMPTY_RESPONSE',
-      'net::ERR_INVALID_CHUNKED_ENCODING',
-      'net::ERR_INVALID_RESPONSE',
-      'net::ERR_RESPONSE_HEADERS_TRUNCATED',
-    ].includes(errorText)
-  ) {
-    return 'request-response';
-  }
-  if (errorText.startsWith('net::ERR_BLOCKED_')) {
-    return 'request-policy';
-  }
-  if (
-    errorText.startsWith('net::ERR_CERT_') ||
-    errorText.startsWith('net::ERR_SSL_') ||
-    errorText === 'net::ERR_INSECURE_RESPONSE'
-  ) {
-    return 'request-tls';
-  }
-  if (errorText.startsWith('net::ERR_CONNECTION_')) {
-    return 'request-connection';
-  }
-  if (errorText.startsWith('net::ERR_')) {
-    return 'request-network';
-  }
-  return 'request-other';
+  return classifySplitRoleModuleRequestFailureText(
+    request.failure()?.errorText,
+  );
 }
 
 function getViteFilesystemRoot(url: URL): string {
@@ -1109,6 +986,16 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
     case 'request-name-resolution': {
       throw new Error(
         'Split-role Administrators workspace script module request had a name-resolution failure.',
+      );
+    }
+    case 'request-network-unclassified': {
+      const resource = describeSplitRoleUnclassifiedNetworkModuleResource(
+        moduleFailure.resource,
+        moduleFailure.workspacePackageRoot,
+        moduleFailure.effectsPackageRoot,
+      );
+      throw new Error(
+        `Split-role Administrators workspace ${resource} script module request had an unclassified network failure.`,
       );
     }
     case 'request-network': {
@@ -1618,6 +1505,11 @@ function throwSplitRoleRouteFallbackModuleFailure(
     case 'request-name-resolution': {
       throw new Error(
         `Split-role ${routeLabel} route target script module request had a name-resolution failure.`,
+      );
+    }
+    case 'request-network-unclassified': {
+      throw new Error(
+        `Split-role ${routeLabel} route target script module request had an unclassified network failure.`,
       );
     }
     case 'request-network': {
@@ -2338,6 +2230,7 @@ async function readSplitRoleAdministratorsWorkspaceState(
   page: Page,
   startupError: SplitRoleStartupError,
   pageErrorSource: SplitRoleWorkspacePageErrorSource,
+  moduleFailure: SplitRoleModuleFailure | undefined,
 ): Promise<SplitRoleAdministratorsWorkspaceState> {
   const [
     persistedPermissions,
@@ -2369,6 +2262,7 @@ async function readSplitRoleAdministratorsWorkspaceState(
     isGameConfigRoute: currentPath === '/game-config',
     isLoginRoute: currentPath === '/auth/login',
     loadingMaskVisible,
+    ...(moduleFailure ? { moduleFailure } : {}),
     pageErrorSource,
     protectedHeadingVisible,
     protectedTableVisible,
@@ -3480,6 +3374,11 @@ function throwSplitRoleInitialLoginModuleFailure(
         'Split-role initial-login script module request had a name-resolution failure.',
       );
     }
+    case 'request-network-unclassified': {
+      throw new Error(
+        'Split-role initial-login script module request had an unclassified network failure.',
+      );
+    }
     case 'request-network': {
       throw new Error(
         'Split-role initial-login script module request had a network failure.',
@@ -3780,6 +3679,11 @@ function throwSplitRoleAdministratorsWorkspaceFailure(
       'Split-role authorized route rendered the fallback surface.',
     );
   }
+  if (workspaceState.moduleFailure) {
+    throwSplitRoleAdministratorsWorkspaceModuleFailure(
+      workspaceState.moduleFailure,
+    );
+  }
   if (!workspaceState.applicationMounted) {
     if (workspaceState.startupError === 'dynamic-module-fetch') {
       throw new Error(
@@ -3865,9 +3769,15 @@ async function assertBrowserRefreshRejected(
   );
   await expect(page).toHaveURL(/\/auth\/login(?:[?#].*)?$/);
   await assertPersistedAccessStateCleared(page);
-  await expect(formField(page, 'login-username')).toBeVisible({
-    timeout: loginReadyTimeoutMs,
-  });
+  const usernameField = formField(page, 'login-username');
+  const passwordField = formField(page, 'login-password');
+  const submitButton = loginAction(page);
+  await expect(usernameField).toBeVisible({ timeout: loginReadyTimeoutMs });
+  await expect(usernameField).toBeEnabled();
+  await expect(passwordField).toBeVisible({ timeout: loginReadyTimeoutMs });
+  await expect(passwordField).toBeEnabled();
+  await expect(submitButton).toBeVisible({ timeout: loginReadyTimeoutMs });
+  await expect(submitButton).toBeEnabled();
 }
 
 async function openWorkspace(
@@ -4960,9 +4870,6 @@ test('roles, permissions, and authorization', async ({
   );
   await expect(page).toHaveURL(/\/auth\/login(?:[?#].*)?$/);
   await assertPersistedAccessStateCleared(page);
-  await expect(formField(page, 'login-username')).toBeVisible({
-    timeout: loginReadyTimeoutMs,
-  });
   let splitRoleLoginSubmissionState: LoginSubmissionState | undefined;
   const splitRoleResponseState: SplitRoleLoginResponseState = {
     loginRequestFailed: false,
@@ -4974,6 +4881,29 @@ test('roles, permissions, and authorization', async ({
   const splitRoleInitialLoginModuleRequests = new Set<Request>();
   const splitRoleInitialLoginResponseState: SplitRoleInitialLoginResponseState =
     {};
+  try {
+    const splitRoleLoginUrl = new URL(page.url());
+    if (
+      splitRoleLoginUrl.pathname !== '/auth/login' ||
+      splitRoleLoginUrl.search.length > 0 ||
+      splitRoleLoginUrl.hash.length > 0
+    ) {
+      await page.goto('/auth/login', {
+        timeout: loginReadyTimeoutMs,
+        waitUntil: 'commit',
+      });
+    }
+    await expect(formField(page, 'login-username')).toBeVisible({
+      timeout: loginReadyTimeoutMs,
+    });
+  } catch {
+    throwSplitRoleLoginFailure(
+      splitRoleResponseState,
+      await readSplitRoleLoginState(page, splitRoleStartupError),
+      splitRoleLoginSubmissionState,
+      splitRoleInitialLoginResponseState,
+    );
+  }
   const isSplitRoleInitialLoginReadinessActive = () =>
     splitRoleInitialLoginReadinessArmed &&
     new URL(page.url()).pathname === '/auth/login';
@@ -5172,9 +5102,14 @@ test('roles, permissions, and authorization', async ({
     page.off('request', observeSplitRoleRequest);
   }
   const splitRoleAdministratorsWorkspacePage = await page.context().newPage();
+  const splitRoleAdministratorsWorkspaceResponseState: Pick<
+    SplitRoleLoginResponseState,
+    'moduleFailure'
+  > = {};
   let splitRoleAdministratorsWorkspaceNavigationArmed = false;
   let splitRoleAdministratorsWorkspaceTargetDocumentActive = false;
   let splitRoleAdministratorsWorkspaceTargetDocumentEverCommitted = false;
+  const splitRoleAdministratorsWorkspaceModuleRequests = new Set<Request>();
   let splitRoleAdministratorsWorkspaceStartupError: SplitRoleStartupError =
     'none';
   let splitRoleAdministratorsWorkspacePageErrorSource: SplitRoleWorkspacePageErrorSource =
@@ -5190,6 +5125,23 @@ test('roles, permissions, and authorization', async ({
   const isSplitRoleAdministratorsWorkspaceTargetActive = () =>
     splitRoleAdministratorsWorkspaceNavigationArmed &&
     splitRoleAdministratorsWorkspaceTargetDocumentActive;
+  const observeSplitRoleAdministratorsWorkspaceRequest = (request: Request) => {
+    if (
+      !isSplitRoleAdministratorsWorkspaceTargetActive() ||
+      request.frame() !== splitRoleAdministratorsWorkspacePage.mainFrame()
+    ) {
+      return;
+    }
+
+    if (
+      classifySplitRoleModuleResource(
+        request,
+        splitRoleAdministratorsWorkspacePage,
+      )
+    ) {
+      splitRoleAdministratorsWorkspaceModuleRequests.add(request);
+    }
+  };
   const observeSplitRoleAdministratorsWorkspaceFrameNavigation = (
     frame: Frame,
   ) => {
@@ -5200,6 +5152,10 @@ test('roles, permissions, and authorization', async ({
       return;
     }
 
+    splitRoleAdministratorsWorkspaceModuleRequests.clear();
+    splitRoleAdministratorsWorkspaceResponseState.moduleFailure = undefined;
+    splitRoleAdministratorsWorkspaceStartupError = 'none';
+    splitRoleAdministratorsWorkspacePageErrorSource = 'unattributed';
     splitRoleAdministratorsWorkspaceTargetDocumentActive = false;
     if (!isSplitRoleAdministratorsWorkspaceTargetPath(frame.url())) {
       return;
@@ -5208,19 +5164,95 @@ test('roles, permissions, and authorization', async ({
     splitRoleAdministratorsWorkspaceTargetDocumentEverCommitted = true;
     splitRoleAdministratorsWorkspaceTargetDocumentActive = true;
   };
+  const observeSplitRoleAdministratorsWorkspaceResponse = (
+    response: Response,
+  ) => {
+    if (!isSplitRoleAdministratorsWorkspaceTargetActive()) {
+      return;
+    }
+
+    const request = response.request();
+    const moduleResource = splitRoleAdministratorsWorkspaceModuleRequests.has(
+      request,
+    )
+      ? classifySplitRoleModuleResource(
+          request,
+          splitRoleAdministratorsWorkspacePage,
+        )
+      : null;
+    const moduleFailureOutcome = classifySplitRoleModuleFailureOutcome(
+      response.status(),
+    );
+    if (moduleResource && moduleFailureOutcome) {
+      recordSplitRoleModuleFailure(
+        splitRoleAdministratorsWorkspaceResponseState,
+        createSplitRoleModuleFailure(
+          request,
+          moduleFailureOutcome,
+          moduleResource,
+        ),
+      );
+    }
+  };
+  const observeSplitRoleAdministratorsWorkspaceRequestFailure = (
+    request: Request,
+  ) => {
+    if (!isSplitRoleAdministratorsWorkspaceTargetActive()) {
+      return;
+    }
+
+    const moduleResource = splitRoleAdministratorsWorkspaceModuleRequests.has(
+      request,
+    )
+      ? classifySplitRoleModuleResource(
+          request,
+          splitRoleAdministratorsWorkspacePage,
+        )
+      : null;
+    if (moduleResource) {
+      recordSplitRoleModuleFailure(
+        splitRoleAdministratorsWorkspaceResponseState,
+        createSplitRoleModuleFailure(
+          request,
+          classifySplitRoleModuleRequestFailure(request),
+          moduleResource,
+        ),
+      );
+    }
+    splitRoleAdministratorsWorkspaceModuleRequests.delete(request);
+  };
+  const observeSplitRoleAdministratorsWorkspaceRequestFinished = (
+    request: Request,
+  ) => {
+    splitRoleAdministratorsWorkspaceModuleRequests.delete(request);
+  };
   const observeSplitRoleAdministratorsWorkspacePageError = (error: Error) => {
     if (!isSplitRoleAdministratorsWorkspaceTargetActive()) {
       return;
     }
 
-    if (error.message.includes('Failed to fetch dynamically imported module')) {
-      splitRoleAdministratorsWorkspaceStartupError = 'dynamic-module-fetch';
-    } else if (splitRoleAdministratorsWorkspaceStartupError === 'none') {
+    if (splitRoleAdministratorsWorkspaceStartupError === 'none') {
       splitRoleAdministratorsWorkspaceStartupError = 'page-error';
       splitRoleAdministratorsWorkspacePageErrorSource =
         classifySplitRoleWorkspacePageErrorSource(error);
     }
   };
+  splitRoleAdministratorsWorkspacePage.on(
+    'request',
+    observeSplitRoleAdministratorsWorkspaceRequest,
+  );
+  splitRoleAdministratorsWorkspacePage.on(
+    'response',
+    observeSplitRoleAdministratorsWorkspaceResponse,
+  );
+  splitRoleAdministratorsWorkspacePage.on(
+    'requestfailed',
+    observeSplitRoleAdministratorsWorkspaceRequestFailure,
+  );
+  splitRoleAdministratorsWorkspacePage.on(
+    'requestfinished',
+    observeSplitRoleAdministratorsWorkspaceRequestFinished,
+  );
   splitRoleAdministratorsWorkspacePage.on(
     'framenavigated',
     observeSplitRoleAdministratorsWorkspaceFrameNavigation,
@@ -5231,6 +5263,12 @@ test('roles, permissions, and authorization', async ({
   );
   try {
     splitRoleAdministratorsWorkspaceNavigationArmed = true;
+    splitRoleAdministratorsWorkspaceTargetDocumentActive = false;
+    splitRoleAdministratorsWorkspaceTargetDocumentEverCommitted = false;
+    splitRoleAdministratorsWorkspaceModuleRequests.clear();
+    splitRoleAdministratorsWorkspaceResponseState.moduleFailure = undefined;
+    splitRoleAdministratorsWorkspaceStartupError = 'none';
+    splitRoleAdministratorsWorkspacePageErrorSource = 'unattributed';
     await openWorkspace(
       splitRoleAdministratorsWorkspacePage,
       '/admin-access',
@@ -5264,6 +5302,7 @@ test('roles, permissions, and authorization', async ({
         splitRoleAdministratorsWorkspacePage,
         splitRoleAdministratorsWorkspaceStartupError,
         splitRoleAdministratorsWorkspacePageErrorSource,
+        splitRoleAdministratorsWorkspaceResponseState.moduleFailure,
       ),
     );
   } finally {
@@ -5276,6 +5315,22 @@ test('roles, permissions, and authorization', async ({
     splitRoleAdministratorsWorkspacePage.off(
       'framenavigated',
       observeSplitRoleAdministratorsWorkspaceFrameNavigation,
+    );
+    splitRoleAdministratorsWorkspacePage.off(
+      'requestfailed',
+      observeSplitRoleAdministratorsWorkspaceRequestFailure,
+    );
+    splitRoleAdministratorsWorkspacePage.off(
+      'requestfinished',
+      observeSplitRoleAdministratorsWorkspaceRequestFinished,
+    );
+    splitRoleAdministratorsWorkspacePage.off(
+      'response',
+      observeSplitRoleAdministratorsWorkspaceResponse,
+    );
+    splitRoleAdministratorsWorkspacePage.off(
+      'request',
+      observeSplitRoleAdministratorsWorkspaceRequest,
     );
     await splitRoleAdministratorsWorkspacePage.close();
   }
@@ -6819,6 +6874,8 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   const bootstrapUserName = requireEnvironment('NOVAGAME_E2E_USERNAME');
   const runId = crypto.randomUUID();
   const longValue = `E2E-${runId}-${'long-operational-value-'.repeat(3)}`;
+  const longDisplayName = `d${runId.replaceAll('-', '')}${'x'.repeat(80)}`;
+  const longUserName = `u${runId.replaceAll('-', '')}${'x'.repeat(31)}`;
   const statePassword = `State-${runId}-Password!`;
 
   const bootstrapAccessToken = await login(
@@ -6849,10 +6906,10 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
       apiUrl(apiBaseURL, '/admin-access/administrators'),
       {
         data: {
-          displayName: longValue,
+          displayName: longDisplayName,
           initialPassword: statePassword,
           roleIds: [builtInRole.id],
-          userName: `e2e-state-${runId}`,
+          userName: longUserName,
         },
         headers: {
           ...authorizationHeaders(bootstrapAccessToken),
@@ -6869,7 +6926,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     'GET',
     apiUrl(apiBaseURL, '/admin-access/administrators?page=1&pageSize=20'),
   );
-  await assertResponseStatus(
+  await assertAuthorizationFailure(
     unauthenticatedResponse,
     acceptanceEvidence,
     401,
@@ -6931,7 +6988,114 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     apiUrl(apiBaseURL, '/admin-access/administrators?page=1&pageSize=20'),
     { headers: authorizationHeaders(stateViewerAccessToken) },
   );
-  await assertResponseStatus(forbiddenResponse, acceptanceEvidence, 403, 'GET');
+  await assertAuthorizationFailure(
+    forbiddenResponse,
+    acceptanceEvidence,
+    403,
+    'GET',
+  );
+
+  await logout(page, acceptanceEvidence);
+  const stateRoleWithAdministratorsRead = await readApiData<AdminRole>(
+    await acceptanceEvidence.apiRequest(
+      page.request,
+      'PUT',
+      apiUrl(apiBaseURL, `/admin-access/roles/${stateRole.id}/permissions`),
+      {
+        data: {
+          permissionNames: [
+            accessPermission,
+            administratorsReadPermission,
+            gameConfigAccessPermission,
+          ],
+        },
+        headers: mutationHeaders(bootstrapAccessToken, stateRole.revision),
+      },
+    ),
+    acceptanceEvidence,
+    'PUT',
+  );
+  await login(
+    page,
+    stateViewer.userName,
+    stateViewerPassword,
+    acceptanceEvidence,
+  );
+  await page.setViewportSize({ height: 844, width: 390 });
+  await openWorkspace(
+    page,
+    '/admin-access/administrators',
+    'Administrators',
+    'administrator-table',
+  );
+  const stateRoleWithoutAdministratorsRead = await readApiData<AdminRole>(
+    await acceptanceEvidence.apiRequest(
+      page.request,
+      'PUT',
+      apiUrl(apiBaseURL, `/admin-access/roles/${stateRole.id}/permissions`),
+      {
+        data: {
+          permissionNames: [accessPermission, gameConfigAccessPermission],
+        },
+        headers: mutationHeaders(
+          bootstrapAccessToken,
+          stateRoleWithAdministratorsRead.revision,
+        ),
+      },
+    ),
+    acceptanceEvidence,
+    'PUT',
+  );
+  expect(stateRoleWithoutAdministratorsRead.permissionNames).not.toContain(
+    administratorsReadPermission,
+  );
+  const forbiddenCdpSession = await page.context().newCDPSession(page);
+  let forbiddenNetworkEnabled = false;
+  try {
+    await forbiddenCdpSession.send('Network.enable');
+    forbiddenNetworkEnabled = true;
+    await forbiddenCdpSession.send('Network.emulateNetworkConditions', {
+      downloadThroughput: -1,
+      latency: 5000,
+      offline: false,
+      uploadThroughput: -1,
+    });
+    const browserForbiddenResponse = waitForApiResponse(
+      page,
+      'GET',
+      '/api/admin-access/administrators',
+      403,
+    );
+    await page.getByTestId('refresh-administrators').click();
+    await assertResponseStatus(
+      await browserForbiddenResponse,
+      acceptanceEvidence,
+      403,
+      'GET',
+    );
+    await expect(page.getByTestId('administrators-forbidden')).toBeVisible({
+      timeout: 60_000,
+    });
+    await assertNoBodyOverflow(page);
+    await acceptanceEvidence.captureScreenshot(
+      page,
+      `${visualOutputDirectory}/admin-access-administrators-forbidden-mobile-390x844.png`,
+    );
+  } finally {
+    if (forbiddenNetworkEnabled) {
+      await forbiddenCdpSession.send('Network.emulateNetworkConditions', {
+        downloadThroughput: -1,
+        latency: 0,
+        offline: false,
+        uploadThroughput: -1,
+      });
+      await forbiddenCdpSession.send('Network.disable');
+    }
+    await forbiddenCdpSession.detach();
+  }
+  await expect(
+    page.getByRole('heading', { name: 'Game configuration' }),
+  ).toBeVisible({ timeout: 60_000 });
 
   await logout(page, acceptanceEvidence);
   await login(page, bootstrapUserName, bootstrapPassword, acceptanceEvidence);
@@ -6943,6 +7107,73 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     { headers: authorizationHeaders(bootstrapAccessToken) },
   );
   await assertResponseStatus(notFoundResponse, acceptanceEvidence, 404, 'GET');
+  await page.setViewportSize({ height: 844, width: 390 });
+  const notFoundPath = `/admin-access/not-found-${runId}`;
+  await page.goto(notFoundPath, { timeout: 60_000, waitUntil: 'commit' });
+  await expect(page.locator('svg[viewBox="0 0 860 571"]')).toBeVisible({
+    timeout: 60_000,
+  });
+  expect(new URL(page.url()).pathname).toBe(notFoundPath);
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-client-route-not-found-mobile-390x844.png`,
+  );
+  await openWorkspace(
+    page,
+    '/admin-access/administrators',
+    'Administrators',
+    'administrator-table',
+  );
+  await formField(page, 'administrator-search').fill(longUserName);
+  await formField(page, 'administrator-search').press('Enter');
+  const initialStateAdministratorRow = tableRow(
+    page,
+    'administrator-table',
+    longUserName,
+  ).first();
+  await expect(initialStateAdministratorRow).toBeVisible({ timeout: 60_000 });
+  await initialStateAdministratorRow
+    .getByTestId('administrator-mobile-actions')
+    .click();
+  await page.getByRole('menuitem', { name: 'Reset password' }).click();
+  const passwordResetSubject = page.getByTestId(
+    'password-reset-administrator-subject',
+  );
+  await expect(passwordResetSubject).toHaveText(longDisplayName);
+  await expect
+    .poll(() =>
+      passwordResetSubject.evaluate((subject) => {
+        const style = window.getComputedStyle(subject);
+        return {
+          overflowWrap: style.overflowWrap,
+          whiteSpace: style.whiteSpace,
+        };
+      }),
+    )
+    .toEqual({ overflowWrap: 'anywhere', whiteSpace: 'normal' });
+  const passwordResetSubjectLayout = await passwordResetSubject.evaluate(
+    (subject) => {
+      const range = document.createRange();
+      range.selectNodeContents(subject);
+
+      return {
+        clientWidth: subject.clientWidth,
+        lineCount: new Set(
+          Array.from(range.getClientRects(), (rect) => Math.round(rect.top)),
+        ).size,
+        scrollWidth: subject.scrollWidth,
+      };
+    },
+  );
+  expect(passwordResetSubjectLayout.clientWidth).toBeGreaterThan(0);
+  expect(passwordResetSubjectLayout.scrollWidth).toBeLessThanOrEqual(
+    passwordResetSubjectLayout.clientWidth,
+  );
+  expect(passwordResetSubjectLayout.lineCount).toBeGreaterThan(1);
+  await assertNoBodyOverflow(page);
+  await page.keyboard.press('Escape');
+  await expect(passwordResetSubject).toHaveCount(0);
   const updatedStateAdministrator = await readApiData<Administrator>(
     await acceptanceEvidence.apiRequest(
       page.request,
@@ -6985,31 +7216,92 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   const workspaces = [
     {
       heading: 'Administrators',
+      mobileScreenshot: `${visualOutputDirectory}/admin-access-administrators-mobile-390x844.png`,
       path: '/admin-access/administrators',
-      screenshot: `${visualOutputDirectory}/admin-access-administrators-desktop-1440x900.png`,
+      desktopScreenshot: `${visualOutputDirectory}/admin-access-administrators-desktop-1440x900.png`,
       tableTestId: 'administrator-table',
     },
     {
       heading: 'Roles and permissions',
+      mobileScreenshot: `${visualOutputDirectory}/admin-access-roles-mobile-390x844.png`,
       path: '/admin-access/roles',
-      screenshot: `${visualOutputDirectory}/admin-access-roles-desktop-1440x900.png`,
+      desktopScreenshot: `${visualOutputDirectory}/admin-access-roles-desktop-1440x900.png`,
       tableTestId: 'role-table',
     },
     {
       heading: 'Sessions',
+      mobileScreenshot: `${visualOutputDirectory}/admin-access-sessions-mobile-390x844.png`,
       path: '/admin-access/sessions',
-      screenshot: `${visualOutputDirectory}/admin-access-sessions-desktop-1440x900.png`,
+      desktopScreenshot: `${visualOutputDirectory}/admin-access-sessions-desktop-1440x900.png`,
       tableTestId: 'session-table',
     },
     {
       heading: 'Audit history',
+      mobileScreenshot: `${visualOutputDirectory}/admin-access-audit-mobile-390x844.png`,
       path: '/admin-access/audit',
-      screenshot: `${visualOutputDirectory}/admin-access-audit-desktop-1440x900.png`,
+      desktopScreenshot: `${visualOutputDirectory}/admin-access-audit-desktop-1440x900.png`,
       tableTestId: 'audit-table',
     },
   ] as const;
 
   await page.setViewportSize({ height: 844, width: 390 });
+  await openWorkspace(
+    page,
+    '/admin-access/administrators',
+    'Administrators',
+    'administrator-table',
+  );
+  const administratorsTable = page.getByTestId('administrator-table');
+  const cdpSession = await page.context().newCDPSession(page);
+  let networkEnabled = false;
+  try {
+    await cdpSession.send('Network.enable');
+    networkEnabled = true;
+    await cdpSession.send('Network.emulateNetworkConditions', {
+      downloadThroughput: -1,
+      latency: 5000,
+      offline: false,
+      uploadThroughput: -1,
+    });
+    const loadingResponse = waitForApiResponse(
+      page,
+      'GET',
+      '/api/admin-access/administrators',
+      200,
+    );
+    await page.getByTestId('refresh-administrators').click();
+    await expect(page.locator('#__app-loading__')).toBeHidden({
+      timeout: 60_000,
+    });
+    await expect(administratorsTable.locator('.el-loading-mask')).toBeVisible({
+      timeout: 60_000,
+    });
+    await assertNoBodyOverflow(page);
+    await acceptanceEvidence.captureScreenshot(
+      page,
+      `${visualOutputDirectory}/admin-access-administrators-loading-mobile-390x844.png`,
+    );
+    await assertResponseStatus(
+      await loadingResponse,
+      acceptanceEvidence,
+      200,
+      'GET',
+    );
+    await expect(administratorsTable.locator('.el-loading-mask')).toBeHidden({
+      timeout: 60_000,
+    });
+  } finally {
+    if (networkEnabled) {
+      await cdpSession.send('Network.emulateNetworkConditions', {
+        downloadThroughput: -1,
+        latency: 0,
+        offline: false,
+        uploadThroughput: -1,
+      });
+      await cdpSession.send('Network.disable');
+    }
+    await cdpSession.detach();
+  }
   for (const workspace of workspaces) {
     await openWorkspace(
       page,
@@ -7018,7 +7310,33 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
       workspace.tableTestId,
     );
     await assertNoBodyOverflow(page);
+    await acceptanceEvidence.captureScreenshot(
+      page,
+      workspace.mobileScreenshot,
+    );
   }
+  await openWorkspace(
+    page,
+    '/admin-access/administrators',
+    'Administrators',
+    'administrator-table',
+  );
+  await page.getByTestId('create-administrator').click();
+  const createAdministratorDrawer = page.getByTestId(
+    'administrator-create-drawer',
+  );
+  await expect(createAdministratorDrawer).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId('submit-administrator-create').click();
+  await expect(
+    createAdministratorDrawer.locator('.el-form-item__error'),
+  ).toHaveCount(3);
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-administrators-validation-mobile-390x844.png`,
+  );
+  await page.keyboard.press('Escape');
+  await expect(createAdministratorDrawer).toHaveCount(0);
   await openWorkspace(
     page,
     '/admin-access/roles',
@@ -7040,6 +7358,11 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     200,
     'GET',
   );
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-roles-create-drawer-mobile-390x844.png`,
+  );
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('role-create-drawer')).toHaveCount(0);
 
@@ -7052,15 +7375,162 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
       workspace.tableTestId,
     );
     await assertNoBodyOverflow(page);
-    await acceptanceEvidence.captureScreenshot(page, workspace.screenshot);
+    await acceptanceEvidence.captureScreenshot(
+      page,
+      workspace.desktopScreenshot,
+    );
   }
 
+  await logout(page, acceptanceEvidence);
+  await login(
+    page,
+    stateAdministrator.userName ?? longUserName,
+    statePassword,
+    acceptanceEvidence,
+  );
+  await page.setViewportSize({ height: 844, width: 390 });
+  await openWorkspace(
+    page,
+    '/admin-access/sessions',
+    'Sessions',
+    'session-table',
+  );
+  const stateSessionRow = tableRow(page, 'session-table', longUserName).first();
+  await expect(stateSessionRow).toBeVisible({ timeout: 60_000 });
+  await stateSessionRow.getByTestId('session-mobile-actions').click();
+  await page.getByRole('menuitem', { name: 'Revoke session' }).click();
+  await expect(page.getByTestId('session-revoke-subject')).toHaveText(
+    longUserName,
+  );
+  await expect(page.getByTestId('confirm-revoke-session')).toBeVisible();
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-sessions-revoke-dialog-mobile-390x844.png`,
+  );
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('session-revoke-subject')).toHaveCount(0);
+
+  const deactivatedStateAdministrator = await readApiData<Administrator>(
+    await acceptanceEvidence.apiRequest(
+      page.request,
+      'PUT',
+      apiUrl(
+        apiBaseURL,
+        `/admin-access/administrators/${stateAdministrator.id}/active-state`,
+      ),
+      {
+        data: { isActive: false },
+        headers: mutationHeaders(
+          bootstrapAccessToken,
+          updatedStateAdministrator.revision,
+        ),
+      },
+    ),
+    acceptanceEvidence,
+    'PUT',
+  );
+  expect(deactivatedStateAdministrator.isActive).toBe(false);
+  await assertBrowserRefreshRejected(page, acceptanceEvidence);
+  await expect(
+    page.getByRole('heading', { name: 'NovaGame Operations' }),
+  ).toBeVisible({ timeout: 60_000 });
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-unauthenticated-mobile-390x844.png`,
+  );
+  const resumedBootstrapAccessToken = await login(
+    page,
+    bootstrapUserName,
+    bootstrapPassword,
+    acceptanceEvidence,
+  );
+  await page.setViewportSize({ height: 844, width: 390 });
   await openWorkspace(
     page,
     '/admin-access/administrators',
     'Administrators',
     'administrator-table',
   );
+  await formField(page, 'administrator-search').fill(longUserName);
+  await formField(page, 'administrator-search').press('Enter');
+  const stateAdministratorRow = tableRow(
+    page,
+    'administrator-table',
+    longUserName,
+  ).first();
+  await expect(stateAdministratorRow).toBeVisible({ timeout: 60_000 });
+  await stateAdministratorRow
+    .getByTestId('administrator-mobile-actions')
+    .click();
+  await page.getByRole('menuitem', { name: 'Edit display name' }).click();
+  await expect(
+    page.getByTestId('administrator-display-name-drawer'),
+  ).toBeVisible({ timeout: 60_000 });
+  await readApiData<Administrator>(
+    await acceptanceEvidence.apiRequest(
+      page.request,
+      'PUT',
+      apiUrl(
+        apiBaseURL,
+        `/admin-access/administrators/${stateAdministrator.id}/display-name`,
+      ),
+      {
+        data: { displayName: `${longValue} source` },
+        headers: mutationHeaders(
+          resumedBootstrapAccessToken,
+          deactivatedStateAdministrator.revision,
+        ),
+      },
+    ),
+    acceptanceEvidence,
+    'PUT',
+  );
+  const displayNameConflictResponse = waitForApiResponse(
+    page,
+    'PUT',
+    `/api/admin-access/administrators/${stateAdministrator.id}/display-name`,
+    409,
+  );
+  await page
+    .getByTestId('administrator-display-name')
+    .fill(`${longValue} review`);
+  await page.getByTestId('save-administrator-display-name').click();
+  await assertResponseStatus(
+    await displayNameConflictResponse,
+    acceptanceEvidence,
+    409,
+    'PUT',
+  );
+  await expect(
+    page.getByTestId('reload-conflicted-display-name'),
+  ).toBeVisible();
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-administrators-conflict-mobile-390x844.png`,
+  );
+  await page.keyboard.press('Escape');
+  await expect(
+    page.getByTestId('administrator-display-name-drawer'),
+  ).toHaveCount(0);
+
+  const emptySearch = `no-administrator-${runId}`;
+  await formField(page, 'administrator-search').fill(emptySearch);
+  await formField(page, 'administrator-search').press('Enter');
+  await expect(
+    page.getByText('No administrators match the current filters'),
+  ).toBeVisible({ timeout: 60_000 });
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-administrators-empty-mobile-390x844.png`,
+  );
+  await formField(page, 'administrator-search').fill('');
+  await formField(page, 'administrator-search').press('Enter');
+  await expect(stateAdministratorRow).toBeVisible({ timeout: 60_000 });
+
   await acceptanceEvidence.withExpectedApiNetworkFailure(
     page,
     {
@@ -7071,6 +7541,26 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
       await page.getByTestId('refresh-administrators').click();
     },
   );
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await assertNoBodyOverflow(page);
+  await acceptanceEvidence.captureScreenshot(
+    page,
+    `${visualOutputDirectory}/admin-access-administrators-retry-mobile-390x844.png`,
+  );
+  const retryResponse = waitForApiResponse(
+    page,
+    'GET',
+    '/api/admin-access/administrators',
+    200,
+  );
+  await page.getByRole('button', { exact: true, name: 'Retry' }).click();
+  await assertResponseStatus(
+    await retryResponse,
+    acceptanceEvidence,
+    200,
+    'GET',
+  );
+  await expect(stateAdministratorRow).toBeVisible({ timeout: 60_000 });
 
   await logout(page, acceptanceEvidence);
 });

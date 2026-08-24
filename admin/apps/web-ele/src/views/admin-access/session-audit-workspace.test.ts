@@ -640,6 +640,41 @@ describe('session and audit workspaces', () => {
     );
   });
 
+  it('recovers the session-family list after a transient failure is retried', async () => {
+    getAccessStore().accessCodes = [accessPermission, sessionsReadPermission];
+    api.listSessionFamilies
+      .mockRejectedValueOnce({
+        message: 'Session list is temporarily unavailable.',
+        status: 503,
+      })
+      .mockResolvedValueOnce(
+        sessionPage([sessionFamily({ userName: 'recovered-session-owner' })]),
+      );
+
+    const wrapper = mountSessions();
+    await flushPromises();
+
+    expect(api.listSessionFamilies).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain(
+      'Session list is temporarily unavailable.',
+    );
+    const retryButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Retry');
+    if (!retryButton) {
+      throw new Error('The session list retry command was not rendered.');
+    }
+
+    await retryButton.trigger('click');
+    await flushPromises();
+
+    expect(api.listSessionFamilies).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('recovered-session-owner');
+    expect(wrapper.text()).not.toContain(
+      'Session list is temporarily unavailable.',
+    );
+  });
+
   it('keeps mobile session controls labelled and uses a read-only state when revoke access is absent', async () => {
     viewport.mobile = true;
     getAccessStore().accessCodes = [
@@ -676,6 +711,22 @@ describe('session and audit workspaces', () => {
       readOnly.find('[data-testid="session-mobile-actions"]').exists(),
     ).toBe(false);
     expect(readOnly.text()).toContain('Read only');
+  });
+
+  it('keeps an unbroken session owner name breakable in the revoke dialog', async () => {
+    const userName = 'u'.repeat(64);
+    api.listSessionFamilies.mockResolvedValue(
+      sessionPage([sessionFamily({ userName })]),
+    );
+
+    const wrapper = mountSessions();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="revoke-session"]').trigger('click');
+
+    const subject = wrapper.get('[data-testid="session-revoke-subject"]');
+    expect(subject.text()).toBe(userName);
+    expect(subject.classes()).toContain('dialog-subject');
   });
 
   it('confirms, retries, reloads, and repeats authoritative session-family revocation', async () => {
@@ -735,6 +786,53 @@ describe('session and audit workspaces', () => {
     expect(api.revokeSessionFamily).toHaveBeenCalledTimes(4);
     expect(api.revokeSessionFamily).toHaveBeenLastCalledWith(familyId);
     expect(api.listSessionFamilies).toHaveBeenCalledTimes(4);
+  });
+
+  it('closes and reloads only when an authoritative session-family target-not-found is returned', async () => {
+    api.listSessionFamilies
+      .mockResolvedValueOnce(sessionPage([sessionFamily()]))
+      .mockResolvedValueOnce(sessionPage());
+    api.revokeSessionFamily.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.SessionFamilyNotFound',
+      message: 'The session family was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountSessions();
+    await flushPromises();
+    await wrapper.get('[data-testid="revoke-session"]').trigger('click');
+    await wrapper
+      .get('[data-testid="confirm-revoke-session"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(
+      wrapper.find('[data-testid="confirm-revoke-session"]').exists(),
+    ).toBe(false);
+    expect(api.listSessionFamilies).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a session revocation dialog open for an unrelated 404', async () => {
+    api.listSessionFamilies.mockResolvedValue(sessionPage([sessionFamily()]));
+    api.revokeSessionFamily.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'A related role was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountSessions();
+    await flushPromises();
+    await wrapper.get('[data-testid="revoke-session"]').trigger('click');
+    await wrapper
+      .get('[data-testid="confirm-revoke-session"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(
+      wrapper.find('[data-testid="confirm-revoke-session"]').exists(),
+    ).toBe(true);
+    expect(wrapper.text()).toContain('A related role was not found.');
+    expect(api.listSessionFamilies).toHaveBeenCalledTimes(1);
   });
 
   it('reconciles a forbidden session request before allowing any further session access', async () => {
@@ -994,6 +1092,39 @@ describe('session and audit workspaces', () => {
     expect(api.listAuditRecords).toHaveBeenLastCalledWith(
       expect.objectContaining({ Page: 1, PageSize: 50 }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('recovers the audit list after a transient failure is retried', async () => {
+    getAccessStore().accessCodes = [accessPermission, auditReadPermission];
+    api.listAuditRecords
+      .mockRejectedValueOnce({
+        message: 'Audit list is temporarily unavailable.',
+        status: 503,
+      })
+      .mockResolvedValueOnce(
+        auditPage([auditRecord({ correlationId: 'recovered-audit-record' })]),
+      );
+
+    const wrapper = mountAudit();
+    await flushPromises();
+
+    expect(api.listAuditRecords).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('Audit list is temporarily unavailable.');
+    const retryButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Retry');
+    if (!retryButton) {
+      throw new Error('The audit list retry command was not rendered.');
+    }
+
+    await retryButton.trigger('click');
+    await flushPromises();
+
+    expect(api.listAuditRecords).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('recovered-audit-record');
+    expect(wrapper.text()).not.toContain(
+      'Audit list is temporarily unavailable.',
     );
   });
 

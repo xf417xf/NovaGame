@@ -20,9 +20,9 @@ verified. The complete player-equipment-grant capability remains SwordMaster-own
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
 another capability, M4, or NovaCore changes.
 
-[M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone and is
-blocked at `M35-07`: `M35-07-T02` is complete, while `M35-07-T03` awaits explicit user
-authorization. M35-05 completed the authorized
+[M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone at
+`M35-07`: `M35-07-T02` is complete, and the user authorized `M35-07-T03` on 2026-08-23. M35-05
+completed the authorized
 `administrator-management` capability through administrator, role and permission, session, audit,
 and generic Vben `web-ele` operations, including final management-admin, checked-contract,
 generic Admin, Documentation, Repository, and whitespace verification. M35-06-T01 froze and
@@ -31,8 +31,9 @@ boundary, and premature-source guard. M35-06 then completed the real composed AP
 security, serial cumulative verification, and zero-residue cleanup paths. M35-07-T01 completed the
 frozen real-browser acceptance foundation, and M35-07-T02 completed route/action permission plus
 authoritative `401`/`403` acceptance after focused, frontend, and serial real-browser verification.
-M35-07-T03 is not authorized and does not authorize later work, SwordMaster changes, extraction,
-M4, or NovaCore changes. M4 remains `Unscheduled`.
+M35-07-T03 is blocked pending an explicit frozen stale-detail `404` contract decision; it remains
+limited to responsive desktop/mobile acceptance and does not authorize later work, SwordMaster
+changes, extraction, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 When sources appear to conflict, stop and resolve the conflict before implementation. Do not silently weaken a repository rule or an active goal acceptance criterion.
 

@@ -158,12 +158,12 @@ brittle static permission-source verifier check was corrected. M35-05 is complet
 the frozen real-server acceptance, security evidence, serial cumulative verification, and
 zero-residue cleanup audit. M35-07-T01 completed the frozen real-browser acceptance foundation
 through the real Vben/API/DbMigrator/MySQL path, visual evidence, secret scanning, and cleanup.
-M3.5 is active but blocked at `M35-07`: `M35-07-T02` completed route/action permission and
-authoritative `401`/`403` acceptance after focused, frontend, and serial real-browser verification.
-The user separately authorized the NovaGame-owned `administrator-management` capability on
-2026-08-13, but has not authorized M35-07-T03. T03 remains blocked pending explicit user
-authorization. This authorization does not come from M3 and does not authorize M35-07-T04 or later
-work, SwordMaster changes, extraction, M4, or NovaCore changes.
+M3.5 is active at `M35-07`: `M35-07-T02` completed route/action permission and authoritative
+`401`/`403` acceptance after focused, frontend, and serial real-browser verification. The user
+separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13 and
+authorized M35-07-T03 responsive acceptance on 2026-08-23. T03 is blocked pending an explicit
+frozen stale-detail `404` contract decision and does not authorize M35-07-T04 or later work,
+SwordMaster changes, extraction, M4, or NovaCore changes.
 
 ### Goal
 

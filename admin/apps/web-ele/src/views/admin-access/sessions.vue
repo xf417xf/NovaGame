@@ -48,6 +48,7 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import {
+  AdminAccessErrorCode,
   AdminAccessPermission,
   hasAdminAccessPermission,
 } from '#/features/admin-access/permissions';
@@ -466,7 +467,10 @@ async function submitRevocation() {
       void refreshPermissionsAfterForbidden();
       return;
     }
-    if (apiError.status === 404) {
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.SessionFamilyNotFound
+    ) {
       closeSessionInteractions();
       await loadSessionFamilies();
       return;
@@ -842,7 +846,7 @@ onBeforeUnmount(() => {
     >
       <p>
         Revoke the session family for
-        <strong>
+        <strong class="dialog-subject" data-testid="session-revoke-subject">
           {{ selectedFamily?.userName ?? 'this administrator' }}
         </strong>
         ?
@@ -1006,6 +1010,11 @@ onBeforeUnmount(() => {
   display: block;
   max-width: 100%;
   margin-bottom: 16px;
+}
+
+.dialog-subject {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .dialog-footer {

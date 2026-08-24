@@ -13,6 +13,7 @@ import {
   setAdminRoleActiveState,
   toNovaGameApiError,
 } from '#/api';
+import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
 
 interface Props {
   canManage: boolean;
@@ -90,11 +91,19 @@ async function loadDetail() {
       detail.value = response;
     }
   } catch (error) {
-    if (isNovaGameRequestCancelled(error) || sequence !== loadSequence) {
+    if (
+      isNovaGameRequestCancelled(error) ||
+      sequence !== loadSequence ||
+      !props.modelValue ||
+      props.roleId !== roleId
+    ) {
       return;
     }
     const apiError = toNovaGameApiError(error);
-    if (apiError.status === 404) {
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.RoleNotFound
+    ) {
       emit('stale');
       close(true);
       return;
@@ -139,6 +148,14 @@ async function submit() {
       return;
     }
     const apiError = toNovaGameApiError(error);
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.RoleNotFound
+    ) {
+      emit('stale');
+      close(true);
+      return;
+    }
     if (apiError.status === 403) {
       closeForForbidden();
       return;

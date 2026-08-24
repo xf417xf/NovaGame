@@ -31,6 +31,7 @@ import { useMediaQuery } from '@vueuse/core';
 import {
   ElAlert,
   ElButton,
+  ElDialog,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
@@ -66,6 +67,10 @@ defineOptions({ name: 'AdministratorAccessRoles' });
 
 type RoleCommand = 'name' | 'permissions' | 'state';
 
+type RetainedRoleDraft =
+  | { kind: 'permissions'; permissionNames: string[] }
+  | { kind: 'rename'; name: string };
+
 const accessStore = useAccessStore();
 const authStore = useAuthStore();
 const router = useRouter();
@@ -79,6 +84,8 @@ const reconciliationError = ref('');
 const reconciliationRequired = ref(false);
 const renameDrawerOpen = ref(false);
 const reconcilingPermissions = ref(false);
+const retainedRoleDraft = ref<null | RetainedRoleDraft>(null);
+const retainedRoleDraftReviewOpen = ref(false);
 const roles = ref<AdminRoleSummaryDto[]>([]);
 const permissionsDrawerOpen = ref(false);
 const selectedRoleId = ref<null | string>(null);
@@ -140,6 +147,11 @@ function clearRoleResults() {
   total.value = 0;
 }
 
+function clearRetainedRoleDraft() {
+  retainedRoleDraft.value = null;
+  retainedRoleDraftReviewOpen.value = false;
+}
+
 function closeRoleInteractions() {
   createDrawerOpen.value = false;
   permissionsDrawerOpen.value = false;
@@ -172,6 +184,7 @@ async function refreshPermissionsAfterAccessChange() {
   }
 
   const refresh = (async () => {
+    clearRetainedRoleDraft();
     closeRoleInteractions();
     roleListSequence += 1;
     roleListController?.abort();
@@ -359,7 +372,22 @@ function handleRoleCreated() {
 }
 
 function handleStaleRole() {
+  closeRoleInteractions();
   void loadRoles();
+}
+
+function handleStaleRoleDraft(draft: null | RetainedRoleDraft) {
+  if (draft) {
+    retainedRoleDraft.value =
+      draft.kind === 'rename'
+        ? { kind: 'rename', name: draft.name }
+        : {
+            kind: 'permissions',
+            permissionNames: [...draft.permissionNames],
+          };
+    retainedRoleDraftReviewOpen.value = false;
+  }
+  handleStaleRole();
 }
 
 function handleRoleAccessChanged(role: AdminRoleDto) {
@@ -379,6 +407,7 @@ watch(canReadRoles, (canReadRoles) => {
   roleListController?.abort();
   roleListController = null;
   loading.value = false;
+  clearRetainedRoleDraft();
   closeRoleInteractions();
   clearRoleResults();
   forbidden.value = true;
@@ -386,6 +415,7 @@ watch(canReadRoles, (canReadRoles) => {
 
 watch(canManage, (canManage) => {
   if (!canManage) {
+    clearRetainedRoleDraft();
     closeRoleInteractions();
   }
 });
@@ -397,6 +427,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   roleListSequence += 1;
   roleListController?.abort();
+  clearRetainedRoleDraft();
 });
 </script>
 
@@ -503,6 +534,35 @@ onBeforeUnmount(() => {
         >
           <template #default>
             <ElButton size="small" @click="loadRoles">Retry</ElButton>
+          </template>
+        </ElAlert>
+
+        <ElAlert
+          v-if="retainedRoleDraft"
+          :closable="false"
+          data-testid="retained-role-draft"
+          show-icon
+          title="Unsaved changes from an unavailable detail are available for review."
+          type="warning"
+        >
+          <template #default>
+            <div class="retained-draft-actions">
+              <ElButton
+                data-testid="review-retained-role-draft"
+                size="small"
+                @click="retainedRoleDraftReviewOpen = true"
+              >
+                Review retained draft
+              </ElButton>
+              <ElButton
+                data-testid="discard-retained-role-draft"
+                size="small"
+                text
+                @click="clearRetainedRoleDraft"
+              >
+                Discard
+              </ElButton>
+            </div>
           </template>
         </ElAlert>
 
@@ -676,6 +736,60 @@ onBeforeUnmount(() => {
       </template>
     </main>
 
+    <ElDialog
+      :model-value="retainedRoleDraftReviewOpen"
+      title="Review retained draft"
+      width="min(520px, 94vw)"
+      @close="retainedRoleDraftReviewOpen = false"
+    >
+      <div
+        v-if="retainedRoleDraft"
+        class="retained-draft-content"
+        data-testid="retained-role-draft-review"
+      >
+        <p>
+          The original role detail is no longer available. This draft is
+          read-only and cannot be submitted.
+        </p>
+        <template v-if="retainedRoleDraft.kind === 'rename'">
+          <span class="retained-draft-label">Role name</span>
+          <strong class="retained-draft-value">
+            {{ retainedRoleDraft.name || 'No value entered' }}
+          </strong>
+        </template>
+        <template v-else>
+          <span class="retained-draft-label">Selected permissions</span>
+          <div class="retained-draft-tag-list">
+            <ElTag
+              v-for="permissionName in retainedRoleDraft.permissionNames"
+              :key="permissionName"
+              class="retained-draft-tag"
+              type="warning"
+            >
+              {{ permissionName }}
+            </ElTag>
+            <span v-if="retainedRoleDraft.permissionNames.length === 0">
+              No permissions selected
+            </span>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <ElButton @click="retainedRoleDraftReviewOpen = false">
+            Close
+          </ElButton>
+          <ElButton
+            data-testid="discard-retained-role-draft-from-review"
+            type="warning"
+            @click="clearRetainedRoleDraft"
+          >
+            Discard draft
+          </ElButton>
+        </div>
+      </template>
+    </ElDialog>
+
     <RoleCreateDrawer
       v-model="createDrawerOpen"
       :can-manage="canManageRoleWorkspace"
@@ -689,7 +803,7 @@ onBeforeUnmount(() => {
       :can-manage="canManageRoleWorkspace"
       :role-id="selectedRoleId"
       @forbidden="refreshPermissionsAfterAccessChange"
-      @stale="handleStaleRole"
+      @stale="handleStaleRoleDraft"
       @updated="replaceRole"
     />
     <RolePermissionsDrawer
@@ -698,7 +812,7 @@ onBeforeUnmount(() => {
       :can-read-roles="canReadRoleWorkspace"
       :role-id="selectedRoleId"
       @forbidden="refreshPermissionsAfterAccessChange"
-      @stale="handleStaleRole"
+      @stale="handleStaleRoleDraft"
       @updated="handleRoleAccessChanged"
     />
     <RoleStateDialog
@@ -793,6 +907,47 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+.retained-draft-actions,
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.retained-draft-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.retained-draft-content p {
+  margin: 0;
+  color: var(--el-text-color-secondary);
+}
+
+.retained-draft-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.retained-draft-value,
+.retained-draft-tag {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.retained-draft-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dialog-footer {
+  justify-content: flex-end;
+}
+
 @media (max-width: 900px) {
   .workspace-header {
     flex-direction: column;
@@ -845,6 +1000,18 @@ onBeforeUnmount(() => {
     --el-pagination-button-width: 44px;
 
     justify-content: center;
+  }
+
+  .retained-draft-actions,
+  .dialog-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .retained-draft-actions :deep(.el-button),
+  .dialog-footer :deep(.el-button) {
+    min-height: 44px;
+    margin-left: 0;
   }
 }
 </style>

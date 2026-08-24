@@ -32,6 +32,7 @@ import { useMediaQuery } from '@vueuse/core';
 import {
   ElAlert,
   ElButton,
+  ElDialog,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
@@ -73,6 +74,10 @@ type AdministratorCommand =
   | 'roles'
   | 'state';
 
+type RetainedAdministratorDraft =
+  | { displayName: string; kind: 'display-name' }
+  | { kind: 'roles'; roleIds: string[] };
+
 const accessStore = useAccessStore();
 const authStore = useAuthStore();
 const router = useRouter();
@@ -89,6 +94,8 @@ const passwordResetDialogOpen = ref(false);
 const reconciliationError = ref('');
 const reconciliationRequired = ref(false);
 const reconcilingPermissions = ref(false);
+const retainedAdministratorDraft = ref<null | RetainedAdministratorDraft>(null);
+const retainedAdministratorDraftReviewOpen = ref(false);
 const roleFilterOptions = ref<AdminRoleSummaryDto[]>([]);
 const rolesDrawerOpen = ref(false);
 const selectedAdministratorId = ref<null | string>(null);
@@ -196,6 +203,11 @@ function clearAdministratorResults() {
   total.value = 0;
 }
 
+function clearRetainedAdministratorDraft() {
+  retainedAdministratorDraft.value = null;
+  retainedAdministratorDraftReviewOpen.value = false;
+}
+
 function closeAdministratorInteractions() {
   createDrawerOpen.value = false;
   displayNameDrawerOpen.value = false;
@@ -238,6 +250,7 @@ async function refreshPermissionsAfterForbidden() {
 
   const refresh = (async () => {
     reconcilingPermissions.value = true;
+    clearRetainedAdministratorDraft();
     closeAdministratorInteractions();
     clearRoleFilterState();
     administratorListSequence += 1;
@@ -485,7 +498,21 @@ function handleAdministratorCreated() {
 }
 
 function handleStaleAdministrator() {
+  closeAdministratorInteractions();
   void loadAdministrators();
+}
+
+function handleStaleAdministratorDraft(
+  draft: null | RetainedAdministratorDraft,
+) {
+  if (draft) {
+    retainedAdministratorDraft.value =
+      draft.kind === 'display-name'
+        ? { displayName: draft.displayName, kind: 'display-name' }
+        : { kind: 'roles', roleIds: [...draft.roleIds] };
+    retainedAdministratorDraftReviewOpen.value = false;
+  }
+  handleStaleAdministrator();
 }
 
 watch(canReadAdministrators, (canRead) => {
@@ -496,6 +523,7 @@ watch(canReadAdministrators, (canRead) => {
   administratorListController?.abort();
   administratorListController = null;
   loading.value = false;
+  clearRetainedAdministratorDraft();
   closeAdministratorInteractions();
   clearAdministratorResults();
   forbidden.value = true;
@@ -506,6 +534,7 @@ watch(canReadRoles, (canReadRoles, previouslyCouldReadRoles) => {
     return;
   }
   const hadRoleFilter = query.roleId !== undefined;
+  clearRetainedAdministratorDraft();
   clearRoleFilterState();
   createDrawerOpen.value = false;
   rolesDrawerOpen.value = false;
@@ -515,6 +544,13 @@ watch(canReadRoles, (canReadRoles, previouslyCouldReadRoles) => {
     canReadAdministratorWorkspace.value
   ) {
     void loadAdministrators();
+  }
+});
+
+watch(canManage, (canManage) => {
+  if (!canManage) {
+    clearRetainedAdministratorDraft();
+    closeAdministratorInteractions();
   }
 });
 
@@ -528,6 +564,7 @@ onBeforeUnmount(() => {
   administratorListController?.abort();
   roleFilterSequence += 1;
   roleFilterController?.abort();
+  clearRetainedAdministratorDraft();
 });
 </script>
 
@@ -648,6 +685,35 @@ onBeforeUnmount(() => {
         >
           <template #default>
             <ElButton size="small" @click="loadAdministrators">Retry</ElButton>
+          </template>
+        </ElAlert>
+
+        <ElAlert
+          v-if="retainedAdministratorDraft"
+          :closable="false"
+          data-testid="retained-administrator-draft"
+          show-icon
+          title="Unsaved changes from an unavailable detail are available for review."
+          type="warning"
+        >
+          <template #default>
+            <div class="retained-draft-actions">
+              <ElButton
+                data-testid="review-retained-administrator-draft"
+                size="small"
+                @click="retainedAdministratorDraftReviewOpen = true"
+              >
+                Review retained draft
+              </ElButton>
+              <ElButton
+                data-testid="discard-retained-administrator-draft"
+                size="small"
+                text
+                @click="clearRetainedAdministratorDraft"
+              >
+                Discard
+              </ElButton>
+            </div>
           </template>
         </ElAlert>
 
@@ -877,6 +943,60 @@ onBeforeUnmount(() => {
       </template>
     </main>
 
+    <ElDialog
+      :model-value="retainedAdministratorDraftReviewOpen"
+      title="Review retained draft"
+      width="min(520px, 94vw)"
+      @close="retainedAdministratorDraftReviewOpen = false"
+    >
+      <div
+        v-if="retainedAdministratorDraft"
+        class="retained-draft-content"
+        data-testid="retained-administrator-draft-review"
+      >
+        <p>
+          The original administrator detail is no longer available. This draft
+          is read-only and cannot be submitted.
+        </p>
+        <template v-if="retainedAdministratorDraft.kind === 'display-name'">
+          <span class="retained-draft-label">Display name</span>
+          <strong class="retained-draft-value">
+            {{ retainedAdministratorDraft.displayName || 'No value entered' }}
+          </strong>
+        </template>
+        <template v-else>
+          <span class="retained-draft-label">Selected role identifiers</span>
+          <div class="retained-draft-tag-list">
+            <ElTag
+              v-for="roleId in retainedAdministratorDraft.roleIds"
+              :key="roleId"
+              class="retained-draft-tag"
+              type="warning"
+            >
+              {{ roleId }}
+            </ElTag>
+            <span v-if="retainedAdministratorDraft.roleIds.length === 0">
+              No active roles selected
+            </span>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <ElButton @click="retainedAdministratorDraftReviewOpen = false">
+            Close
+          </ElButton>
+          <ElButton
+            data-testid="discard-retained-administrator-draft-from-review"
+            type="warning"
+            @click="clearRetainedAdministratorDraft"
+          >
+            Discard draft
+          </ElButton>
+        </div>
+      </template>
+    </ElDialog>
+
     <AdministratorCreateDrawer
       v-model="createDrawerOpen"
       :can-manage="canManageAdministratorWorkspace"
@@ -890,7 +1010,7 @@ onBeforeUnmount(() => {
       :administrator-id="selectedAdministratorId"
       :can-manage="canManageAdministratorWorkspace"
       @forbidden="refreshPermissionsAfterForbidden"
-      @stale="handleStaleAdministrator"
+      @stale="handleStaleAdministratorDraft"
       @updated="replaceAdministrator"
     />
     <AdministratorRolesDrawer
@@ -899,7 +1019,7 @@ onBeforeUnmount(() => {
       :can-manage="canManageAdministratorWorkspace"
       :can-read-roles="canReadRoleFilterWorkspace"
       @forbidden="refreshPermissionsAfterForbidden"
-      @stale="handleStaleAdministrator"
+      @stale="handleStaleAdministratorDraft"
       @updated="replaceAdministrator"
     />
     <AdministratorStateDialog
@@ -976,6 +1096,47 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.retained-draft-actions,
+.dialog-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.retained-draft-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.retained-draft-content p {
+  margin: 0;
+  color: var(--el-text-color-secondary);
+}
+
+.retained-draft-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.retained-draft-value,
+.retained-draft-tag {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.retained-draft-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dialog-footer {
+  justify-content: flex-end;
 }
 
 .table-toolbar {
@@ -1081,6 +1242,18 @@ onBeforeUnmount(() => {
     --el-pagination-button-width: 44px;
 
     justify-content: center;
+  }
+
+  .retained-draft-actions,
+  .dialog-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .retained-draft-actions :deep(.el-button),
+  .dialog-footer :deep(.el-button) {
+    min-height: 44px;
+    margin-left: 0;
   }
 }
 </style>

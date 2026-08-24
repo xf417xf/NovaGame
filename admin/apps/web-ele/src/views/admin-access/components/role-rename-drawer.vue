@@ -21,6 +21,7 @@ import {
   renameAdminRole,
   toNovaGameApiError,
 } from '#/api';
+import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
 
 import { fieldErrorsFrom } from './administrator-form-utils';
 import { normalizeRoleName, validateRoleName } from './role-form-utils';
@@ -31,10 +32,15 @@ interface Props {
   roleId: null | string;
 }
 
+interface StaleRoleNameDraft {
+  kind: 'rename';
+  name: string;
+}
+
 const props = defineProps<Props>();
 const emit = defineEmits<{
   forbidden: [];
-  stale: [];
+  stale: [draft: null | StaleRoleNameDraft];
   'update:modelValue': [value: boolean];
   updated: [role: AdminRoleDto];
 }>();
@@ -57,6 +63,14 @@ function clearState() {
   fieldErrors.value = {};
   form.name = '';
   hasLocalInput = false;
+}
+
+function closeForStaleDetail() {
+  const draft = hasLocalInput
+    ? { kind: 'rename' as const, name: form.name }
+    : null;
+  emit('stale', draft);
+  close(true);
 }
 
 function close(force = false) {
@@ -103,13 +117,20 @@ async function loadDetail(preserveInput = false) {
       hasLocalInput = false;
     }
   } catch (error) {
-    if (isNovaGameRequestCancelled(error) || sequence !== loadSequence) {
+    if (
+      isNovaGameRequestCancelled(error) ||
+      sequence !== loadSequence ||
+      !props.modelValue ||
+      props.roleId !== roleId
+    ) {
       return;
     }
     const apiError = toNovaGameApiError(error);
-    if (apiError.status === 404) {
-      emit('stale');
-      close(true);
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.RoleNotFound
+    ) {
+      closeForStaleDetail();
       return;
     }
     if (apiError.status === 403) {
@@ -163,6 +184,13 @@ async function submit() {
       return;
     }
     const apiError = toNovaGameApiError(error);
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.RoleNotFound
+    ) {
+      closeForStaleDetail();
+      return;
+    }
     if (apiError.status === 403) {
       closeForForbidden();
       return;

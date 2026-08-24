@@ -11664,9 +11664,30 @@ function Get-AdminManagementScreenshotSpecifications {
             },
             [pscustomobject]@{
                 RelativePath =
+                    "output/playwright/visual/admin-access-administrators-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
                     "output/playwright/visual/admin-access-roles-desktop-1440x900.png"
                 Width = 1440
                 MinimumHeight = 900
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-roles-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-roles-create-drawer-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
                 MaximumHeight = 10000
             },
             [pscustomobject]@{
@@ -11678,9 +11699,86 @@ function Get-AdminManagementScreenshotSpecifications {
             },
             [pscustomobject]@{
                 RelativePath =
+                    "output/playwright/visual/admin-access-sessions-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-sessions-revoke-dialog-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
                     "output/playwright/visual/admin-access-audit-desktop-1440x900.png"
                 Width = 1440
                 MinimumHeight = 900
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-audit-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-administrators-conflict-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-administrators-empty-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-administrators-retry-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-administrators-loading-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-administrators-validation-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-administrators-forbidden-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-client-route-not-found-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
+                MaximumHeight = 10000
+            },
+            [pscustomobject]@{
+                RelativePath =
+                    "output/playwright/visual/admin-access-unauthenticated-mobile-390x844.png"
+                Width = 390
+                MinimumHeight = 844
                 MaximumHeight = 10000
             }
         )
@@ -11770,14 +11868,20 @@ function Get-AdminManagementResponseAuditManifest {
                     FileName =
                         "admin-access-responsive-failures-response-audit.json"
                     TestTitle = "responsive and failure states"
-                    MinimumScreenshotSurfaceScanCount = 1
+                    MinimumScreenshotSurfaceScanCount = 18
                 })) {
             $entry | Add-Member `
                 -NotePropertyName SourceFile `
                 -NotePropertyValue "admin-access.spec.ts"
             $entry | Add-Member `
                 -NotePropertyName ExactScreenshotSurfaceScanCount `
-                -NotePropertyValue $null
+                -NotePropertyValue $(
+                    if ($entry.TestTitle -ceq "responsive and failure states") {
+                        18
+                    }
+                    else {
+                        $null
+                    })
             $null = $manifest.Add($entry)
         }
     }

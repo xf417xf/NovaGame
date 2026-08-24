@@ -20,6 +20,7 @@ import {
   isNovaGameRequestCancelled,
   toNovaGameApiError,
 } from '#/api';
+import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
 
 import {
   fieldErrorsFrom,
@@ -33,10 +34,15 @@ interface Props {
   modelValue: boolean;
 }
 
+interface StaleDisplayNameDraft {
+  displayName: string;
+  kind: 'display-name';
+}
+
 const props = defineProps<Props>();
 const emit = defineEmits<{
   forbidden: [];
-  stale: [];
+  stale: [draft: null | StaleDisplayNameDraft];
   'update:modelValue': [value: boolean];
   updated: [administrator: AdministratorDto];
 }>();
@@ -72,6 +78,14 @@ function clearState() {
   hasLocalInput = false;
 }
 
+function closeForStaleDetail() {
+  const draft = hasLocalInput
+    ? { displayName: form.displayName, kind: 'display-name' as const }
+    : null;
+  emit('stale', draft);
+  close(true);
+}
+
 async function loadDetail(preserveInput = false) {
   const sequence = ++loadSequence;
   const administratorId = props.administratorId;
@@ -102,14 +116,21 @@ async function loadDetail(preserveInput = false) {
       hasLocalInput = false;
     }
   } catch (error) {
-    if (isNovaGameRequestCancelled(error) || sequence !== loadSequence) {
+    if (
+      isNovaGameRequestCancelled(error) ||
+      sequence !== loadSequence ||
+      !props.modelValue ||
+      props.administratorId !== administratorId
+    ) {
       return;
     }
 
     const apiError = toNovaGameApiError(error);
-    if (apiError.status === 404) {
-      emit('stale');
-      close();
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.AdministratorNotFound
+    ) {
+      closeForStaleDetail();
       return;
     }
     if (apiError.status === 403) {
@@ -160,6 +181,13 @@ async function submit() {
     }
 
     const apiError = toNovaGameApiError(error);
+    if (
+      apiError.status === 404 &&
+      apiError.code === AdminAccessErrorCode.AdministratorNotFound
+    ) {
+      closeForStaleDetail();
+      return;
+    }
     if (apiError.status === 403) {
       closeForForbidden();
       return;

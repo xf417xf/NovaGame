@@ -428,11 +428,13 @@ function rolePage(items: AdminRoleSummaryDto[] = []) {
 }
 
 function deferred<T>() {
+  let reject!: (reason?: unknown) => void;
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => {
+  const promise = new Promise<T>((resolver, rejecter) => {
+    reject = rejecter;
     resolve = resolver;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function getAccessStore() {
@@ -778,6 +780,31 @@ describe('administrator workspace', () => {
     );
   });
 
+  it('captures only a locally edited display name when the administrator disappears during save', async () => {
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.changeAdministratorDisplayName.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountDisplayNameDrawer();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="administrator-display-name"]')
+      .setValue('Unsaved display name');
+    await wrapper
+      .get('[data-testid="save-administrator-display-name"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toEqual([
+      [{ displayName: 'Unsaved display name', kind: 'display-name' }],
+    ]);
+    expect(wrapper.emitted('updated')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+  });
+
   it('does not let an older administrator-detail request replace the currently selected administrator', async () => {
     const firstLoad = deferred<ReturnType<typeof administratorDetail>>();
     const secondLoad = deferred<ReturnType<typeof administratorDetail>>();
@@ -885,6 +912,56 @@ describe('administrator workspace', () => {
     );
   });
 
+  it('captures only selected role identifiers when the administrator disappears during role replacement', async () => {
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.listAdminRoles.mockResolvedValue(rolePage([role()]));
+    api.replaceAdministratorRoles.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountRolesDrawer();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="administrator-role-ids"]')
+      .setValue(['role-id']);
+    await wrapper
+      .get('[data-testid="save-administrator-roles"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toEqual([
+      [{ kind: 'roles', roleIds: ['role-id'] }],
+    ]);
+    expect(wrapper.emitted('updated')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+  });
+
+  it('keeps administrator role editing open when a submitted role no longer exists', async () => {
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.replaceAdministratorRoles.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'A selected role was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountRolesDrawer();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="administrator-role-ids"]')
+      .setValue(['role-id']);
+    await wrapper
+      .get('[data-testid="save-administrator-roles"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(wrapper.text()).toContain('A selected role was not found.');
+    expect(api.listAdminRoles).toHaveBeenCalledTimes(2);
+  });
+
   it('uses an explicit active-state confirmation and the current detail ETag', async () => {
     api.getAdministrator.mockResolvedValue(administratorDetail());
     api.setAdministratorActiveState.mockResolvedValue(
@@ -908,6 +985,98 @@ describe('administrator workspace', () => {
       { isActive: false },
       '"7"',
     );
+  });
+
+  it('closes an administrator state confirmation when its target disappears during submission', async () => {
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.setAdministratorActiveState.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountStateDialog();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="confirm-administrator-state"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toEqual([[]]);
+    expect(wrapper.emitted('updated')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+  });
+
+  it('keeps an administrator state confirmation open for a foreign-reference 404', async () => {
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.setAdministratorActiveState.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.RoleNotFound',
+      message: 'A related role was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountStateDialog();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="confirm-administrator-state"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(wrapper.text()).toContain('A related role was not found.');
+  });
+
+  it('ignores an abandoned administrator state-detail 404 response', async () => {
+    const delayedDetail = deferred<ReturnType<typeof administratorDetail>>();
+    api.getAdministrator.mockReturnValueOnce(delayedDetail.promise);
+
+    const wrapper = mountStateDialog();
+    await wrapper.setProps({ modelValue: false });
+    delayedDetail.reject({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator was not found.',
+      status: 404,
+    });
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+  });
+
+  it('does not close a newly selected administrator state confirmation for an older detail 404', async () => {
+    const firstDetail = deferred<ReturnType<typeof administratorDetail>>();
+    api.getAdministrator
+      .mockReturnValueOnce(firstDetail.promise)
+      .mockResolvedValueOnce(
+        administratorDetail(
+          administrator({
+            displayName: 'Second state target',
+            id: 'second-administrator-id',
+          }),
+        ),
+      );
+
+    const wrapper = mountStateDialog({
+      administratorId: 'first-administrator-id',
+    });
+    await wrapper.setProps({
+      administratorId: 'second-administrator-id',
+      targetActive: true,
+    });
+    await flushPromises();
+
+    firstDetail.reject({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The first administrator was not found.',
+      status: 404,
+    });
+    await flushPromises();
+
+    expect(wrapper.props('modelValue')).toBe(true);
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(wrapper.text()).toContain('Second state target');
   });
 
   it('keeps an administrator state confirmation open when Escape is requested while pending', async () => {
@@ -936,6 +1105,39 @@ describe('administrator workspace', () => {
     );
     await flushPromises();
     expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+  });
+
+  it('ignores an abandoned password-reset detail 404 response', async () => {
+    const delayedDetail = deferred<ReturnType<typeof administratorDetail>>();
+    api.getAdministrator.mockReturnValueOnce(delayedDetail.promise);
+
+    const wrapper = mountPasswordResetDialog();
+    await wrapper.setProps({ modelValue: false });
+    delayedDetail.reject({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator was not found.',
+      status: 404,
+    });
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toBeUndefined();
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+  });
+
+  it('wraps a long unbroken administrator username in the password-reset subject', async () => {
+    const userName = 'a'.repeat(64);
+    api.getAdministrator.mockResolvedValue(
+      administratorDetail(administrator({ displayName: '', userName })),
+    );
+
+    const wrapper = mountPasswordResetDialog();
+    await flushPromises();
+
+    const subject = wrapper.get(
+      '[data-testid="password-reset-administrator-subject"]',
+    );
+    expect(subject.text()).toBe(userName);
+    expect(subject.classes()).toContain('password-reset-administrator-subject');
   });
 
   it('clears a password after conflict and requires reload and review before a new reset', async () => {
@@ -977,6 +1179,31 @@ describe('administrator workspace', () => {
       .trigger('click');
     await flushPromises();
     expect(api.getAdministrator).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears a password and closes without retaining a draft when the administrator disappears during reset', async () => {
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.resetAdministratorPassword.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountPasswordResetDialog();
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="administrator-new-password"]')
+      .setValue('new-password-123');
+    await wrapper
+      .get('[data-testid="confirm-password-reset"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(wrapper.emitted('stale')).toEqual([[]]);
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]]);
+    expect(
+      wrapper.get('[data-testid="administrator-new-password"]').element,
+    ).toHaveProperty('value', '');
   });
 
   it('reuses a canonical UUID and unchanged password after an uncertain reset result', async () => {
@@ -1117,6 +1344,46 @@ describe('administrator workspace', () => {
         Search: 'oper',
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('recovers the administrator list after a transient failure is retried', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+    ];
+    api.listAdministrators
+      .mockRejectedValueOnce({
+        message: 'Administrator list is temporarily unavailable.',
+        status: 503,
+      })
+      .mockResolvedValueOnce(
+        administratorPage([
+          administrator({ userName: 'recovered-administrator' }),
+        ]),
+      );
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+
+    expect(api.listAdministrators).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain(
+      'Administrator list is temporarily unavailable.',
+    );
+    const retryButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Retry');
+    if (!retryButton) {
+      throw new Error('The administrator list retry command was not rendered.');
+    }
+
+    await retryButton.trigger('click');
+    await flushPromises();
+
+    expect(api.listAdministrators).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('recovered-administrator');
+    expect(wrapper.text()).not.toContain(
+      'Administrator list is temporarily unavailable.',
     );
   });
 
@@ -1276,6 +1543,230 @@ describe('administrator workspace', () => {
     const drawer = wrapper.findComponent(AdministratorDisplayNameDrawer);
     expect(drawer.props('administratorId')).toBe('administrator-id');
     expect(drawer.props('modelValue')).toBe(true);
+  });
+
+  it('closes an unavailable display-name detail and reloads administrators after a 404', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+    ];
+    api.listAdministrators
+      .mockResolvedValueOnce(
+        administratorPage([administrator({ userName: 'stale-detail' })]),
+      )
+      .mockResolvedValueOnce(
+        administratorPage([administrator({ userName: 'reloaded-list' })]),
+      );
+    api.getAdministrator.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator no longer exists.',
+      status: 404,
+    });
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    expect(api.listAdministrators).toHaveBeenCalledTimes(1);
+
+    await wrapper
+      .get('[aria-label="Edit display name for stale-detail"]')
+      .trigger('click');
+    await flushPromises();
+
+    const drawer = wrapper.findComponent(AdministratorDisplayNameDrawer);
+    expect(api.getAdministrator).toHaveBeenCalledWith('administrator-id');
+    expect(drawer.props('modelValue')).toBe(false);
+    expect(
+      wrapper
+        .find('[data-testid="administrator-display-name-drawer"]')
+        .exists(),
+    ).toBe(false);
+    expect(api.listAdministrators).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('reloaded-list');
+    expect(wrapper.text()).not.toContain('stale-detail');
+    expect(
+      wrapper.find('[data-testid="retained-administrator-draft"]').exists(),
+    ).toBe(false);
+  });
+
+  it('closes an unavailable administrator state confirmation and reloads administrators after a 404', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+    ];
+    api.listAdministrators
+      .mockResolvedValueOnce(
+        administratorPage([administrator({ userName: 'stale-state' })]),
+      )
+      .mockResolvedValueOnce(
+        administratorPage([administrator({ userName: 'reloaded-list' })]),
+      );
+    api.getAdministrator.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator no longer exists.',
+      status: 404,
+    });
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    await wrapper.get('[aria-label="Deactivate stale-state"]').trigger('click');
+    await flushPromises();
+
+    expect(
+      wrapper.findComponent(AdministratorStateDialog).props('modelValue'),
+    ).toBe(false);
+    expect(api.listAdministrators).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('reloaded-list');
+    expect(wrapper.text()).not.toContain('stale-state');
+  });
+
+  it('retains a stale display-name draft only for explicit review and discard', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+    ];
+    api.listAdministrators
+      .mockResolvedValueOnce(administratorPage([administrator()]))
+      .mockResolvedValueOnce(
+        administratorPage([administrator({ userName: 'reloaded-list' })]),
+      );
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    wrapper.findComponent(AdministratorDisplayNameDrawer).vm.$emit('stale', {
+      displayName: 'Unsaved display name',
+      kind: 'display-name',
+    });
+    await flushPromises();
+
+    expect(api.listAdministrators).toHaveBeenCalledTimes(2);
+    expect(
+      wrapper.findComponent(AdministratorDisplayNameDrawer).props('modelValue'),
+    ).toBe(false);
+    expect(
+      wrapper.get('[data-testid="retained-administrator-draft"]').text(),
+    ).not.toContain('Unsaved display name');
+
+    wrapper
+      .findComponent(AdministratorDisplayNameDrawer)
+      .vm.$emit('stale', null);
+    await flushPromises();
+    expect(
+      wrapper.find('[data-testid="retained-administrator-draft"]').exists(),
+    ).toBe(true);
+
+    await wrapper
+      .get('[data-testid="review-retained-administrator-draft"]')
+      .trigger('click');
+    await flushPromises();
+    expect(
+      wrapper.get('[data-testid="retained-administrator-draft-review"]').text(),
+    ).toContain('Unsaved display name');
+    expect(
+      wrapper.find('[data-testid="save-administrator-display-name"]').exists(),
+    ).toBe(false);
+
+    await wrapper
+      .get('[data-testid="discard-retained-administrator-draft-from-review"]')
+      .trigger('click');
+    await flushPromises();
+    expect(
+      wrapper.find('[data-testid="retained-administrator-draft"]').exists(),
+    ).toBe(false);
+    expect(
+      wrapper
+        .find('[data-testid="retained-administrator-draft-review"]')
+        .exists(),
+    ).toBe(false);
+  });
+
+  it('retains selected roles in memory and clears the review draft when management access is lost', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+      rolesReadPermission,
+    ];
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    wrapper.findComponent(AdministratorRolesDrawer).vm.$emit('stale', {
+      kind: 'roles',
+      roleIds: ['role-one', 'role-two'],
+    });
+    await flushPromises();
+
+    await wrapper
+      .get('[data-testid="review-retained-administrator-draft"]')
+      .trigger('click');
+    await flushPromises();
+    expect(
+      wrapper.get('[data-testid="retained-administrator-draft-review"]').text(),
+    ).toContain('role-one');
+    expect(
+      wrapper.get('[data-testid="retained-administrator-draft-review"]').text(),
+    ).toContain('role-two');
+
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsReadPermission,
+      rolesReadPermission,
+    ];
+    await flushPromises();
+
+    expect(
+      wrapper.find('[data-testid="retained-administrator-draft"]').exists(),
+    ).toBe(false);
+  });
+
+  it('retains a real stale display-name draft after the child closes and reloads administrators', async () => {
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+    ];
+    api.listAdministrators
+      .mockResolvedValueOnce(
+        administratorPage([administrator({ userName: 'stale-detail' })]),
+      )
+      .mockResolvedValueOnce(
+        administratorPage([administrator({ userName: 'reloaded-list' })]),
+      );
+    api.getAdministrator.mockResolvedValue(administratorDetail());
+    api.changeAdministratorDisplayName.mockRejectedValueOnce({
+      code: 'NovaGame.AdminAccess.AdministratorNotFound',
+      message: 'The administrator was not found.',
+      status: 404,
+    });
+
+    const wrapper = mountWorkspace();
+    await flushPromises();
+    await wrapper
+      .get('[aria-label="Edit display name for stale-detail"]')
+      .trigger('click');
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="administrator-display-name"]')
+      .setValue('Unsaved display name');
+    await wrapper
+      .get('[data-testid="save-administrator-display-name"]')
+      .trigger('click');
+    await flushPromises();
+
+    expect(api.listAdministrators).toHaveBeenCalledTimes(2);
+    expect(
+      wrapper.findComponent(AdministratorDisplayNameDrawer).props('modelValue'),
+    ).toBe(false);
+    await wrapper
+      .get('[data-testid="review-retained-administrator-draft"]')
+      .trigger('click');
+    await flushPromises();
+    expect(
+      wrapper.get('[data-testid="retained-administrator-draft-review"]').text(),
+    ).toContain('Unsaved display name');
+    expect(wrapper.text()).toContain('reloaded-list');
   });
 
   it('refreshes permissions and removes management controls after a child reports forbidden', async () => {
