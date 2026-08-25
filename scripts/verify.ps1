@@ -14759,9 +14759,10 @@ function Invoke-AdminEndToEnd {
         $pnpmShimPath = Join-Path $runRoot "pnpm.cmd"
         $pnpmShimContent = @(
             "@echo off",
-            ('"{0}" "{1}" %*' -f
+            ('"{0}" "{1}" dlx "pnpm@{2}" %*' -f
                 [string]$Toolchain.nodePath,
-                [string]$Toolchain.pnpmBootstrapPath)
+                [string]$Toolchain.pnpmBootstrapPath,
+                [string]$Toolchain.pnpmVersion)
         ) -join "`r`n"
         Set-Content `
             -LiteralPath $pnpmShimPath `
