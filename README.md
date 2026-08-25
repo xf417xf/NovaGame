@@ -44,9 +44,10 @@ premature-source guard. M35-06 then completed the real composed API, frozen secu
 cumulative verification, and zero-residue cleanup paths. M35-07-T01 completed the frozen real
 browser foundation through the composed Vben/API/DbMigrator/MySQL acceptance path, and M35-07-T02
 completed its route/action permission and authoritative `401`/`403` acceptance after focused,
-frontend, and serial real-browser verification. T03 is blocked pending an explicit frozen
-stale-detail `404` contract decision; it remains limited to responsive desktop/mobile acceptance
-and does not authorize M35-07-T04 or later tasks, SwordMaster, extraction, M4, or NovaCore changes.
+frontend, and serial real-browser verification. T03 is in progress under the user-approved narrow
+stale-detail `404` evidence contract: real unknown-ID API `404`/stable-code evidence, focused
+defensive detail coverage, and responsive desktop/mobile acceptance without a removal lifecycle. It
+does not authorize M35-07-T04 or later tasks, SwordMaster, extraction, M4, or NovaCore changes.
 M4 remains `Unscheduled`.
 
 ## Prerequisites

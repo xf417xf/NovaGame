@@ -1926,6 +1926,19 @@ async function assertAuthorizationFailure(
   }
 }
 
+async function assertAdministratorNotFoundFailure(
+  response: APIResponse | Response,
+  acceptanceEvidence: AcceptanceEvidenceAudit,
+  method: string,
+): Promise<void> {
+  await acceptanceEvidence.auditResponse(response, method);
+  expect(response.status()).toBe(404);
+
+  const body = JSON.parse(await response.text()) as ApiEnvelope<never>;
+  expect(body.succeeded).toBe(false);
+  expect(body.error?.code).toBe('NovaGame.AdminAccess.AdministratorNotFound');
+}
+
 async function login(
   page: Page,
   userName: string,
@@ -7433,7 +7446,11 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     apiUrl(apiBaseURL, `/admin-access/administrators/${crypto.randomUUID()}`),
     { headers: authorizationHeaders(bootstrapAccessToken) },
   );
-  await assertResponseStatus(notFoundResponse, acceptanceEvidence, 404, 'GET');
+  await assertAdministratorNotFoundFailure(
+    notFoundResponse,
+    acceptanceEvidence,
+    'GET',
+  );
   await page.setViewportSize({ height: 844, width: 390 });
   const notFoundPath = `/admin-access/not-found-${runId}`;
   await page.goto(notFoundPath, { timeout: 60_000, waitUntil: 'commit' });

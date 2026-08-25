@@ -31,9 +31,10 @@ boundary, and premature-source guard. M35-06 then completed the real composed AP
 security, serial cumulative verification, and zero-residue cleanup paths. M35-07-T01 completed the
 frozen real-browser acceptance foundation, and M35-07-T02 completed route/action permission plus
 authoritative `401`/`403` acceptance after focused, frontend, and serial real-browser verification.
-M35-07-T03 is blocked pending an explicit frozen stale-detail `404` contract decision; it remains
-limited to responsive desktop/mobile acceptance and does not authorize later work, SwordMaster
-changes, extraction, M4, or NovaCore changes. M4 remains `Unscheduled`.
+M35-07-T03 is in progress under the user-approved narrow stale-detail `404` evidence contract:
+real unknown-ID API `404`/stable-code evidence, focused defensive detail coverage, and responsive
+desktop/mobile acceptance without a removal lifecycle. It does not authorize later work,
+SwordMaster changes, extraction, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 When sources appear to conflict, stop and resolve the conflict before implementation. Do not silently weaken a repository rule or an active goal acceptance criterion.
 
