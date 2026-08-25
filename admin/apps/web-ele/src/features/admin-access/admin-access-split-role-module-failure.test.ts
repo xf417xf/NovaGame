@@ -6,6 +6,9 @@ import type {
   SplitRoleWorkspacePackageRoot,
 } from '../../../e2e/module-request-failure-diagnostics';
 
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -159,4 +162,43 @@ describe('split-role module request failure diagnostics', () => {
       ).toBe(expectedResource);
     },
   );
+
+  it('keeps one static failure site for every finite module boundary', async () => {
+    const source = await readFile(
+      resolve(process.cwd(), 'apps/web-ele/e2e/admin-access.spec.ts'),
+      'utf8',
+    );
+    const functionStart = source.indexOf(
+      'function throwSplitRoleAdministratorsWorkspaceUnclassifiedNetworkModuleFailure(',
+    );
+    const functionEnd = source.indexOf(
+      '\nfunction throwSplitRoleAdministratorsWorkspaceModuleFailure(',
+      functionStart,
+    );
+    expect(functionStart).toBeGreaterThanOrEqual(0);
+    expect(functionEnd).toBeGreaterThan(functionStart);
+
+    const staticFailureSource = source.slice(functionStart, functionEnd);
+    const resources = resourceCases.map((resourceCase) => resourceCase[3]);
+    expect(new Set(resources).size).toBe(resources.length);
+    expect(staticFailureSource.match(/throw new Error\(/g)).toHaveLength(
+      resources.length,
+    );
+    expect(staticFailureSource).not.toContain('${');
+
+    for (const resource of resources) {
+      const caseStart = staticFailureSource.indexOf(`case '${resource}': {`);
+      const nextCase = staticFailureSource.indexOf(
+        '\n    case ',
+        caseStart + 1,
+      );
+      expect(caseStart).toBeGreaterThanOrEqual(0);
+      expect(
+        staticFailureSource.slice(
+          caseStart,
+          nextCase === -1 ? undefined : nextCase,
+        ),
+      ).toContain('throw new Error(');
+    }
+  });
 });

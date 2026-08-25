@@ -12,6 +12,7 @@ import type {
   SplitRoleEffectsPackageRoot,
   SplitRoleModuleRequestFailureOutcome,
   SplitRoleModuleResource,
+  SplitRoleUnclassifiedNetworkModuleResource,
   SplitRoleWorkspacePackageRoot,
 } from './module-request-failure-diagnostics';
 import type { SplitRoleAdministratorsCreateCommandState } from './split-role-administrators-workspace-diagnostics';
@@ -1006,6 +1007,168 @@ function recordSplitRoleModuleFailure(
   }
 }
 
+function throwSplitRoleAdministratorsWorkspaceUnclassifiedNetworkModuleFailure(
+  resource: SplitRoleUnclassifiedNetworkModuleResource,
+): never {
+  switch (resource) {
+    case 'bootstrap': {
+      throw new Error(
+        'Split-role Administrators workspace bootstrap script module request had an unclassified network failure.',
+      );
+    }
+    case 'direct node module': {
+      throw new Error(
+        'Split-role Administrators workspace direct node module script request had an unclassified network failure.',
+      );
+    }
+    case 'filesystem application source': {
+      throw new Error(
+        'Split-role Administrators workspace filesystem application source script module request had an unclassified network failure.',
+      );
+    }
+    case 'filesystem dependency': {
+      throw new Error(
+        'Split-role Administrators workspace filesystem dependency script module request had an unclassified network failure.',
+      );
+    }
+    case 'filesystem unclassified': {
+      throw new Error(
+        'Split-role Administrators workspace filesystem unclassified script module request had an unclassified network failure.',
+      );
+    }
+    case 'filesystem workspace internal': {
+      throw new Error(
+        'Split-role Administrators workspace filesystem workspace internal script module request had an unclassified network failure.',
+      );
+    }
+    case 'filesystem workspace package': {
+      throw new Error(
+        'Split-role Administrators workspace filesystem workspace package script module request had an unclassified network failure.',
+      );
+    }
+    case 'optimized dependency': {
+      throw new Error(
+        'Split-role Administrators workspace optimized dependency script module request had an unclassified network failure.',
+      );
+    }
+    case 'source outside views': {
+      throw new Error(
+        'Split-role Administrators workspace source outside views script module request had an unclassified network failure.',
+      );
+    }
+    case 'source view': {
+      throw new Error(
+        'Split-role Administrators workspace source view script module request had an unclassified network failure.',
+      );
+    }
+    case 'unknown': {
+      throw new Error(
+        'Split-role Administrators workspace unknown script module request had an unclassified network failure.',
+      );
+    }
+    case 'vite client': {
+      throw new Error(
+        'Split-role Administrators workspace Vite client script module request had an unclassified network failure.',
+      );
+    }
+    case 'vite virtual': {
+      throw new Error(
+        'Split-role Administrators workspace Vite virtual script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace constants': {
+      throw new Error(
+        'Split-role Administrators workspace constants package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace core': {
+      throw new Error(
+        'Split-role Administrators workspace core package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects': {
+      throw new Error(
+        'Split-role Administrators workspace effects package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects access': {
+      throw new Error(
+        'Split-role Administrators workspace effects access package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects common UI': {
+      throw new Error(
+        'Split-role Administrators workspace effects common UI package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects hooks': {
+      throw new Error(
+        'Split-role Administrators workspace effects hooks package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects layouts': {
+      throw new Error(
+        'Split-role Administrators workspace effects layouts package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects other': {
+      throw new Error(
+        'Split-role Administrators workspace effects other package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects plugins': {
+      throw new Error(
+        'Split-role Administrators workspace effects plugins package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace effects request': {
+      throw new Error(
+        'Split-role Administrators workspace effects request package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace icons': {
+      throw new Error(
+        'Split-role Administrators workspace icons package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace locales': {
+      throw new Error(
+        'Split-role Administrators workspace locales package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace other': {
+      throw new Error(
+        'Split-role Administrators workspace other package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace preferences': {
+      throw new Error(
+        'Split-role Administrators workspace preferences package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace stores': {
+      throw new Error(
+        'Split-role Administrators workspace stores package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace styles': {
+      throw new Error(
+        'Split-role Administrators workspace styles package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace types': {
+      throw new Error(
+        'Split-role Administrators workspace types package script module request had an unclassified network failure.',
+      );
+    }
+    case 'workspace utils': {
+      throw new Error(
+        'Split-role Administrators workspace utils package script module request had an unclassified network failure.',
+      );
+    }
+  }
+}
+
 function throwSplitRoleAdministratorsWorkspaceModuleFailure(
   moduleFailure: SplitRoleModuleFailure,
 ): never {
@@ -1041,8 +1204,8 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         moduleFailure.workspacePackageRoot,
         moduleFailure.effectsPackageRoot,
       );
-      throw new Error(
-        `Split-role Administrators workspace ${resource} script module request had an unclassified network failure.`,
+      return throwSplitRoleAdministratorsWorkspaceUnclassifiedNetworkModuleFailure(
+        resource,
       );
     }
     case 'request-network': {
