@@ -14,6 +14,7 @@ import type {
   SplitRoleModuleResource,
   SplitRoleWorkspacePackageRoot,
 } from './module-request-failure-diagnostics';
+import type { SplitRoleAdministratorsCreateCommandState } from './split-role-administrators-workspace-diagnostics';
 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -22,6 +23,7 @@ import {
   classifySplitRoleModuleRequestFailureText,
   describeSplitRoleUnclassifiedNetworkModuleResource,
 } from './module-request-failure-diagnostics';
+import { resolveSplitRoleAdministratorsWorkspaceDiagnosticPriority } from './split-role-administrators-workspace-diagnostics';
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -153,6 +155,7 @@ interface SplitRolePersistedAccessState {
 
 interface SplitRoleAdministratorsWorkspaceState extends SplitRolePersistedAccessState {
   applicationMounted: boolean;
+  createCommandState: SplitRoleAdministratorsCreateCommandState;
   fallbackSurfaceVisible: boolean;
   isAdministratorAccessRootRoute: boolean;
   isAdministratorsRoute: boolean;
@@ -2285,6 +2288,7 @@ function readPersistedAccessPermission(
 
 async function readSplitRoleAdministratorsWorkspaceState(
   page: Page,
+  createCommandState: SplitRoleAdministratorsCreateCommandState,
   startupError: SplitRoleStartupError,
   pageErrorSource: SplitRoleWorkspacePageErrorSource,
   moduleFailure: SplitRoleModuleFailure | undefined,
@@ -2313,6 +2317,7 @@ async function readSplitRoleAdministratorsWorkspaceState(
 
   return {
     applicationMounted,
+    createCommandState,
     fallbackSurfaceVisible,
     isAdministratorAccessRootRoute: currentPath === '/admin-access',
     isAdministratorsRoute: currentPath === '/admin-access/administrators',
@@ -3936,7 +3941,17 @@ function throwSplitRoleAdministratorsWorkspaceFailure(
       'Split-role authorized route rendered the fallback surface.',
     );
   }
-  if (workspaceState.moduleFailure) {
+  const diagnosticPriority =
+    resolveSplitRoleAdministratorsWorkspaceDiagnosticPriority(
+      workspaceState.createCommandState,
+      workspaceState.moduleFailure !== undefined,
+    );
+  if (diagnosticPriority === 'create-command-exposed') {
+    throw new Error(
+      'Split-role Administrators workspace exposed the Create administrator command without Administrator Manage permission.',
+    );
+  }
+  if (diagnosticPriority === 'module-failure' && workspaceState.moduleFailure) {
     throwSplitRoleAdministratorsWorkspaceModuleFailure(
       workspaceState.moduleFailure,
     );
@@ -5443,6 +5458,8 @@ test('roles, permissions, and authorization', async ({
   let splitRoleAdministratorsWorkspaceNavigationArmed = false;
   let splitRoleAdministratorsWorkspaceTargetDocumentActive = false;
   let splitRoleAdministratorsWorkspaceTargetDocumentEverCommitted = false;
+  let splitRoleAdministratorsWorkspaceCreateCommandState: SplitRoleAdministratorsCreateCommandState =
+    'not-observed';
   const splitRoleAdministratorsWorkspaceModuleRequests = new Set<Request>();
   let splitRoleAdministratorsWorkspaceStartupError: SplitRoleStartupError =
     'none';
@@ -5494,6 +5511,7 @@ test('roles, permissions, and authorization', async ({
 
     splitRoleAdministratorsWorkspaceModuleRequests.clear();
     splitRoleAdministratorsWorkspaceResponseState.moduleFailure = undefined;
+    splitRoleAdministratorsWorkspaceCreateCommandState = 'not-observed';
     splitRoleAdministratorsWorkspaceStartupError = 'none';
     splitRoleAdministratorsWorkspacePageErrorSource = 'unattributed';
     splitRoleAdministratorsWorkspaceTargetDocumentActive = false;
@@ -5605,6 +5623,7 @@ test('roles, permissions, and authorization', async ({
     splitRoleAdministratorsWorkspaceNavigationArmed = true;
     splitRoleAdministratorsWorkspaceTargetDocumentActive = false;
     splitRoleAdministratorsWorkspaceTargetDocumentEverCommitted = false;
+    splitRoleAdministratorsWorkspaceCreateCommandState = 'not-observed';
     splitRoleAdministratorsWorkspaceModuleRequests.clear();
     splitRoleAdministratorsWorkspaceResponseState.moduleFailure = undefined;
     splitRoleAdministratorsWorkspaceStartupError = 'none';
@@ -5621,9 +5640,22 @@ test('roles, permissions, and authorization', async ({
     await expect(splitRoleAdministratorsWorkspacePage).toHaveURL(
       '/admin-access/administrators',
     );
-    await expect(
-      splitRoleAdministratorsWorkspacePage.getByTestId('create-administrator'),
-    ).toHaveCount(0);
+    const createAdministratorCommand =
+      splitRoleAdministratorsWorkspacePage.getByTestId('create-administrator');
+    try {
+      await expect(createAdministratorCommand).toHaveCount(0);
+      splitRoleAdministratorsWorkspaceCreateCommandState = 'absent';
+    } catch (error) {
+      try {
+        splitRoleAdministratorsWorkspaceCreateCommandState =
+          (await createAdministratorCommand.count()) > 0
+            ? 'present'
+            : 'not-observed';
+      } catch {
+        splitRoleAdministratorsWorkspaceCreateCommandState = 'not-observed';
+      }
+      throw error;
+    }
   } catch {
     if (!splitRoleAdministratorsWorkspaceTargetDocumentEverCommitted) {
       if (splitRoleAdministratorsWorkspaceGotoCommitted) {
@@ -5640,6 +5672,7 @@ test('roles, permissions, and authorization', async ({
     throwSplitRoleAdministratorsWorkspaceFailure(
       await readSplitRoleAdministratorsWorkspaceState(
         splitRoleAdministratorsWorkspacePage,
+        splitRoleAdministratorsWorkspaceCreateCommandState,
         splitRoleAdministratorsWorkspaceStartupError,
         splitRoleAdministratorsWorkspacePageErrorSource,
         splitRoleAdministratorsWorkspaceResponseState.moduleFailure,
