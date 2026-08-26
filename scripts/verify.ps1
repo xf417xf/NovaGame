@@ -3533,6 +3533,192 @@ function Resolve-E2EBrowserChannel {
     return "msedge"
 }
 
+function Test-AdminEndToEndHostCapacitySnapshot {
+    param([object[]]$Snapshot)
+
+    try {
+        $records = @($Snapshot)
+        if ($records.Count -ne 1 -or $null -eq $records[0]) {
+            return $false
+        }
+
+        $record = $records[0]
+        $integralCapacityValueTypes = @(
+            [sbyte],
+            [byte],
+            [int16],
+            [uint16],
+            [int32],
+            [uint32],
+            [int64],
+            [uint64]
+        )
+        $capacityValues = [ordered]@{}
+        foreach ($propertyName in @(
+                "AvailableMBytes",
+                "CommittedBytes",
+                "CommitLimit"
+            )) {
+            $property = $record.PSObject.Properties[$propertyName]
+            if ($null -eq $property -or $null -eq $property.Value) {
+                return $false
+            }
+
+            $propertyValue = $property.Value
+            if (-not ($integralCapacityValueTypes -contains $propertyValue.GetType())) {
+                return $false
+            }
+
+            $capacityValues[$propertyName] = [Convert]::ToInt64(
+                $propertyValue,
+                [Globalization.CultureInfo]::InvariantCulture)
+        }
+
+        $availableMBytes = $capacityValues["AvailableMBytes"]
+        $committedBytes = $capacityValues["CommittedBytes"]
+        $commitLimit = $capacityValues["CommitLimit"]
+        if ($availableMBytes -lt 0 -or
+            $committedBytes -lt 0 -or
+            $commitLimit -lt 0 -or
+            $commitLimit -lt $committedBytes) {
+            return $false
+        }
+
+        return ($availableMBytes -ge 2048 -and
+            ($commitLimit - $committedBytes) -ge 4GB)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Assert-AdminEndToEndHostCapacity {
+    param([object[]]$Snapshot)
+
+    try {
+        $effectiveSnapshot = if ($PSBoundParameters.ContainsKey("Snapshot")) {
+            @($Snapshot)
+        }
+        else {
+            @(Get-CimInstance `
+                    -ClassName Win32_PerfFormattedData_PerfOS_Memory `
+                    -ErrorAction Stop)
+        }
+        Assert-Condition `
+            (Test-AdminEndToEndHostCapacitySnapshot -Snapshot $effectiveSnapshot) `
+            "admin-e2e-host-capacity-unavailable"
+    }
+    catch {
+        throw "admin-e2e-host-capacity-unavailable"
+    }
+}
+
+function Test-AdminEndToEndHostCapacityAdmissionPolicy {
+    $admittedSnapshot = [pscustomobject]@{
+        AvailableMBytes = [uint64]2048
+        CommittedBytes = [uint64]4294967296
+        CommitLimit = [uint64]8589934592
+    }
+    Assert-AdminEndToEndHostCapacity -Snapshot @($admittedSnapshot)
+
+    $rejectedCases = @(
+        [pscustomobject]@{
+            Name = "empty"
+            Snapshot = [object[]]@()
+        },
+        [pscustomobject]@{
+            Name = "multiple"
+            Snapshot = [object[]]@($admittedSnapshot, $admittedSnapshot)
+        },
+        [pscustomobject]@{
+            Name = "low-physical"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = 2047
+                    CommittedBytes = 4GB
+                    CommitLimit = 8GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "fractional-physical"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = [decimal]2047.5
+                    CommittedBytes = 4GB
+                    CommitLimit = 8GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "low-commit"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = 2048
+                    CommittedBytes = 4GB + 1
+                    CommitLimit = 8GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "fractional-commit"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = 2048
+                    CommittedBytes = [decimal]4294967296.5
+                    CommitLimit = 8GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "integral-double"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = [double]2048
+                    CommittedBytes = 4GB
+                    CommitLimit = 8GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "overflow"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = [uint64]::MaxValue
+                    CommittedBytes = 4GB
+                    CommitLimit = 8GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "invalid-commit-order"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = 2048
+                    CommittedBytes = 8GB
+                    CommitLimit = 4GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "missing-property"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = 2048
+                    CommittedBytes = 4GB
+                })
+        },
+        [pscustomobject]@{
+            Name = "malformed"
+            Snapshot = [object[]]@([pscustomobject]@{
+                    AvailableMBytes = "not-a-number"
+                    CommittedBytes = 4GB
+                    CommitLimit = 8GB
+                })
+        }
+    )
+    foreach ($rejectedCase in $rejectedCases) {
+        $rejected = $false
+        try {
+            Assert-AdminEndToEndHostCapacity `
+                -Snapshot $rejectedCase.Snapshot
+        }
+        catch {
+            $rejected = $_.Exception.Message.Equals(
+                "admin-e2e-host-capacity-unavailable",
+                [StringComparison]::Ordinal)
+        }
+        Assert-Condition `
+            $rejected `
+            "Admin E2E host capacity policy '$($rejectedCase.Name)' did not fail closed."
+    }
+}
+
 function Test-Documentation {
     $requiredFiles = @(
         "README.md",
@@ -4338,6 +4524,152 @@ function Test-Documentation {
                         'test-results\swordmaster-',
                         [StringComparison]::Ordinal)) `
                 "AdminManagement must expose the frozen scope and use neutral focused-test evidence paths."
+        }
+
+        if ($m35TaskStatuses["M35-07-T03"] -in @(
+                "in_progress", "blocked", "complete")) {
+            $verificationScript = Get-Content `
+                -LiteralPath "scripts/verify.ps1" `
+                -Raw
+            $capacityPredicateMatches = [regex]::Matches(
+                $verificationScript,
+                '(?ms)^function Test-AdminEndToEndHostCapacitySnapshot \{\r?\n(?<body>.*?)(?=^function\s+|\z)')
+            Assert-Condition `
+                ($capacityPredicateMatches.Count -eq 1) `
+                "Admin E2E host-capacity policy must have exactly one snapshot predicate."
+            $capacityPredicate =
+                $capacityPredicateMatches[0].Groups["body"].Value
+            $integralTypeCheckPosition = $capacityPredicate.IndexOf(
+                '$integralCapacityValueTypes -contains $propertyValue.GetType()',
+                [StringComparison]::Ordinal)
+            $capacityConversionPosition = $capacityPredicate.IndexOf(
+                '[Convert]::ToInt64(',
+                [StringComparison]::Ordinal)
+            Assert-Condition `
+                ($integralTypeCheckPosition -ge 0 -and
+                    $capacityConversionPosition -gt $integralTypeCheckPosition) `
+                "Admin E2E host-capacity policy must reject non-integral values before conversion."
+            foreach ($requiredIntegralCapacityValueType in @(
+                    "[sbyte]",
+                    "[byte]",
+                    "[int16]",
+                    "[uint16]",
+                    "[int32]",
+                    "[uint32]",
+                    "[int64]",
+                    "[uint64]"
+                )) {
+                Assert-Condition `
+                    $capacityPredicate.Contains(
+                        $requiredIntegralCapacityValueType,
+                        [StringComparison]::Ordinal) `
+                    "Admin E2E host-capacity policy is missing integral type '$requiredIntegralCapacityValueType'."
+            }
+            $capacityGateMatches = [regex]::Matches(
+                $verificationScript,
+                '(?ms)^function Assert-AdminEndToEndHostCapacity \{\r?\n(?<body>.*?)(?=^function\s+|\z)')
+            Assert-Condition `
+                ($capacityGateMatches.Count -eq 1) `
+                "Admin E2E host-capacity policy must have exactly one admission gate."
+            $capacityGate = $capacityGateMatches[0].Groups["body"].Value
+            foreach ($requiredCapacityPredicateText in @(
+                    "AvailableMBytes",
+                    "CommittedBytes",
+                    "CommitLimit",
+                    "2048",
+                    "4GB"
+                )) {
+                Assert-Condition `
+                    $capacityPredicate.Contains(
+                        $requiredCapacityPredicateText,
+                        [StringComparison]::Ordinal) `
+                    "Admin E2E host-capacity predicate is missing '$requiredCapacityPredicateText'."
+            }
+            foreach ($requiredCapacityGateText in @(
+                    "Win32_PerfFormattedData_PerfOS_Memory",
+                    "admin-e2e-host-capacity-unavailable"
+                )) {
+                Assert-Condition `
+                    $capacityGate.Contains(
+                        $requiredCapacityGateText,
+                        [StringComparison]::Ordinal) `
+                    "Admin E2E host-capacity gate is missing '$requiredCapacityGateText'."
+            }
+            Assert-Condition `
+                ([regex]::Matches($capacityGate, 'Get-CimInstance').Count -eq 1) `
+                "Admin E2E host-capacity gate must query exactly one aggregate snapshot."
+            foreach ($forbiddenCapacityGateText in @(
+                    "Win32_Process",
+                    "Get-Process",
+                    "Start-Process",
+                    "Stop-Process",
+                    ".Kill",
+                    "docker"
+                )) {
+                Assert-Condition `
+                    (-not $capacityGate.Contains(
+                            $forbiddenCapacityGateText,
+                            [StringComparison]::OrdinalIgnoreCase)) `
+                    "Admin E2E host-capacity gate must not contain '$forbiddenCapacityGateText'."
+            }
+
+            $invokeAdminE2EMatches = [regex]::Matches(
+                $verificationScript,
+                '(?ms)^function Invoke-AdminEndToEnd \{\r?\n(?<body>.*?)(?=^function\s+|\z)')
+            Assert-Condition `
+                ($invokeAdminE2EMatches.Count -eq 1) `
+                "Admin E2E must have exactly one composition function."
+            $invokeAdminE2E = $invokeAdminE2EMatches[0].Groups["body"].Value
+            $invokeGatePosition = $invokeAdminE2E.IndexOf(
+                "Assert-AdminEndToEndHostCapacity",
+                [StringComparison]::Ordinal)
+            $invokeDockerPosition = $invokeAdminE2E.IndexOf(
+                'Invoke-CheckedCommand "docker"',
+                [StringComparison]::Ordinal)
+            Assert-Condition `
+                ($invokeGatePosition -ge 0 -and
+                    $invokeDockerPosition -gt $invokeGatePosition) `
+                "Admin E2E must apply host-capacity admission before Docker composition."
+
+            $adminE2EEntryMatches = [regex]::Matches(
+                $verificationScript,
+                '(?ms)^function Test-AdminEndToEnd \{\r?\n(?<body>.*?)(?=^function\s+|\z)')
+            Assert-Condition `
+                ($adminE2EEntryMatches.Count -eq 1) `
+                "Admin E2E must have exactly one direct entry point."
+            $adminE2EEntry = $adminE2EEntryMatches[0].Groups["body"].Value
+            $entryGatePosition = $adminE2EEntry.IndexOf(
+                "Assert-AdminEndToEndHostCapacity",
+                [StringComparison]::Ordinal)
+            $toolchainPosition = $adminE2EEntry.IndexOf(
+                "Initialize-AdminToolchain",
+                [StringComparison]::Ordinal)
+            Assert-Condition `
+                ($entryGatePosition -ge 0 -and
+                    $toolchainPosition -gt $entryGatePosition) `
+                "Admin E2E must apply host-capacity admission before toolchain startup."
+
+            $adminEntryMatches = [regex]::Matches(
+                $verificationScript,
+                '(?ms)^function Test-Admin \{\r?\n(?<body>.*?)(?=^function\s+|\z)')
+            Assert-Condition `
+                ($adminEntryMatches.Count -eq 1) `
+                "Admin must have exactly one browser-capable entry point."
+            $adminEntry = $adminEntryMatches[0].Groups["body"].Value
+            $adminModeGuardPosition = $adminEntry.IndexOf(
+                'if ($m35BrowserMode -eq "M35Management") {',
+                [StringComparison]::Ordinal)
+            $adminEntryGatePosition = $adminEntry.IndexOf(
+                "Assert-AdminEndToEndHostCapacity",
+                [StringComparison]::Ordinal)
+            $adminToolchainPosition = $adminEntry.IndexOf(
+                "Initialize-AdminToolchain",
+                [StringComparison]::Ordinal)
+            Assert-Condition `
+                ($adminModeGuardPosition -ge 0 -and
+                    $adminEntryGatePosition -gt $adminModeGuardPosition -and
+                    $adminToolchainPosition -gt $adminEntryGatePosition) `
+                "Admin M35 management must apply host-capacity admission before toolchain startup."
         }
 
         foreach ($requiredM35VerificationText in @(
@@ -8689,6 +9021,7 @@ function Test-Repository {
     Test-M35ExternalNovaCoreCheckout
     Test-NovaGameProcessJobLifecycle
     Test-AdminManagementArtifactPolicy
+    Test-AdminEndToEndHostCapacityAdmissionPolicy
     Assert-Condition (Test-Path -LiteralPath "NovaGame.sln" -PathType Leaf) "Root solution 'NovaGame.sln' is missing."
 
     foreach ($script in @(
@@ -14408,6 +14741,10 @@ function Invoke-AdminEndToEnd {
         [switch]$RunSwordMasterAcceptance
     )
 
+    if ($Mode -eq "M35Management") {
+        Assert-AdminEndToEndHostCapacity
+    }
+
     $managementSpecPath = "admin/apps/web-ele/e2e/admin-access.spec.ts"
     $gameConfigSpecPath = "admin/apps/web-ele/e2e/game-config.spec.ts"
     $playwrightSpecArguments = if ($Mode -eq "M35Management") {
@@ -15301,6 +15638,9 @@ function Test-Admin {
     else {
         "LegacyGameConfig"
     }
+    if ($m35BrowserMode -eq "M35Management") {
+        Assert-AdminEndToEndHostCapacity
+    }
 
     foreach ($requiredPath in @(
         "admin/LICENSE",
@@ -15580,6 +15920,7 @@ function Test-AdminEndToEnd {
     Assert-Condition `
         ($m35BrowserTaskStatus -in @("in_progress", "blocked", "complete")) `
         "AdminE2E is unavailable before M35-07-T01 is active. Use -Scope Admin for the legacy GameConfig regression."
+    Assert-AdminEndToEndHostCapacity
     $toolchain = Initialize-AdminToolchain
     $previousCi = $env:CI
     $env:CI = "true"
