@@ -19,6 +19,8 @@ import type { SplitRoleAdministratorsCreateCommandState } from './split-role-adm
 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { errors } from '@playwright/test';
+
 import { expect, test } from './acceptance-evidence';
 import {
   classifySplitRoleModuleRequestFailureText,
@@ -272,6 +274,12 @@ type RolePermissionApiWaitOutcome =
   | 'request-failed'
   | 'request-started-no-response'
   | 'unexpected-response';
+
+type RolePermissionApiWaitTimeoutPhase =
+  | 'access-only-game-config-after-target-document-commit'
+  | 'access-only-game-config-before-target-document-commit';
+
+class AccessOnlyGameConfigObservationTimeoutError extends Error {}
 
 type SplitRoleStartupError = 'dynamic-module-fetch' | 'none' | 'page-error';
 
@@ -764,6 +772,75 @@ async function waitForRolePermissionApiResponse(
     page.off('response', observeResponse);
     page.off('request', observeRequest);
   }
+}
+
+async function waitForAccessOnlyGameConfigDraftResponse(
+  page: Page,
+  epoch: RolePermissionApiWaitEpoch,
+  resolveTimeoutPhase: () => RolePermissionApiWaitTimeoutPhase,
+): Promise<Response> {
+  const diagnostic = 'access-only-game-config-drafts' as const;
+  const matchingRequests = new WeakSet<Request>();
+  let requestStarted = false;
+  let requestFailed = false;
+  let responseWaitTimedOut: boolean;
+  const observeRequest = (request: Request) => {
+    if (
+      epoch.active &&
+      matchesApiRequest(request, 'GET', '/api/game-config/drafts')
+    ) {
+      matchingRequests.add(request);
+      requestStarted = true;
+    }
+  };
+  const matchesEpochRequest = (request: Request) =>
+    matchingRequests.has(request);
+  const observeRequestFailure = (request: Request) => {
+    if (matchesEpochRequest(request)) {
+      requestFailed = true;
+    }
+  };
+
+  page.on('request', observeRequest);
+  page.on('requestfailed', observeRequestFailure);
+  try {
+    return await page.waitForResponse(
+      (response) => matchesEpochRequest(response.request()),
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    responseWaitTimedOut = error instanceof errors.TimeoutError;
+  } finally {
+    page.off('requestfailed', observeRequestFailure);
+    page.off('request', observeRequest);
+  }
+
+  let outcome: RolePermissionApiWaitOutcome = 'not-observed';
+  if (requestFailed) {
+    outcome = 'request-failed';
+  } else if (requestStarted) {
+    outcome = 'request-started-no-response';
+  }
+
+  const evidenceRule = rolePermissionApiWaitEvidenceRule(diagnostic, outcome);
+  if (outcome === 'not-observed' && responseWaitTimedOut) {
+    switch (resolveTimeoutPhase()) {
+      case 'access-only-game-config-before-target-document-commit': {
+        // The fixed source location carries this redacted phase without widening verifier output.
+        throw new AccessOnlyGameConfigObservationTimeoutError(
+          `Acceptance evidence rule '${evidenceRule}' failed.`,
+        );
+      }
+      case 'access-only-game-config-after-target-document-commit': {
+        // The fixed source location carries this redacted phase without widening verifier output.
+        throw new AccessOnlyGameConfigObservationTimeoutError(
+          `Acceptance evidence rule '${evidenceRule}' failed.`,
+        );
+      }
+    }
+  }
+
+  throw new Error(`Acceptance evidence rule '${evidenceRule}' failed.`);
 }
 
 function classifySplitRoleModuleFailureOutcome(
@@ -2041,6 +2118,48 @@ async function waitForGameConfigStartupResponses(
       '/api/game-config/environments/development',
       undefined,
       diagnostics?.environment,
+      epoch,
+    ),
+  ]);
+
+  if (drafts.status === 'rejected') {
+    throw drafts.reason;
+  }
+  if (versions.status === 'rejected') {
+    throw versions.reason;
+  }
+  if (environment.status === 'rejected') {
+    throw environment.reason;
+  }
+
+  return [drafts.value, versions.value, environment.value];
+}
+
+async function waitForAccessOnlyGameConfigStartupResponses(
+  page: Page,
+  epoch: RolePermissionApiWaitEpoch,
+  resolveDraftsTimeoutPhase: () => RolePermissionApiWaitTimeoutPhase,
+): Promise<Response[]> {
+  const [drafts, versions, environment] = await Promise.allSettled([
+    waitForAccessOnlyGameConfigDraftResponse(
+      page,
+      epoch,
+      resolveDraftsTimeoutPhase,
+    ),
+    waitForApiResponse(
+      page,
+      'GET',
+      '/api/game-config/versions',
+      undefined,
+      'access-only-game-config-versions',
+      epoch,
+    ),
+    waitForApiResponse(
+      page,
+      'GET',
+      '/api/game-config/environments/development',
+      undefined,
+      'access-only-game-config-environment',
       epoch,
     ),
   ]);
@@ -5074,24 +5193,42 @@ test('roles, permissions, and authorization', async ({
     page.off('pageerror', observeAccessOnlyAuditRoutePageError);
     page.off('framenavigated', observeAccessOnlyAuditRouteFrameNavigation);
   }
+  let accessOnlyGameConfigNavigationArmed = false;
+  let accessOnlyGameConfigTargetDocumentEverCommitted = false;
+  let accessOnlyGameConfigWaitTimeoutPhase:
+    | RolePermissionApiWaitTimeoutPhase
+    | undefined;
+  const observeAccessOnlyGameConfigFrameNavigation = (frame: Frame) => {
+    if (
+      accessOnlyGameConfigNavigationArmed &&
+      frame === page.mainFrame() &&
+      new URL(frame.url()).pathname === '/game-config'
+    ) {
+      accessOnlyGameConfigTargetDocumentEverCommitted = true;
+    }
+  };
   const accessOnlyGameConfigEpoch = createRolePermissionApiWaitEpoch();
   const accessOnlyGameConfigStartupResponses =
-    waitForGameConfigStartupResponses(
+    waitForAccessOnlyGameConfigStartupResponses(
       page,
-      {
-        drafts: 'access-only-game-config-drafts',
-        environment: 'access-only-game-config-environment',
-        versions: 'access-only-game-config-versions',
-      },
       accessOnlyGameConfigEpoch,
+      () => {
+        accessOnlyGameConfigWaitTimeoutPhase ??=
+          accessOnlyGameConfigTargetDocumentEverCommitted
+            ? 'access-only-game-config-after-target-document-commit'
+            : 'access-only-game-config-before-target-document-commit';
+        return accessOnlyGameConfigWaitTimeoutPhase;
+      },
     );
   let accessOnlyGameConfigPageError = false;
   const observeAccessOnlyGameConfigPageError = () => {
     accessOnlyGameConfigPageError = true;
   };
+  page.on('framenavigated', observeAccessOnlyGameConfigFrameNavigation);
   page.on('pageerror', observeAccessOnlyGameConfigPageError);
   try {
     beginRolePermissionApiWaitEpoch(accessOnlyGameConfigEpoch);
+    accessOnlyGameConfigNavigationArmed = true;
     await page.goto('/game-config', {
       timeout: loginReadyTimeoutMs,
       waitUntil: 'commit',
@@ -5103,13 +5240,18 @@ test('roles, permissions, and authorization', async ({
       accessOnlyGameConfigStartupResponses,
       acceptanceEvidence,
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof AccessOnlyGameConfigObservationTimeoutError) {
+      throw error;
+    }
     await throwAccessOnlyGameConfigStartupFailure(
       page,
       accessOnlyGameConfigPageError,
     );
   } finally {
+    accessOnlyGameConfigNavigationArmed = false;
     page.off('pageerror', observeAccessOnlyGameConfigPageError);
+    page.off('framenavigated', observeAccessOnlyGameConfigFrameNavigation);
   }
 
   const forbiddenRequests: ReadonlyArray<{
