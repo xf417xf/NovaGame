@@ -1178,9 +1178,19 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         'Split-role Administrators workspace script module request was aborted.',
       );
     }
+    case 'request-cache': {
+      throw new Error(
+        'Split-role Administrators workspace script module request had a browser cache failure.',
+      );
+    }
     case 'request-connection': {
       throw new Error(
         'Split-role Administrators workspace script module request failed to connect.',
+      );
+    }
+    case 'request-context': {
+      throw new Error(
+        'Split-role Administrators workspace script module request had a browser context shutdown.',
       );
     }
     case 'request-failed': {
@@ -1330,6 +1340,11 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
     case 'request-reachability': {
       throw new Error(
         'Split-role Administrators workspace script module request had a reachability failure.',
+      );
+    }
+    case 'request-resource': {
+      throw new Error(
+        'Split-role Administrators workspace script module request had a browser resource failure.',
       );
     }
     case 'request-response': {
@@ -1697,9 +1712,19 @@ function throwSplitRoleRouteFallbackModuleFailure(
         `Split-role ${routeLabel} route target script module request was aborted.`,
       );
     }
+    case 'request-cache': {
+      throw new Error(
+        `Split-role ${routeLabel} route target script module request had a browser cache failure.`,
+      );
+    }
     case 'request-connection': {
       throw new Error(
         `Split-role ${routeLabel} route target script module request failed to connect.`,
+      );
+    }
+    case 'request-context': {
+      throw new Error(
+        `Split-role ${routeLabel} route target script module request had a browser context shutdown.`,
       );
     }
     case 'request-failed': {
@@ -1751,6 +1776,11 @@ function throwSplitRoleRouteFallbackModuleFailure(
     case 'request-reachability': {
       throw new Error(
         `Split-role ${routeLabel} route target script module request had a reachability failure.`,
+      );
+    }
+    case 'request-resource': {
+      throw new Error(
+        `Split-role ${routeLabel} route target script module request had a browser resource failure.`,
       );
     }
     case 'request-response': {
@@ -3688,9 +3718,19 @@ function throwSplitRoleInitialLoginModuleFailure(
         'Split-role initial-login script module request was aborted.',
       );
     }
+    case 'request-cache': {
+      throw new Error(
+        'Split-role initial-login script module request had a browser cache failure.',
+      );
+    }
     case 'request-connection': {
       throw new Error(
         'Split-role initial-login script module request failed to connect.',
+      );
+    }
+    case 'request-context': {
+      throw new Error(
+        'Split-role initial-login script module request had a browser context shutdown.',
       );
     }
     case 'request-failed': {
@@ -3739,6 +3779,11 @@ function throwSplitRoleInitialLoginModuleFailure(
     case 'request-reachability': {
       throw new Error(
         'Split-role initial-login script module request had a reachability failure.',
+      );
+    }
+    case 'request-resource': {
+      throw new Error(
+        'Split-role initial-login script module request had a browser resource failure.',
       );
     }
     case 'request-response': {

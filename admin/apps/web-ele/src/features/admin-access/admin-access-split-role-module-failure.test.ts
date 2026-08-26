@@ -32,7 +32,16 @@ describe('split-role module request failure diagnostics', () => {
     ['net::ERR_BLOCKED_BY_CLIENT', 'request-policy'],
     ['net::ERR_CERT_AUTHORITY_INVALID', 'request-tls'],
     ['net::ERR_CONNECTION_REFUSED', 'request-connection'],
-    ['net::ERR_CACHE_MISS', 'request-network-unclassified'],
+    ['net::ERR_CACHE_MISS', 'request-cache'],
+    ['net::ERR_CACHE_OPEN_FAILURE', 'request-cache'],
+    ['net::ERR_CACHE_FUTURE_UNKNOWN', 'request-network-unclassified'],
+    ['net::ERR_CONTEXT_SHUT_DOWN', 'request-context'],
+    ['net::ERR_INSUFFICIENT_RESOURCES', 'request-resource'],
+    ['net::ERR_NO_BUFFER_SPACE', 'request-resource'],
+    ['net::ERR_OUT_OF_MEMORY', 'request-resource'],
+    ['net::ERR_PRECONNECT_MAX_SOCKET_LIMIT', 'request-resource'],
+    ['net::ERR_TEMPORARILY_THROTTLED', 'request-resource'],
+    ['net::ERR_FUTURE_UNKNOWN', 'request-network-unclassified'],
     ['unrecognized failure', 'request-other'],
   ];
   const resourceCases: ReadonlyArray<
@@ -199,6 +208,55 @@ describe('split-role module request failure diagnostics', () => {
           nextCase === -1 ? undefined : nextCase,
         ),
       ).toContain('throw new Error(');
+    }
+  });
+
+  it('keeps every Chromium error-family diagnostic terminal and redacted', async () => {
+    const source = await readFile(
+      resolve(process.cwd(), 'apps/web-ele/e2e/admin-access.spec.ts'),
+      'utf8',
+    );
+    const mapperBoundaries = [
+      [
+        'function throwSplitRoleAdministratorsWorkspaceModuleFailure(',
+        '\nfunction throwSplitRoleRouteFallbackModuleFailure(',
+      ],
+      [
+        'function throwSplitRoleRouteFallbackModuleFailure(',
+        '\nfunction throwSplitRoleRouteFallbackNetworkModuleFailure(',
+      ],
+      [
+        'function throwSplitRoleInitialLoginModuleFailure(',
+        '\nfunction throwSplitRoleLoginFailure(',
+      ],
+    ] as const;
+    const outcomes = [
+      'request-cache',
+      'request-context',
+      'request-resource',
+    ] as const;
+
+    for (const [startMarker, endMarker] of mapperBoundaries) {
+      const mapperStart = source.indexOf(startMarker);
+      const mapperEnd = source.indexOf(endMarker, mapperStart);
+      expect(mapperStart).toBeGreaterThanOrEqual(0);
+      expect(mapperEnd).toBeGreaterThan(mapperStart);
+
+      const mapperSource = source.slice(mapperStart, mapperEnd);
+      for (const outcome of outcomes) {
+        const caseStart = mapperSource.indexOf(`case '${outcome}': {`);
+        const nextCase = mapperSource.indexOf('\n    case ', caseStart + 1);
+        expect(caseStart).toBeGreaterThanOrEqual(0);
+
+        const caseSource = mapperSource.slice(
+          caseStart,
+          nextCase === -1 ? undefined : nextCase,
+        );
+        expect(caseSource).toContain('throw new Error(');
+        expect(caseSource).not.toContain('errorText');
+        expect(caseSource).not.toContain('request.failure()');
+        expect(caseSource).not.toContain('request.url()');
+      }
     }
   });
 });

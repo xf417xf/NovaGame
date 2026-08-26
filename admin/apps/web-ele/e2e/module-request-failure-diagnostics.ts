@@ -1,6 +1,8 @@
 export type SplitRoleModuleRequestFailureOutcome =
   | 'request-aborted'
+  | 'request-cache'
   | 'request-connection'
+  | 'request-context'
   | 'request-failed'
   | 'request-missing-details'
   | 'request-name-resolution'
@@ -10,6 +12,7 @@ export type SplitRoleModuleRequestFailureOutcome =
   | 'request-protocol'
   | 'request-proxy'
   | 'request-reachability'
+  | 'request-resource'
   | 'request-response'
   | 'request-timeout'
   | 'request-tls';
@@ -98,6 +101,25 @@ export function classifySplitRoleModuleRequestFailureText(
     case 'net::ERR_FAILED': {
       return 'request-failed';
     }
+  }
+  if (
+    ['net::ERR_CACHE_MISS', 'net::ERR_CACHE_OPEN_FAILURE'].includes(errorText)
+  ) {
+    return 'request-cache';
+  }
+  if (errorText === 'net::ERR_CONTEXT_SHUT_DOWN') {
+    return 'request-context';
+  }
+  if (
+    [
+      'net::ERR_INSUFFICIENT_RESOURCES',
+      'net::ERR_NO_BUFFER_SPACE',
+      'net::ERR_OUT_OF_MEMORY',
+      'net::ERR_PRECONNECT_MAX_SOCKET_LIMIT',
+      'net::ERR_TEMPORARILY_THROTTLED',
+    ].includes(errorText)
+  ) {
+    return 'request-resource';
   }
   if (
     [
