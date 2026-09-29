@@ -4887,6 +4887,7 @@ pwsh -NoProfile -File scripts/verify.ps1 -Scope Repository
 pwsh -NoProfile -Command "[scriptblock]::Create((Get-Content -Raw scripts/verify.ps1)) | Out-Null"
 git diff --check
 '@
+        $expectedM356T01CommandBlock = $expectedM356T01CommandBlock.Replace("`r`n", "`n")
         Assert-Condition `
             $m356NormalizedEvidence.Contains($expectedM356T01CommandBlock) `
             "M35-06-T01 must retain its exact ordered documentation-governance commands."
@@ -7870,9 +7871,9 @@ git diff --check
             'samples/SwordMaster/server/src/SwordMaster.Host.EntityFrameworkCore/Migrations/20260810105902_AddPlayerEquipmentGrants.cs' =
                 '117df3a162d32730fcb5771a1d1368a02ea8bfd7c1bee95bf3d5ef6d310f6167'
             'samples/SwordMaster/server/src/SwordMaster.Host.EntityFrameworkCore/Migrations/20260810105902_AddPlayerEquipmentGrants.Designer.cs' =
-                'eb3e6765461c1cb9d975aa79697d5bb6835589e13af58caece0acab3c44e1901'
+                '6c8c105171a22baecb20865cad975542b2e8b7935755ca9b4eafdda5f13c7fc3'
             'samples/SwordMaster/server/src/SwordMaster.Host.EntityFrameworkCore/Migrations/SwordMasterDbContextModelSnapshot.cs' =
-                'e7dbb131d96bf3e0d02ec093ae2a4e56cf113bda86c69b88485a3b3a29cb139d'
+                'a620e176668178245dd627da3cdbd10cfe6722d46eba1915b77f78c2614a1524'
         }
         foreach ($m308FrozenFile in $m308FrozenFiles.GetEnumerator()) {
             Assert-Condition `
@@ -8339,7 +8340,7 @@ git diff --check
             Assert-Condition `
                 ([regex]::Matches(
                     $m306VerifierSource,
-                    '(?m)^\s*Invoke-SwordMasterPlayerEquipmentGrantComposedApiAcceptance\s+`?$').Count -eq 1) `
+                    '(?m)^[ \t]*Invoke-SwordMasterPlayerEquipmentGrantComposedApiAcceptance[ \t]+`?[ \t]*\r?$').Count -eq 1) `
                 "M3-06-T02 must invoke its composed API acceptance exactly once."
         }
 
@@ -8373,7 +8374,7 @@ git diff --check
             Assert-Condition `
                 ([regex]::Matches(
                     $m306VerifierSource,
-                    '(?m)^\s*Invoke-SwordMasterPlayerEquipmentGrantPlaywrightAcceptance\s+`?$').Count -eq 1) `
+                    '(?m)^[ \t]*Invoke-SwordMasterPlayerEquipmentGrantPlaywrightAcceptance[ \t]+`?[ \t]*\r?$').Count -eq 1) `
                 "M3-06-T03 must invoke its Playwright acceptance exactly once."
 
             $m306T03Package = Get-Content `
