@@ -4541,12 +4541,26 @@ async function openLifecycleAdministratorWorkspace(
   }
 }
 
-async function assertNoBodyOverflow(page: Page): Promise<void> {
+async function assertResponsiveLayout(page: Page): Promise<void> {
+  // Full-page capture must start at the origin so fixed navigation is not
+  // painted over content at the previous interaction's scroll position.
+  await page.evaluate(() => {
+    window.scrollTo({ behavior: 'instant', left: 0, top: 0 });
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   const width = await page.locator('body').evaluate((body) => ({
     clientWidth: body.clientWidth,
     scrollWidth: body.scrollWidth,
   }));
   expect(width.scrollWidth).toBeLessThanOrEqual(width.clientWidth);
+
+  const search = page.getByTestId('administrator-search');
+  if ((page.viewportSize()?.width ?? 0) <= 640 && (await search.isVisible())) {
+    const bounds = await search.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds?.height).toBeGreaterThan(0);
+    expect(bounds?.height).toBeLessThanOrEqual(48);
+  }
 }
 
 test('administrator lifecycle and concurrency', async ({
@@ -7799,7 +7813,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     await expect(page.getByTestId('administrators-forbidden')).toBeVisible({
       timeout: 60_000,
     });
-    await assertNoBodyOverflow(page);
+    await assertResponsiveLayout(page);
     await acceptanceEvidence.captureScreenshot(
       page,
       `${visualOutputDirectory}/admin-access-administrators-forbidden-mobile-390x844.png`,
@@ -7841,7 +7855,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     timeout: 60_000,
   });
   expect(new URL(page.url()).pathname).toBe(notFoundPath);
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-client-route-not-found-mobile-390x844.png`,
@@ -7898,7 +7912,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     passwordResetSubjectLayout.clientWidth,
   );
   expect(passwordResetSubjectLayout.lineCount).toBeGreaterThan(1);
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await page.keyboard.press('Escape');
   await expect(passwordResetSubject).toHaveCount(0);
   const updatedStateAdministrator = await readApiData<Administrator>(
@@ -8003,7 +8017,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     await expect(administratorsTable.locator('.el-loading-mask')).toBeVisible({
       timeout: 60_000,
     });
-    await assertNoBodyOverflow(page);
+    await assertResponsiveLayout(page);
     await acceptanceEvidence.captureScreenshot(
       page,
       `${visualOutputDirectory}/admin-access-administrators-loading-mobile-390x844.png`,
@@ -8036,7 +8050,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
       workspace.heading,
       workspace.tableTestId,
     );
-    await assertNoBodyOverflow(page);
+    await assertResponsiveLayout(page);
     await acceptanceEvidence.captureScreenshot(
       page,
       workspace.mobileScreenshot,
@@ -8057,7 +8071,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   await expect(
     createAdministratorDrawer.locator('.el-form-item__error'),
   ).toHaveCount(3);
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-administrators-validation-mobile-390x844.png`,
@@ -8085,7 +8099,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     200,
     'GET',
   );
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-roles-create-drawer-mobile-390x844.png`,
@@ -8101,7 +8115,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
       workspace.heading,
       workspace.tableTestId,
     );
-    await assertNoBodyOverflow(page);
+    await assertResponsiveLayout(page);
     await acceptanceEvidence.captureScreenshot(
       page,
       workspace.desktopScreenshot,
@@ -8130,7 +8144,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     longUserName,
   );
   await expect(page.getByTestId('confirm-revoke-session')).toBeVisible();
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-sessions-revoke-dialog-mobile-390x844.png`,
@@ -8162,7 +8176,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   await expect(
     page.getByRole('heading', { name: 'NovaGame Operations' }),
   ).toBeVisible({ timeout: 60_000 });
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-unauthenticated-mobile-390x844.png`,
@@ -8233,7 +8247,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   await expect(
     page.getByTestId('reload-conflicted-display-name'),
   ).toBeVisible();
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-administrators-conflict-mobile-390x844.png`,
@@ -8249,7 +8263,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
   await expect(
     page.getByText('No administrators match the current filters'),
   ).toBeVisible({ timeout: 60_000 });
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-administrators-empty-mobile-390x844.png`,
@@ -8269,7 +8283,7 @@ test('responsive and failure states', async ({ acceptanceEvidence, page }) => {
     },
   );
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-  await assertNoBodyOverflow(page);
+  await assertResponsiveLayout(page);
   await acceptanceEvidence.captureScreenshot(
     page,
     `${visualOutputDirectory}/admin-access-administrators-retry-mobile-390x844.png`,

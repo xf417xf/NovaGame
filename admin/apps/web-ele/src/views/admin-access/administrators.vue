@@ -1226,6 +1226,10 @@ onBeforeUnmount(() => {
     width: 100%;
   }
 
+  .filter-row > :first-child {
+    flex: 0 0 auto;
+  }
+
   .header-actions :deep(.el-button) {
     min-height: 44px;
     margin-left: 0;
