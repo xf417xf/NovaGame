@@ -9022,6 +9022,7 @@ function Test-Repository {
     Test-M35ExternalNovaCoreCheckout
     Test-NovaGameProcessJobLifecycle
     Test-AdminManagementArtifactPolicy
+    Test-AdminManagementSuccessfulCleanupRetention
     Test-AdminEndToEndHostCapacityAdmissionPolicy
     Assert-Condition (Test-Path -LiteralPath "NovaGame.sln" -PathType Leaf) "Root solution 'NovaGame.sln' is missing."
 
@@ -12678,6 +12679,79 @@ function Write-AdminManagementStrideAlignedProbePng {
     }
 }
 
+function Test-AdminManagementSuccessfulCleanupRetention {
+    $parseTokens = $null
+    $parseErrors = $null
+    $verifyAst = [System.Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $repositoryRoot "scripts\verify.ps1"),
+        [ref]$parseTokens,
+        [ref]$parseErrors)
+    Assert-Condition ($parseErrors.Count -eq 0) `
+        "Successful cleanup retention proof requires a valid verification script."
+    $browserFunctions = @($verifyAst.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq "Invoke-AdminEndToEnd"
+    }, $false))
+    Assert-Condition ($browserFunctions.Count -eq 1) `
+        "Successful cleanup retention proof requires the exact browser caller."
+    $successCleanupBranches = @($browserFunctions[0].Body.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.IfStatementAst] -and
+            $node.Clauses[0].Item1.Extent.Text.Contains('$artifactSecretScanPassed') -and
+            $node.Clauses[0].Item1.Extent.Text.Contains('$logRoot')
+    }, $false))
+    Assert-Condition ($successCleanupBranches.Count -eq 1) `
+        "Successful cleanup retention proof requires the exact final success branch."
+    $successCleanup = [scriptblock]::Create(
+        $successCleanupBranches[0].Extent.Text)
+    $adminManagementRoot = Join-Path $repositoryRoot ".local\admin-management"
+    $runRoot = Join-Path `
+        $adminManagementRoot `
+        "novagame-test-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
+    $logRoot = $runRoot
+    $operationError = $null
+    $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+    $artifactSecretScanPassed = $true
+    $artifactSensitiveValues = @("synthetic-sensitive-value-not-in-fixture")
+    $allowedScreenshotRelativePaths = @("output/playwright/visual/probe.png")
+    $screenshotPath = Join-Path $runRoot $allowedScreenshotRelativePaths[0]
+    $auditPath = Join-Path $runRoot "response-audit.json"
+    $rawLogPath = Join-Path $runRoot "api.stdout.log"
+    try {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $screenshotPath) `
+            -Force | Out-Null
+        Write-AdminManagementProbePng -Path $screenshotPath -Width 64 -Height 64
+        $screenshotInspectionRecords = @([pscustomobject]@{
+            RelativePath = $allowedScreenshotRelativePaths[0]
+            Sha256 = (Get-FileHash -LiteralPath $screenshotPath -Algorithm SHA256).Hash
+            Width = 64
+            Height = 64
+        })
+        [System.IO.File]::WriteAllText($auditPath, '{"fixture":"synthetic"}')
+        [System.IO.File]::WriteAllText($rawLogPath, "Synthetic raw transport log.")
+        & $successCleanup
+        Assert-Condition ($cleanupErrors.Count -eq 0) `
+            "Successful cleanup retention proof encountered a cleanup error."
+        Assert-Condition (Test-Path -LiteralPath $screenshotPath -PathType Leaf) `
+            "Final successful cleanup must retain its validated screenshot."
+        Assert-Condition `
+            ((Test-Path -LiteralPath $auditPath -PathType Leaf) -and
+                [System.IO.File]::ReadAllText($auditPath) -ceq '{"fixture":"synthetic"}') `
+            "Final successful cleanup must preserve its scanned response-audit evidence."
+        Assert-Condition (-not (Test-Path -LiteralPath $rawLogPath)) `
+            "Final successful cleanup must remove raw process transcripts."
+        Assert-AdminManagementScreenshotIdentity `
+            -RunRoot $runRoot -InspectionRecords $screenshotInspectionRecords
+        Remove-AdminManagementNonRetainableArtifacts -ArtifactRoot $runRoot
+        Assert-Condition (-not (Test-Path -LiteralPath $screenshotPath)) `
+            "Failure reduction must still remove screenshot evidence."
+    }
+    finally {
+        Remove-AdminManagementRunRootVerified -RunRoot $runRoot -MaximumAttempts 6
+    }
+}
+
 function Test-AdminManagementArtifactPolicy {
     $probeRunRoot = Join-Path `
         $repositoryRoot `
@@ -15585,14 +15659,17 @@ function Invoke-AdminEndToEnd {
                         "Refusing to remove Admin E2E logs outside '$resolvedAdminE2ERoot'.")
                 }
                 else {
-                    Remove-AdminManagementRunRootVerified `
-                        -RunRoot $resolvedLogRoot `
-                        -MaximumAttempts 6
+                    Remove-AdminManagementNonRetainableArtifacts `
+                        -ArtifactRoot $resolvedLogRoot `
+                        -AllowedScreenshotRelativePaths $allowedScreenshotRelativePaths
+                    Assert-AdminManagementScreenshotIdentity `
+                        -RunRoot $runRoot `
+                        -InspectionRecords $screenshotInspectionRecords
                 }
             }
             catch {
                 $null = $cleanupErrors.Add(
-                    "Failed to remove successful Admin E2E logs '$logRoot'.")
+                    "Failed to apply the successful Admin E2E artifact policy.")
                 try {
                     Remove-AdminManagementNonRetainableArtifacts `
                         -ArtifactRoot $runRoot

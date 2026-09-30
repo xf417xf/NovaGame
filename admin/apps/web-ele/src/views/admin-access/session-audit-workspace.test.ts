@@ -41,6 +41,7 @@ const router = vi.hoisted(() => ({
 
 const viewport = vi.hoisted(() => ({
   mobile: false,
+  realDialog: false,
 }));
 
 vi.mock('#/api', () => api);
@@ -79,11 +80,14 @@ vi.mock('@vben/stores', async () => {
   };
 });
 
-vi.mock('@vueuse/core', () => ({
+vi.mock('@vueuse/core', async () => ({
+  ...(await vi.importActual<typeof import('@vueuse/core')>('@vueuse/core')),
   useMediaQuery: () => ref(viewport.mobile),
 }));
 
-vi.mock('element-plus', () => {
+vi.mock('element-plus', async () => {
+  const actual =
+    await vi.importActual<typeof import('element-plus')>('element-plus');
   const tableRowsKey = Symbol('table-rows');
   const Container = defineComponent({
     inheritAttrs: false,
@@ -133,14 +137,18 @@ vi.mock('element-plus', () => {
       title: { default: '', type: String },
     },
     setup(props, { attrs, slots }) {
-      return () =>
-        props.modelValue
+      return () => {
+        if (viewport.realDialog) {
+          return h(actual.ElDialog, { ...attrs, ...props }, slots);
+        }
+        return props.modelValue
           ? h('section', attrs, [
               h('h2', props.title),
               slots.default?.(),
               slots.footer?.(),
             ])
           : null;
+      };
     },
   });
   const ElDrawer = defineComponent({
@@ -489,6 +497,7 @@ function mountAudit() {
 beforeEach(() => {
   vi.clearAllMocks();
   viewport.mobile = false;
+  viewport.realDialog = false;
   getAccessStore().accessCodes = [
     accessPermission,
     administratorsReadPermission,
@@ -731,6 +740,40 @@ describe('session and audit workspaces', () => {
     const subject = wrapper.get('[data-testid="session-revoke-subject"]');
     expect(subject.text()).toBe(userName);
     expect(subject.classes()).toContain('dialog-subject');
+  });
+
+  it('removes the real session confirmation after Escape and reopens it without a revocation', async () => {
+    viewport.realDialog = true;
+    api.listSessionFamilies.mockResolvedValue(sessionPage([sessionFamily()]));
+    const wrapper = mount(SessionsWorkspace, {
+      attachTo: document.body,
+      global: { ...testGlobal(), stubs: { transition: false } },
+    });
+    mountedWrappers.push(wrapper);
+    await flushPromises();
+    await wrapper.get('[data-testid="revoke-session"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[data-testid="session-revoke-subject"]').text()).toBe(
+      sessionFamily().userName,
+    );
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        code: 'Escape',
+        key: 'Escape',
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        wrapper.find('[data-testid="session-revoke-subject"]').exists(),
+      ).toBe(false),
+    );
+    expect(api.revokeSessionFamily).not.toHaveBeenCalled();
+    await wrapper.get('[data-testid="revoke-session"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[data-testid="session-revoke-subject"]').text()).toBe(
+      sessionFamily().userName,
+    );
   });
 
   it('confirms, retries, reloads, and repeats authoritative session-family revocation', async () => {

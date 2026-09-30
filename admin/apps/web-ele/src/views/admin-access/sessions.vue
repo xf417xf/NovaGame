@@ -839,6 +839,7 @@ onBeforeUnmount(() => {
       :close-on-press-escape="!revoking"
       :model-value="revokeDialogOpen"
       :show-close="!revoking"
+      destroy-on-close
       title="Revoke session family"
       width="min(480px, calc(100vw - 32px))"
       @close="closeRevokeDialog"
