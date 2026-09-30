@@ -34,7 +34,8 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5](docs/goals/m3.5.md) is the only active repository milestone at `M35-07`: `M35-07-T03` is
-complete, and `M35-07-T04` is blocked pending separate explicit authorization. M35-05 completed
+complete, and `M35-07-T04` is in progress under separate user authorization on 2026-09-30 for
+cumulative Admin verification, cleanup audit, and stage closure. M35-05 completed
 the NovaGame-owned `Operations/AdminAccess`
 `administrator-management` workspace across .NET, MySQL 8.4, and the generic Vben Admin 5
 `web-ele` application, including its final management-admin, checked-contract, generic Admin,

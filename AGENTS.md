@@ -85,9 +85,10 @@ stale-detail `404` evidence contract on 2026-08-25. M35-07-T03 completed on 2026
 the real unknown-ID API `404` and stable code, focused defensive detail coverage, the 190-test
 frontend scope, serial five-test browser acceptance, and manual review of all 20 retained
 desktop/mobile screenshots. Its consumed authorization does not authorize M35-07-T04 or later work.
-M35-07 is blocked solely pending explicit authorization for M35-07-T04; no successor command has
-started. The completed task does not authorize
-SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
+The user separately authorized M35-07-T04 on 2026-09-30. It is the only active task and is limited
+to cumulative Admin verification, cleanup audit, and M35-07 stage closure. Its authorization does
+not permit executing M35-08 tasks, SwordMaster changes, an admin-shell extraction, another
+capability, M4, or NovaCore changes. M4
 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
