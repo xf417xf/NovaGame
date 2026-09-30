@@ -9078,7 +9078,7 @@ function Test-Repository {
     Assert-Condition `
         ([regex]::Matches(
                 $verifyScript,
-                '(?m)^\s*"--force-evaluate",$').Count -eq 2) `
+                '(?m)^[ \t]*"--force-evaluate",\r?$').Count -eq 2) `
         "NovaGame and SwordMaster restores must reevaluate same-version locked NovaCore packages."
     Assert-Condition `
         $processEnvironmentScript.Contains('[Environment]::GetEnvironmentVariables("Process")') `
@@ -9101,7 +9101,7 @@ function Test-Repository {
     Assert-Condition `
         ([regex]::Matches(
             $verifyScript,
-            '(?m)^\s*\$previous(?:Seed|Runtime)?Environment\s*=\s*Get-NovaGameProcessEnvironmentSnapshot\s*`?$').Count -eq 5) `
+            '(?m)^[ \t]*\$previous(?:Seed|Runtime)?Environment[ \t]*=[ \t]*Get-NovaGameProcessEnvironmentSnapshot[ \t]*`?\r?$').Count -eq 5) `
         "Verification must use null-preserving snapshots in all five local lifecycles."
     Assert-Condition `
         ([regex]::Matches(

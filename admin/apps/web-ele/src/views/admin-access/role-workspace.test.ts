@@ -1485,7 +1485,9 @@ describe('roles and permissions workspace', () => {
     expect(wrapper.find('[data-testid="role-mobile-actions"]').exists()).toBe(
       true,
     );
-    expect(wrapper.find('[content="Role actions"]').exists()).toBe(true);
+    expect(
+      wrapper.get('[data-testid="role-mobile-actions"]').attributes('title'),
+    ).toBe('Role actions');
     expect(wrapper.find('[aria-label="Rename Operators"]').exists()).toBe(
       false,
     );

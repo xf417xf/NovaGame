@@ -783,15 +783,14 @@ onBeforeUnmount(() => {
                   v-if="isMobile && canRevokeSessionWorkspace"
                   trigger="click"
                 >
-                  <ElTooltip content="Session actions" placement="top">
-                    <ElButton
-                      :aria-label="`Actions for session ${scope.row.familyId}`"
-                      circle
-                      data-testid="session-mobile-actions"
-                    >
-                      <Ellipsis :size="17" />
-                    </ElButton>
-                  </ElTooltip>
+                  <ElButton
+                    :aria-label="`Actions for session ${scope.row.familyId}`"
+                    circle
+                    data-testid="session-mobile-actions"
+                    title="Session actions"
+                  >
+                    <Ellipsis :size="17" />
+                  </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem @click="openRevokeDialog(scope.row)">

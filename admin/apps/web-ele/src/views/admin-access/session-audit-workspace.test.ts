@@ -690,7 +690,11 @@ describe('session and audit workspaces', () => {
     expect(
       writable.find('[data-testid="session-mobile-actions"]').exists(),
     ).toBe(true);
-    expect(writable.find('[content="Session actions"]').exists()).toBe(true);
+    expect(
+      writable
+        .get('[data-testid="session-mobile-actions"]')
+        .attributes('title'),
+    ).toBe('Session actions');
     expect(
       writable.findComponent({ name: 'ElPagination' }).props('layout'),
     ).toBe('prev, pager, next');
@@ -1140,9 +1144,9 @@ describe('session and audit workspaces', () => {
     expect(mobileActions.attributes('aria-label')).toBe(
       `Actions for audit record ${auditRecord().id}`,
     );
-    expect(wrapper.find('[content="Audit record actions"]').exists()).toBe(
-      true,
-    );
+    expect(
+      wrapper.get('[data-testid="audit-mobile-actions"]').attributes('title'),
+    ).toBe('Audit record actions');
     expect(
       wrapper.findComponent({ name: 'ElPagination' }).props('layout'),
     ).toBe('prev, pager, next');

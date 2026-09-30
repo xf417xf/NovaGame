@@ -50,6 +50,8 @@ const router = vi.hoisted(() => ({
 
 const viewport = vi.hoisted(() => ({
   mobile: false,
+  realRowActions: false,
+  visibleChange: vi.fn(),
 }));
 
 vi.mock('#/api', () => api);
@@ -99,11 +101,14 @@ vi.mock('@vben/stores', async () => {
   };
 });
 
-vi.mock('@vueuse/core', () => ({
+vi.mock('@vueuse/core', async () => ({
+  ...(await vi.importActual<typeof import('@vueuse/core')>('@vueuse/core')),
   useMediaQuery: () => ref(viewport.mobile),
 }));
 
-vi.mock('element-plus', () => {
+vi.mock('element-plus', async () => {
+  const actual =
+    await vi.importActual<typeof import('element-plus')>('element-plus');
   const tableRowsKey = Symbol('table-rows');
   const Container = defineComponent({
     inheritAttrs: false,
@@ -136,15 +141,26 @@ vi.mock('element-plus', () => {
     emits: ['click'],
     setup(props, { attrs, emit, slots }) {
       return () =>
-        h(
-          'button',
-          {
-            ...attrs,
-            disabled: props.disabled || props.loading,
-            onClick: (event: MouseEvent) => emit('click', event),
-          },
-          slots.default?.(),
-        );
+        viewport.realRowActions
+          ? h(
+              actual.ElButton,
+              {
+                ...attrs,
+                disabled: props.disabled,
+                loading: props.loading,
+                onClick: (event: MouseEvent) => emit('click', event),
+              },
+              slots,
+            )
+          : h(
+              'button',
+              {
+                ...attrs,
+                disabled: props.disabled || props.loading,
+                onClick: (event: MouseEvent) => emit('click', event),
+              },
+              slots.default?.(),
+            );
     },
   });
   const ElDialog = defineComponent({
@@ -205,13 +221,30 @@ vi.mock('element-plus', () => {
     name: 'ElDropdown',
     inheritAttrs: false,
     emits: ['command'],
+    setup(_, { attrs, emit, slots }) {
+      return () =>
+        viewport.realRowActions
+          ? h(
+              actual.ElDropdown,
+              {
+                ...attrs,
+                onCommand: (command: string) => emit('command', command),
+                onVisibleChange: viewport.visibleChange,
+              },
+              slots,
+            )
+          : h('div', attrs, [
+              slots.default?.(),
+              slots.extra?.(),
+              slots.dropdown?.(),
+            ]);
+    },
+  });
+  const ElTooltip = defineComponent({
+    inheritAttrs: false,
     setup(_, { attrs, slots }) {
       return () =>
-        h('div', attrs, [
-          slots.default?.(),
-          slots.extra?.(),
-          slots.dropdown?.(),
-        ]);
+        h(viewport.realRowActions ? actual.ElTooltip : Container, attrs, slots);
     },
   });
   const ElInput = defineComponent({
@@ -346,7 +379,7 @@ vi.mock('element-plus', () => {
     ElTable,
     ElTableColumn,
     ElTag: Container,
-    ElTooltip: Container,
+    ElTooltip,
   };
 });
 
@@ -537,6 +570,7 @@ function mountWorkspace() {
 beforeEach(() => {
   vi.clearAllMocks();
   viewport.mobile = false;
+  viewport.realRowActions = false;
   getAccessStore().accessCodes = [];
   operator.userId = 'current-administrator-id';
   authentication.expireSession.mockResolvedValue(undefined);
@@ -1491,9 +1525,11 @@ describe('administrator workspace', () => {
     expect(
       wrapper.find('[data-testid="administrator-mobile-actions"]').exists(),
     ).toBe(true);
-    expect(wrapper.find('[content="Administrator actions"]').exists()).toBe(
-      true,
-    );
+    expect(
+      wrapper
+        .get('[data-testid="administrator-mobile-actions"]')
+        .attributes('title'),
+    ).toBe('Administrator actions');
     expect(
       wrapper.find('[aria-label="Edit display name for operator"]').exists(),
     ).toBe(false);
@@ -1519,6 +1555,36 @@ describe('administrator workspace', () => {
       readOnly.find('[data-testid="administrator-mobile-actions"]').exists(),
     ).toBe(false);
     expect(readOnly.text()).toContain('Read only');
+  });
+
+  it('opens the real mobile administrator menu from its labelled button', async () => {
+    viewport.mobile = true;
+    viewport.realRowActions = true;
+    getAccessStore().accessCodes = [
+      accessPermission,
+      administratorsManagePermission,
+      administratorsReadPermission,
+    ];
+    api.listAdministrators.mockResolvedValue(
+      administratorPage([administrator()]),
+    );
+    const wrapper = mount(AdministratorsWorkspace, {
+      attachTo: document.body,
+      global: { ...testGlobal(), stubs: { transition: false } },
+    });
+    try {
+      await flushPromises();
+      const button = wrapper.get(
+        '[data-testid="administrator-mobile-actions"]',
+      );
+      expect(button.attributes('aria-label')).toBe('Actions for operator');
+      await button.trigger('click', { button: 0 });
+      await vi.waitFor(() =>
+        expect(viewport.visibleChange).toHaveBeenCalledWith(true),
+      );
+    } finally {
+      wrapper.unmount();
+    }
   });
 
   it('routes a mobile administrator row-menu command to the matching drawer', async () => {

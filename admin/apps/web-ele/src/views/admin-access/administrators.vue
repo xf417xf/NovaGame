@@ -788,15 +788,14 @@ onBeforeUnmount(() => {
                     handleRowCommand($event as AdministratorCommand, scope.row)
                   "
                 >
-                  <ElTooltip content="Administrator actions" placement="top">
-                    <ElButton
-                      :aria-label="`Actions for ${scope.row.userName}`"
-                      circle
-                      data-testid="administrator-mobile-actions"
-                    >
-                      <Ellipsis :size="17" />
-                    </ElButton>
-                  </ElTooltip>
+                  <ElButton
+                    :aria-label="`Actions for ${scope.row.userName}`"
+                    circle
+                    data-testid="administrator-mobile-actions"
+                    title="Administrator actions"
+                  >
+                    <Ellipsis :size="17" />
+                  </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem

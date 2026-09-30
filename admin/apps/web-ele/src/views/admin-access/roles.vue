@@ -645,15 +645,14 @@ onBeforeUnmount(() => {
                   trigger="click"
                   @command="handleRowCommand($event as RoleCommand, scope.row)"
                 >
-                  <ElTooltip content="Role actions" placement="top">
-                    <ElButton
-                      :aria-label="`Actions for ${scope.row.name}`"
-                      circle
-                      data-testid="role-mobile-actions"
-                    >
-                      <Ellipsis :size="17" />
-                    </ElButton>
-                  </ElTooltip>
+                  <ElButton
+                    :aria-label="`Actions for ${scope.row.name}`"
+                    circle
+                    data-testid="role-mobile-actions"
+                    title="Role actions"
+                  >
+                    <Ellipsis :size="17" />
+                  </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem command="name">

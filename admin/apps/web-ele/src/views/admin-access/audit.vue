@@ -1074,15 +1074,14 @@ onBeforeUnmount(() => {
             >
               <template #default="scope">
                 <ElDropdown v-if="isMobile" trigger="click">
-                  <ElTooltip content="Audit record actions" placement="top">
-                    <ElButton
-                      :aria-label="`Actions for audit record ${scope.row.id}`"
-                      circle
-                      data-testid="audit-mobile-actions"
-                    >
-                      <Ellipsis :size="17" />
-                    </ElButton>
-                  </ElTooltip>
+                  <ElButton
+                    :aria-label="`Actions for audit record ${scope.row.id}`"
+                    circle
+                    data-testid="audit-mobile-actions"
+                    title="Audit record actions"
+                  >
+                    <Ellipsis :size="17" />
+                  </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem @click="openRecordDetail(scope.row)">
