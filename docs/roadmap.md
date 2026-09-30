@@ -162,9 +162,12 @@ M3.5 is active at `M35-07`: `M35-07-T02` completed route/action permission and a
 `401`/`403` acceptance after focused, frontend, and serial real-browser verification. The user
 separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13 and
 authorized M35-07-T03 responsive acceptance on 2026-08-23 and its narrow stale-detail `404`
-evidence contract on 2026-08-25. T03 is in progress with real unknown-ID API `404`/stable-code
-evidence, focused defensive detail coverage, and retained responsive browser acceptance, without a
-removal lifecycle; it does not authorize M35-07-T04 or later work, SwordMaster changes, extraction,
+evidence contract on 2026-08-25. T03 completed on 2026-09-30 with real unknown-ID API
+`404`/stable-code evidence, focused defensive detail coverage, 190 passing frontend tests, the
+serial five-test real-browser suite, and manual review of all 20 retained responsive screenshots.
+M35-07 is blocked solely pending separate explicit authorization for M35-07-T04, which has not
+started. T03 added no removal lifecycle and grants no authorization for T04 or later work,
+SwordMaster changes, extraction,
 M4, or NovaCore changes.
 
 ### Goal

@@ -81,9 +81,12 @@ acceptance, security evidence, serial cumulative verification, and zero-residue 
 M3.5 completed the frozen real-browser acceptance foundation at `M35-07-T01` and the frozen
 route/action permission plus authoritative `401`/`403` acceptance at `M35-07-T02`. Follow
 `docs/goals/m3.5.md`. The user authorized `M35-07-T03` on 2026-08-23 and approved its narrow
-stale-detail `404` evidence contract on 2026-08-25; it is the only active task. It remains limited
-to responsive browser acceptance, a real unknown-ID API `404` with its stable code, and focused
-defensive detail coverage; it does not authorize M35-07-T04 or later work,
+stale-detail `404` evidence contract on 2026-08-25. M35-07-T03 completed on 2026-09-30 with
+the real unknown-ID API `404` and stable code, focused defensive detail coverage, the 190-test
+frontend scope, serial five-test browser acceptance, and manual review of all 20 retained
+desktop/mobile screenshots. Its consumed authorization does not authorize M35-07-T04 or later work.
+M35-07 is blocked solely pending explicit authorization for M35-07-T04; no successor command has
+started. The completed task does not authorize
 SwordMaster changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4
 remains `Unscheduled`.
 

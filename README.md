@@ -33,8 +33,8 @@ player-equipment-grant capability remains SwordMaster-owned.
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
 another capability, M4, or NovaCore changes.
 
-[M3.5](docs/goals/m3.5.md) is the only active repository milestone at `M35-07`: `M35-07-T02` is
-complete, and the user authorized `M35-07-T03` on 2026-08-23. M35-05 completed
+[M3.5](docs/goals/m3.5.md) is the only active repository milestone at `M35-07`: `M35-07-T03` is
+complete, and `M35-07-T04` is blocked pending separate explicit authorization. M35-05 completed
 the NovaGame-owned `Operations/AdminAccess`
 `administrator-management` workspace across .NET, MySQL 8.4, and the generic Vben Admin 5
 `web-ele` application, including its final management-admin, checked-contract, generic Admin,
@@ -44,9 +44,10 @@ premature-source guard. M35-06 then completed the real composed API, frozen secu
 cumulative verification, and zero-residue cleanup paths. M35-07-T01 completed the frozen real
 browser foundation through the composed Vben/API/DbMigrator/MySQL acceptance path, and M35-07-T02
 completed its route/action permission and authoritative `401`/`403` acceptance after focused,
-frontend, and serial real-browser verification. T03 is in progress under the user-approved narrow
-stale-detail `404` evidence contract: real unknown-ID API `404`/stable-code evidence, focused
-defensive detail coverage, and responsive desktop/mobile acceptance without a removal lifecycle. It
+frontend, and serial real-browser verification. T03 completed on 2026-09-30 with real unknown-ID
+API `404`/stable-code evidence, focused defensive detail coverage, 190 passing frontend tests,
+serial five-test real-browser acceptance, and manual review of all 20 retained desktop/mobile
+screenshots. It added no removal lifecycle and
 does not authorize M35-07-T04 or later tasks, SwordMaster, extraction, M4, or NovaCore changes.
 M4 remains `Unscheduled`.
 
