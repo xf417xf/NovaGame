@@ -21,8 +21,9 @@ implemented nor authorized for extraction. M3 grants no continuing authorization
 another capability, M4, or NovaCore changes.
 
 [M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone.
-M35-07 completed on 2026-10-01; `M35-08-T01` is blocked pending separate explicit authorization,
-and no M35-08 command has run. T04 passed cumulative Admin with 520 unit tests, exactly five
+M35-07 completed on 2026-10-01. The separately authorized `M35-08-T01` is the only active task
+and runs the frozen ordered cumulative acceptance set; T02 and T03 remain pending and separately
+unauthorized. T04 passed cumulative Admin with 520 unit tests, exactly five
 zero-retry real browser tests, all 20 manual screenshot reviews, committed evidence, verified
 disposal, and final governance checks. Its consumed authority does not authorize M35-08. M35-05
 completed the authorized

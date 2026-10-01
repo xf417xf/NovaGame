@@ -22,7 +22,7 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 - `admin/AGENTS.md` for the operations admin.
 - `clients/cocos/AGENTS.md` for the Cocos client framework.
 
-Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-08` in `docs/goals/m3.5.md`, with `M35-08-T01` blocked pending separate explicit authorization, for the NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
+Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-08` in `docs/goals/m3.5.md`, with only the separately authorized `M35-08-T01` executable, for the NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
 
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
@@ -89,10 +89,11 @@ The separately authorized M35-07-T04 completed on 2026-10-01 after the confirmed
 type annotation and frozen hash correction. Cumulative Admin passed all 520 unit tests and the
 exact five-test real browser suite with zero retries; all 20 scanned PNGs passed manual review.
 Evidence was committed before verified disposal, and final cleanup and governance checks passed.
-M35-07 is complete. M3.5 remains active at M35-08, with M35-08-T01 blocked solely pending
-separate explicit authorization; no M35-08 task or command has started. The consumed T04 authority
-does not permit M35-08 execution, SwordMaster changes, an admin-shell extraction, another
-capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
+M35-07 is complete. The user separately authorized M35-08-T01 on 2026-10-01. It is the only
+active task and executes only the frozen ordered cumulative acceptance set. Admin owns the sole
+five-test browser invocation. T02 and T03 remain pending and separately unauthorized. Neither
+the consumed T04 authority nor the new T01 authority permits T02/T03 execution, SwordMaster changes,
+an admin-shell extraction, another capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 
