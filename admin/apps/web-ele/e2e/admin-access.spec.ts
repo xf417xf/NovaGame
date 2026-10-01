@@ -1449,11 +1449,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
             'Split-role Administrators workspace bootstrap module returned a client error.',
           );
         }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace bootstrap module request failed.',
-          );
-        }
         case 'server-error': {
           throw new Error(
             'Split-role Administrators workspace bootstrap module returned a server error.',
@@ -1472,11 +1467,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         case 'client-error': {
           throw new Error(
             'Split-role Administrators workspace direct node module returned a client error.',
-          );
-        }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace direct node module request failed.',
           );
         }
         case 'server-error': {
@@ -1499,11 +1489,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
             'Split-role Administrators workspace filesystem app source returned a client error.',
           );
         }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace filesystem app source request failed.',
-          );
-        }
         case 'server-error': {
           throw new Error(
             'Split-role Administrators workspace filesystem app source returned a server error.',
@@ -1522,11 +1507,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         case 'client-error': {
           throw new Error(
             'Split-role Administrators workspace filesystem dependency returned a client error.',
-          );
-        }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace filesystem dependency request failed.',
           );
         }
         case 'server-error': {
@@ -1549,11 +1529,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
             'Split-role Administrators workspace unclassified filesystem module returned a client error.',
           );
         }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace unclassified filesystem module request failed.',
-          );
-        }
         case 'server-error': {
           throw new Error(
             'Split-role Administrators workspace unclassified filesystem module returned a server error.',
@@ -1572,11 +1547,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         case 'client-error': {
           throw new Error(
             'Split-role Administrators workspace filesystem workspace internal module returned a client error.',
-          );
-        }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace filesystem workspace internal module request failed.',
           );
         }
         case 'server-error': {
@@ -1599,11 +1569,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
             'Split-role Administrators workspace filesystem workspace package returned a client error.',
           );
         }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace filesystem workspace package request failed.',
-          );
-        }
         case 'server-error': {
           throw new Error(
             'Split-role Administrators workspace filesystem workspace package returned a server error.',
@@ -1622,11 +1587,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         case 'client-error': {
           throw new Error(
             'Split-role Administrators workspace optimized dependency returned a client error.',
-          );
-        }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace optimized dependency request failed.',
           );
         }
         case 'server-error': {
@@ -1649,11 +1609,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
             'Split-role Administrators workspace source outside views returned a client error.',
           );
         }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace source outside views request failed.',
-          );
-        }
         case 'server-error': {
           throw new Error(
             'Split-role Administrators workspace source outside views returned a server error.',
@@ -1672,11 +1627,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         case 'client-error': {
           throw new Error(
             'Split-role Administrators workspace source view returned a client error.',
-          );
-        }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace source view request failed.',
           );
         }
         case 'server-error': {
@@ -1699,11 +1649,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
             'Split-role Administrators workspace unknown module returned a client error.',
           );
         }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace unknown module request failed.',
-          );
-        }
         case 'server-error': {
           throw new Error(
             'Split-role Administrators workspace unknown module returned a server error.',
@@ -1724,11 +1669,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
             'Split-role Administrators workspace Vite client module returned a client error.',
           );
         }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace Vite client module request failed.',
-          );
-        }
         case 'server-error': {
           throw new Error(
             'Split-role Administrators workspace Vite client module returned a server error.',
@@ -1747,11 +1687,6 @@ function throwSplitRoleAdministratorsWorkspaceModuleFailure(
         case 'client-error': {
           throw new Error(
             'Split-role Administrators workspace Vite virtual module returned a client error.',
-          );
-        }
-        case 'request-failed': {
-          throw new Error(
-            'Split-role Administrators workspace Vite virtual module request failed.',
           );
         }
         case 'server-error': {
