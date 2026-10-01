@@ -163,8 +163,9 @@ completed its exact ten-command acceptance set on 2026-10-01. Evidence includes 
 tests, all 12 management families/147 focused tests, byte-identical checked contracts, 190 focused
 frontend tests, and full Admin with 520 unit tests plus five zero-retry real browser tests.
 The interrupted command 4 and unknown-cause command 5 failure remain recorded; recovered
-unchanged commands passed. Accepted evidence is retained. `M35-08-T02` is blocked pending separate
-explicit authorization and T03 remains pending. `M35-07-T02` completed
+unchanged commands passed. Accepted evidence is retained. The user authorized `M35-08-T02`
+and remaining M3.5 closure on 2026-10-01; only T02 is executable, with T03 pending its committed
+result. `M35-07-T02` completed
 route/action permission and authoritative
 `401`/`403` acceptance after focused, frontend, and serial real-browser verification. The user
 separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13 and
