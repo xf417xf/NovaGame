@@ -20,11 +20,11 @@ verified. The complete player-equipment-grant capability remains SwordMaster-own
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
 another capability, M4, or NovaCore changes.
 
-[M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone at
-`M35-07`: `M35-07-T03` is complete, and `M35-07-T04` resumed after separately confirmed
-protected-helper typing and frozen hash correction on 2026-10-01.
-Its separate user authorization on 2026-09-30 covers cumulative Admin verification,
-cleanup audit, and stage closure. M35-05
+[M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone.
+M35-07 completed on 2026-10-01; `M35-08-T01` is blocked pending separate explicit authorization,
+and no M35-08 command has run. T04 passed cumulative Admin with 520 unit tests, exactly five
+zero-retry real browser tests, all 20 manual screenshot reviews, committed evidence, verified
+disposal, and final governance checks. Its consumed authority does not authorize M35-08. M35-05
 completed the authorized
 `administrator-management` capability through administrator, role and permission, session, audit,
 and generic Vben `web-ele` operations, including final management-admin, checked-contract,

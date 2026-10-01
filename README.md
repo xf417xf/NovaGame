@@ -33,11 +33,11 @@ player-equipment-grant capability remains SwordMaster-owned.
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
 another capability, M4, or NovaCore changes.
 
-[M3.5](docs/goals/m3.5.md) is the only active repository milestone at `M35-07`: `M35-07-T03` is
-complete, and `M35-07-T04` resumed after separately confirmed protected-helper typing and frozen
-hash correction on 2026-10-01. Its separate
-user authorization on 2026-09-30 covers
-cumulative Admin verification, cleanup audit, and stage closure. M35-05 completed
+[M3.5](docs/goals/m3.5.md) is the only active repository milestone. M35-07 completed on
+2026-10-01; `M35-08-T01` is blocked pending separate explicit authorization, and no M35-08
+command has run. The separately authorized T04 passed cumulative Admin with 520 unit tests,
+exactly five zero-retry real browser tests, all 20 manual screenshot reviews, committed evidence,
+verified disposal, and final governance checks. M35-05 completed
 the NovaGame-owned `Operations/AdminAccess`
 `administrator-management` workspace across .NET, MySQL 8.4, and the generic Vben Admin 5
 `web-ele` application, including its final management-admin, checked-contract, generic Admin,
@@ -50,8 +50,8 @@ completed its route/action permission and authoritative `401`/`403` acceptance a
 frontend, and serial real-browser verification. T03 completed on 2026-09-30 with real unknown-ID
 API `404`/stable-code evidence, focused defensive detail coverage, 190 passing frontend tests,
 serial five-test real-browser acceptance, and manual review of all 20 retained desktop/mobile
-screenshots. It added no removal lifecycle and
-does not authorize M35-07-T04 or later tasks, SwordMaster, extraction, M4, or NovaCore changes.
+screenshots. T03 added no removal lifecycle. Neither its consumed authority nor the completed
+T04 authorization permits M35-08 execution, SwordMaster, extraction, M4, or NovaCore changes.
 M4 remains `Unscheduled`.
 
 ## Prerequisites

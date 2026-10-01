@@ -158,20 +158,21 @@ brittle static permission-source verifier check was corrected. M35-05 is complet
 the frozen real-server acceptance, security evidence, serial cumulative verification, and
 zero-residue cleanup audit. M35-07-T01 completed the frozen real-browser acceptance foundation
 through the real Vben/API/DbMigrator/MySQL path, visual evidence, secret scanning, and cleanup.
-M3.5 is active at `M35-07`: `M35-07-T02` completed route/action permission and authoritative
+M35-07 is complete. M3.5 remains active at `M35-08`, with `M35-08-T01` blocked pending
+separate explicit authorization; no M35-08 task or command has started. `M35-07-T02` completed
+route/action permission and authoritative
 `401`/`403` acceptance after focused, frontend, and serial real-browser verification. The user
 separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13 and
 authorized M35-07-T03 responsive acceptance on 2026-08-23 and its narrow stale-detail `404`
 evidence contract on 2026-08-25. T03 completed on 2026-09-30 with real unknown-ID API
 `404`/stable-code evidence, focused defensive detail coverage, 190 passing frontend tests, the
 serial five-test real-browser suite, and manual review of all 20 retained responsive screenshots.
-The user separately authorized M35-07-T04 on 2026-09-30; it resumed after separately confirmed
-protected-helper typing and frozen hash correction on 2026-10-01.
-Its scope remains cumulative Admin
-verification, cleanup audit, and M35-07 stage closure. T03 added no removal lifecycle and
-its consumed authorization grants no authority for T04 or later work,
-SwordMaster changes, extraction,
-M4, or NovaCore changes.
+The separately authorized M35-07-T04 completed on 2026-10-01 after the confirmed protected-helper
+typing and frozen hash correction. Cumulative Admin passed 520 unit tests, exactly five real
+browser tests with zero retries, and all 20 manual screenshot reviews. Evidence was committed
+before bounded disposal; zero owned residue and final governance checks passed. T03 added no
+removal lifecycle. The consumed T03 and T04 authorities grant no authority for M35-08 execution,
+SwordMaster changes, extraction, M4, or NovaCore changes.
 
 ### Goal
 
