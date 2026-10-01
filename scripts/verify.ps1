@@ -4963,7 +4963,7 @@ git diff --check
 
     $m35VerificationOnlyAdminHashes = [ordered]@{
         "admin/apps/web-ele/e2e/acceptance-evidence.ts" =
-            "01BC6040E5AAEE534D4B71EF13E53E3FA8DD6194469B245250BE52375399305E"
+            "C9804592723D309CB64721AD68465369F3BACC3A57C214AE67C53E8FBC27D920"
         "admin/apps/web-ele/e2e/game-config.spec.ts" =
             "2A9671EE7AF10D1A6335FB5E6F89481377F992B3014312F52D5C27A1B987770D"
     }

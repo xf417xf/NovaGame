@@ -165,8 +165,8 @@ authorized M35-07-T03 responsive acceptance on 2026-08-23 and its narrow stale-d
 evidence contract on 2026-08-25. T03 completed on 2026-09-30 with real unknown-ID API
 `404`/stable-code evidence, focused defensive detail coverage, 190 passing frontend tests, the
 serial five-test real-browser suite, and manual review of all 20 retained responsive screenshots.
-The user separately authorized M35-07-T04 on 2026-09-30; it awaits bounded protected-helper
-typing and frozen hash authorization after host admission and E2E compiler diagnosis on 2026-10-01.
+The user separately authorized M35-07-T04 on 2026-09-30; it resumed after separately confirmed
+protected-helper typing and frozen hash correction on 2026-10-01.
 Its scope remains cumulative Admin
 verification, cleanup audit, and M35-07 stage closure. T03 added no removal lifecycle and
 its consumed authorization grants no authority for T04 or later work,

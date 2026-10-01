@@ -1646,7 +1646,7 @@ export class AcceptanceEvidenceAudit {
 
   private async scanScreenshotSurface(page: Page): Promise<void> {
     await this.settle();
-    const surface = await page.locator('html').evaluate((root) => {
+    const surface = await page.locator('html').evaluate((root: HTMLElement) => {
       const formValues = [...root.querySelectorAll('input, select, textarea')]
         .map((element) => {
           const value = (element as unknown as { value?: unknown }).value;
