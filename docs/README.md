@@ -49,6 +49,7 @@ When sources appear to conflict, stop and resolve the conflict before implementa
 
 ## Core Documents
 
+- [Specific game startup and coding-agent handoff](workflows/game-project-start.md)
 - [Architecture](architecture.md)
 - [Development workflow](workflows/development.md)
 - [Extraction workflow](workflows/extraction.md)
@@ -58,4 +59,4 @@ When sources appear to conflict, stop and resolve the conflict before implementa
 - [M1 First SwordMaster Domain Slice completed goal record](goals/m1.md)
 - [M2 First Validated Extraction completed goal record](goals/m2.md)
 - [M3 SwordMaster Player Equipment Grant completed goal record](goals/m3.md)
-- [M3.5 Administrator Management active goal](goals/m3.5.md)
+- [M3.5 Administrator Management completed goal record](goals/m3.5.md)

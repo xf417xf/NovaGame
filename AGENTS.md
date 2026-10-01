@@ -24,6 +24,8 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 
 Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, M3, and M3.5 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, `docs/goals/m3.md`, and `docs/goals/m3.5.md`. M3.5 completed the NovaGame-owned `administrator-management` capability, its exact M35-08 acceptance, final audit and closure. No repository milestone is active. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
 
+For starting a specific game, read [the game-project startup and agent handoff guide](docs/workflows/game-project-start.md). It explains the verified consumption paths, game-owned composition, setup, and acceptance responsibilities. It does not activate a NovaGame milestone or authorize framework changes.
+
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
 ## Completed Baseline

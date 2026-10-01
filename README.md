@@ -118,6 +118,7 @@ The verified SwordMaster smoke consumer is documented in [samples/SwordMaster](s
 
 ## Documentation
 
+- [Start a specific game and hand off to the next coding agent](docs/workflows/game-project-start.md)
 - [Documentation index](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [Roadmap](docs/roadmap.md)
@@ -128,6 +129,6 @@ The verified SwordMaster smoke consumer is documented in [samples/SwordMaster](s
 - [M1 completed goal record](docs/goals/m1.md)
 - [M2 completed goal record](docs/goals/m2.md)
 - [M3 completed goal record](docs/goals/m3.md)
-- [M3.5 active Administrator Management goal](docs/goals/m3.5.md)
+- [M3.5 Administrator Management completed goal record](docs/goals/m3.5.md)
 
 Codex and other coding agents must read [AGENTS.md](AGENTS.md) before changing this repository and the nearest scoped `AGENTS.md` before changing a subtree.
