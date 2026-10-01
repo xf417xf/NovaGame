@@ -173,6 +173,15 @@ EF provider execution-strategy retries are disabled in M0.5. NovaCore currently 
 
 The Vben `web-ele` NovaGame admin is an operational client for framework-owned APIs such as administrator access and GameConfig. It contains presentation and interaction behavior, not domain policy. Each game owns its game-specific operator pages and consumes its own backend APIs, while it may reuse the NovaGame shell, authentication flow, components, and conventions. Server permission codes control navigation and action visibility; the owning server remains the authorization authority.
 
+The completed M3.5 `Operations/AdminAccess` management capability remains in the existing standard
+server layers and generic Vben admin. Its 17 HTTP operations manage administrators, custom roles
+and registered permissions, session-family revocation and redacted audit queries. Server and client
+checks require Access plus the relevant leaf permission. Aggregate policies, strong revisions,
+transactional audit and idempotent receipts remain server-authoritative; built-in-role and
+self-lockout guards are domain rules. OpenAPI-generated TypeScript and real MySQL/browser evidence
+validate the existing contract. This completion adds no game policy, physical module, admin-shell
+package, extraction or stable promotion of the experimental snapshot validator.
+
 ### Client
 
 Engine-independent TypeScript packages own promoted reusable contracts and snapshot behavior. Cocos adapters own engine integration. A specific game consumes both and adds its own game systems, presentation, and content; those game packages do not move into the NovaGame client framework merely because another game might need similar behavior.

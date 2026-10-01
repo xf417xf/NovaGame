@@ -133,9 +133,9 @@ domains remain game-owned and outside this milestone; M3 does not make them Nova
 
 ## M3.5 - Administrator Management
 
-**Status:** Active
+**Status:** Complete
 
-**Active goal:** [M3.5 Administrator Management](goals/m3.5.md)
+**Completed goal record:** [M3.5 Administrator Management](goals/m3.5.md)
 
 **Execution state:** M35-01 completed its evidence-backed current-state and boundary audit, M35-02
 froze and verified its domain, security, Application, HTTP, MySQL, Vben, browser, and verification
@@ -158,14 +158,15 @@ brittle static permission-source verifier check was corrected. M35-05 is complet
 the frozen real-server acceptance, security evidence, serial cumulative verification, and
 zero-residue cleanup audit. M35-07-T01 completed the frozen real-browser acceptance foundation
 through the real Vben/API/DbMigrator/MySQL path, visual evidence, secret scanning, and cleanup.
-M35-07 is complete. M3.5 remains active at `M35-08`; the separately authorized `M35-08-T01`
+M35-07 and M35-08 are complete. M3.5 is deactivated; no repository milestone is active. The separately authorized `M35-08-T01`
 completed its exact ten-command acceptance set on 2026-10-01. Evidence includes 210 real-MySQL
 tests, all 12 management families/147 focused tests, byte-identical checked contracts, 190 focused
 frontend tests, and full Admin with 520 unit tests plus five zero-retry real browser tests.
 The interrupted command 4 and unknown-cause command 5 failure remain recorded; recovered
-unchanged commands passed. Accepted evidence is retained. The user authorized `M35-08-T02`
+unchanged commands passed. Accepted evidence identities and hashes were committed before verified disposal. The user authorized `M35-08-T02`
 and remaining M3.5 closure on 2026-10-01. T02 final audit passed with no unresolved finding;
-only `M35-08-T03` closure becomes executable after committed T02 evidence. `M35-07-T02` completed
+its result was committed before `M35-08-T03` verified local-evidence disposal, documentation
+synchronization, final governance checks and deactivation. All 37 tasks and eight stages are complete. `M35-07-T02` completed
 route/action permission and authoritative
 `401`/`403` acceptance after focused, frontend, and serial real-browser verification. The user
 separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13 and

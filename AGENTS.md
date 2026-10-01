@@ -22,7 +22,7 @@ This file applies to the entire repository. Read the nearest scoped instruction 
 - `admin/AGENTS.md` for the operations admin.
 - `clients/cocos/AGENTS.md` for the Cocos client framework.
 
-Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, and M3 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, and `docs/goals/m3.md`. M3.5 is active at `M35-08` in `docs/goals/m3.5.md`, with T01 acceptance and T02 final audit complete and only the authorized `M35-08-T03` closure executable, for the NovaGame-owned `administrator-management` capability. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
+Also read the workflow relevant to the task under `docs/workflows/`. Milestone status is defined in `docs/roadmap.md`. The completed M0.5, M1, M2, M3, and M3.5 records are `docs/goals/m0.5.md`, `docs/goals/m1.md`, `docs/goals/m2.md`, `docs/goals/m3.md`, and `docs/goals/m3.5.md`. M3.5 completed the NovaGame-owned `administrator-management` capability, its exact M35-08 acceptance, final audit and closure. No repository milestone is active. Creating or reading a goal definition does not authorize work beyond an explicitly activated stage and task.
 
 Roadmap items provide context, not authorization. Do not implement a future milestone or an unrequested extraction candidate.
 
@@ -94,14 +94,16 @@ cumulative acceptance set on 2026-10-01: 210 real-MySQL tests, 12 management fam
 tests, byte-identical OpenAPI/generated types, 190 focused frontend tests, and full Admin with
 520 unit tests plus the sole five-test zero-retry browser suite. Documentation, Repository,
 parse, and whitespace passed. The original interrupted command 4 and unknown-cause command 5
-failure remain recorded; the unchanged recovered commands passed. Accepted evidence is retained.
+failure remain recorded; the unchanged recovered commands passed. Accepted evidence was committed
+before verified disposal.
 The user explicitly authorized M35-08-T02 and the remaining M3.5 closure task on 2026-10-01.
 M35-08-T02 completed the final audit with no unresolved finding, unchanged consumers and product,
 clean NovaCore, four migrations/no pending model changes, strict evidence hashes, 20 current manual
-image reviews and zero disposable Docker/process residue. Only M35-08-T03 becomes executable after
-the verified T02 result is committed; its authority was supplied in the same user request.
-This authority is limited to the remaining current-goal tasks and does not authorize SwordMaster
-changes, an admin-shell extraction, another capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
+image reviews and zero disposable Docker/process residue. Its verified result was committed before
+M35-08-T03 removed only hash-verified local evidence and task-created scripts, synchronized
+documentation, passed final governance checks, and deactivated M3.5. All 37 tasks and eight stages
+are complete. The consumed authority does not authorize SwordMaster changes, an admin-shell
+extraction, another capability, M4, or NovaCore changes. M4 remains `Unscheduled`.
 
 Complete systems such as Battle, Skills, Enhancement, Set Bonuses, Drops, Shop, Mail, Ranking, and Activity are specific-game-owned by default. They are not automatic NovaGame deliverables in any milestone. Only a separately authorized, evidence-backed reusable mechanism may be extracted later.
 

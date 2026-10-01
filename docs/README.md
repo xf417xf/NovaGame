@@ -20,13 +20,14 @@ verified. The complete player-equipment-grant capability remains SwordMaster-own
 implemented nor authorized for extraction. M3 grants no continuing authorization for extraction,
 another capability, M4, or NovaCore changes.
 
-[M3.5 Administrator Management](goals/m3.5.md) is the only active repository milestone.
+[M3.5 Administrator Management](goals/m3.5.md) is complete and deactivated. No repository milestone is active.
 M35-07 completed on 2026-10-01. The separately authorized `M35-08-T01` completed the frozen
 ten-command acceptance set, including 210 real-MySQL tests, 147 focused management tests, checked
 contracts, 190 focused frontend tests, and full Admin with 520 unit tests plus five zero-retry
 browser tests. Accepted evidence and failed-attempt history remain recorded. The user authorized
 `M35-08-T02` and remaining M3.5 closure on 2026-10-01. T02 final audit passed with no unresolved
-finding; only `M35-08-T03` closure becomes executable after committed T02 evidence. T04 passed cumulative Admin with 520 unit tests, exactly five
+finding and was committed before `M35-08-T03` verified evidence disposal, documentation synchronization
+and final governance checks. All 37 tasks and eight stages are complete. T04 passed cumulative Admin with 520 unit tests, exactly five
 zero-retry real browser tests, all 20 manual screenshot reviews, committed evidence, verified
 disposal, and final governance checks. Its consumed authority does not authorize M35-08. M35-05
 completed the authorized
