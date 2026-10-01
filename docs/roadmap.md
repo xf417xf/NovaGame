@@ -158,9 +158,13 @@ brittle static permission-source verifier check was corrected. M35-05 is complet
 the frozen real-server acceptance, security evidence, serial cumulative verification, and
 zero-residue cleanup audit. M35-07-T01 completed the frozen real-browser acceptance foundation
 through the real Vben/API/DbMigrator/MySQL path, visual evidence, secret scanning, and cleanup.
-M35-07 is complete. M3.5 remains active at `M35-08`; the user separately authorized `M35-08-T01`
-on 2026-10-01. Only T01 executes the frozen ordered cumulative acceptance set. T02 and T03
-remain pending and separately unauthorized. `M35-07-T02` completed
+M35-07 is complete. M3.5 remains active at `M35-08`; the separately authorized `M35-08-T01`
+completed its exact ten-command acceptance set on 2026-10-01. Evidence includes 210 real-MySQL
+tests, all 12 management families/147 focused tests, byte-identical checked contracts, 190 focused
+frontend tests, and full Admin with 520 unit tests plus five zero-retry real browser tests.
+The interrupted command 4 and unknown-cause command 5 failure remain recorded; recovered
+unchanged commands passed. Accepted evidence is retained. `M35-08-T02` is blocked pending separate
+explicit authorization and T03 remains pending. `M35-07-T02` completed
 route/action permission and authoritative
 `401`/`403` acceptance after focused, frontend, and serial real-browser verification. The user
 separately authorized the NovaGame-owned `administrator-management` capability on 2026-08-13 and
