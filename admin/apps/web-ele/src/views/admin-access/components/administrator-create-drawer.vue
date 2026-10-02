@@ -25,6 +25,11 @@ import {
   listAdminRoles,
   toNovaGameApiError,
 } from '#/api';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import {
   createAdministratorIdempotencyKey,
@@ -51,9 +56,9 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean];
 }>();
 
-const conflictMessage = ref('');
+const conflictMessage = useOperationsMessage();
 const fieldErrors = ref<Record<string, string>>({});
-const formError = ref('');
+const formError = useOperationsMessage();
 const loadingRoles = ref(false);
 const roleOptions = ref<AdminRoleSummaryDto[]>([]);
 const saving = ref(false);
@@ -100,8 +105,10 @@ function closeForForbidden() {
 }
 
 function lockRetryAfterUncertainOutcome() {
-  formError.value =
-    'The create request may have completed. Retry only with the unchanged fields and password.';
+  formError.value = () =>
+    tOperations(
+      'theCreateRequestMayHaveCompletedRetryOnlyWithTheUnchangedFieldsAndPassword',
+    );
   retryLocked.value = true;
 }
 
@@ -151,7 +158,7 @@ async function loadRoleOptions(search = '') {
       closeForForbidden();
       return;
     }
-    formError.value = apiError.message;
+    formError.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === roleLoadSequence) {
       loadingRoles.value = false;
@@ -181,7 +188,9 @@ function ensureIdempotencyKey(): boolean {
     return true;
   } catch (error) {
     formError.value =
-      error instanceof Error ? error.message : 'Unable to create this command.';
+      error instanceof Error
+        ? error.message
+        : tOperations('unableToCreateThisCommand');
     return false;
   }
 }
@@ -224,7 +233,7 @@ async function submit() {
       return;
     }
     fieldErrors.value = fieldErrorsFrom(apiError);
-    formError.value = apiError.message;
+    formError.value = () => operationsErrorMessage(apiError);
     if (isUncertainCommandError(apiError)) {
       lockRetryAfterUncertainOutcome();
       return;
@@ -234,7 +243,7 @@ async function submit() {
     idempotencyKey.value = null;
     retryLocked.value = false;
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       emit('conflict');
     }
   } finally {
@@ -288,7 +297,7 @@ onBeforeUnmount(() => {
     :show-close="!saving"
     destroy-on-close
     size="min(620px, 100vw)"
-    title="Create administrator"
+    :title="tOperations('createAdministrator')"
     @close="close"
   >
     <div
@@ -309,7 +318,7 @@ onBeforeUnmount(() => {
             @click="reloadConflict"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -323,13 +332,15 @@ onBeforeUnmount(() => {
       >
         <template #default>
           <div v-if="retryLocked" class="retry-actions">
-            <span>Retry only with the unchanged fields and password.</span>
+            <span>{{
+              tOperations('retryOnlyWithTheUnchangedFieldsAndPassword')
+            }}</span>
             <ElButton
               data-testid="restart-administrator-create"
               size="small"
               @click="retryOrRestart"
             >
-              Start new intent
+              {{ tOperations('startNewIntent') }}
             </ElButton>
           </div>
         </template>
@@ -337,7 +348,10 @@ onBeforeUnmount(() => {
 
       <ElForm label-position="top">
         <div class="form-grid">
-          <ElFormItem :error="fieldErrors.userName" label="User name">
+          <ElFormItem
+            :error="fieldErrors.userName"
+            :label="tOperations('userName')"
+          >
             <ElInput
               v-model="form.userName"
               :disabled="formDisabled || !canManage"
@@ -346,7 +360,10 @@ onBeforeUnmount(() => {
               autocomplete="username"
             />
           </ElFormItem>
-          <ElFormItem :error="fieldErrors.displayName" label="Display name">
+          <ElFormItem
+            :error="fieldErrors.displayName"
+            :label="tOperations('displayName')"
+          >
             <ElInput
               v-model="form.displayName"
               :disabled="formDisabled || !canManage"
@@ -358,7 +375,7 @@ onBeforeUnmount(() => {
 
         <ElFormItem
           :error="fieldErrors.initialPassword"
-          label="Initial password"
+          :label="tOperations('initialPassword')"
         >
           <ElInput
             v-model="form.initialPassword"
@@ -374,7 +391,7 @@ onBeforeUnmount(() => {
         <ElFormItem
           v-if="canReadRoles"
           :error="fieldErrors.roleIds"
-          label="Active roles"
+          :label="tOperations('activeRoles')"
         >
           <ElSelect
             v-model="form.roleIds"
@@ -385,7 +402,7 @@ onBeforeUnmount(() => {
             remote
             reserve-keyword
             data-testid="administrator-create-roles"
-            placeholder="Search active roles"
+            :placeholder="tOperations('searchActiveRoles')"
             :remote-method="loadRoleOptions"
           >
             <ElOption
@@ -399,7 +416,9 @@ onBeforeUnmount(() => {
         <ElAlert
           v-else
           :closable="false"
-          title="Role selection is unavailable without role read access."
+          :title="
+            tOperations('roleSelectionIsUnavailableWithoutRoleReadAccess')
+          "
           type="info"
         />
       </ElForm>
@@ -407,7 +426,9 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton :disabled="saving" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="saving" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :disabled="!canManage"
           :loading="saving"
@@ -415,7 +436,7 @@ onBeforeUnmount(() => {
           type="primary"
           @click="submit"
         >
-          Create administrator
+          {{ tOperations('createAdministrator') }}
         </ElButton>
       </div>
     </template>

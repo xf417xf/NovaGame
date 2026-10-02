@@ -52,6 +52,11 @@ import {
   AdminAccessPermission,
   hasAdminAccessPermission,
 } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 import { useAuthStore } from '#/store';
 
 defineOptions({ name: 'AdministratorAccessSessions' });
@@ -65,21 +70,21 @@ const router = useRouter();
 const isMobile = useMediaQuery('(max-width: 640px)');
 
 const administratorOptions = ref<AdministratorDto[]>([]);
-const copyMessage = ref('');
+const copyMessage = useOperationsMessage();
 const copyMessageType = ref<'error' | 'success'>('success');
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const forbidden = ref(false);
 const loading = ref(false);
-const reconciliationError = ref('');
+const reconciliationError = useOperationsMessage();
 const reconciliationRequired = ref(false);
 const reconcilingPermissions = ref(false);
 const revokeDialogOpen = ref(false);
-const revokeError = ref('');
+const revokeError = useOperationsMessage();
 const revoking = ref(false);
 const selectedFamily = ref<AdminSessionFamilyDto | null>(null);
 const sessionFamilies = ref<AdminSessionFamilyDto[]>([]);
 const total = ref(0);
-const administratorFilterError = ref('');
+const administratorFilterError = useOperationsMessage();
 const query = reactive({
   administratorId: '',
   page: 1,
@@ -127,12 +132,12 @@ const selectedFamilyId = computed(() => selectedFamily.value?.familyId ?? '');
 
 function formatDate(value: null | string | undefined): string {
   if (!value) {
-    return 'Never';
+    return tOperations('never');
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return 'Unavailable';
+    return tOperations('unavailable');
   }
 
   return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
@@ -141,16 +146,16 @@ function formatDate(value: null | string | undefined): string {
 function sessionStateLabel(state: AdminSessionFamilyState | undefined): string {
   switch (state) {
     case 1: {
-      return 'Active';
+      return tOperations('active');
     }
     case 2: {
-      return 'Expired';
+      return tOperations('expired');
     }
     case 3: {
-      return 'Revoked';
+      return tOperations('revoked');
     }
     default: {
-      return 'Unknown';
+      return tOperations('unknown');
     }
   }
 }
@@ -176,20 +181,23 @@ function sessionStateType(
 
 function revocationReasonLabel(reason: number | undefined): string {
   const labels: Record<number, string> = {
-    1: 'Rotated',
-    2: 'Logged out',
-    3: 'Reuse detected',
-    4: 'Expired',
-    5: 'Administrator inactive',
-    6: 'Password reset',
-    7: 'Revoked by administrator',
+    1: tOperations('rotated'),
+    2: tOperations('loggedOut'),
+    3: tOperations('reuseDetected'),
+    4: tOperations('expired'),
+    5: tOperations('administratorInactive'),
+    6: tOperations('passwordReset'),
+    7: tOperations('revokedByAdministrator'),
   };
 
-  return reason ? (labels[reason] ?? 'Unknown') : 'Not revoked';
+  return reason
+    ? (labels[reason] ?? tOperations('unknown'))
+    : tOperations('notRevoked');
 }
 
 function administratorLabel(administrator: AdministratorDto): string {
-  const userName = administrator.userName ?? administrator.id ?? 'Unknown';
+  const userName =
+    administrator.userName ?? administrator.id ?? tOperations('unknown');
   const displayName = administrator.displayName?.trim();
   return displayName ? `${userName} (${displayName})` : userName;
 }
@@ -284,7 +292,7 @@ async function refreshPermissionsAfterForbidden() {
       await loadSessionFamilies();
     } catch (error) {
       if (!isNovaGameRequestCancelled(error)) {
-        reconciliationError.value = toNovaGameApiError(error).message;
+        reconciliationError.value = () => operationsErrorMessage(error);
       }
     } finally {
       reconcilingPermissions.value = false;
@@ -312,7 +320,7 @@ function recordError(error: unknown, target: { value: string } = errorMessage) {
     void refreshPermissionsAfterForbidden();
     return;
   }
-  target.value = apiError.message;
+  target.value = operationsErrorMessage(apiError);
 }
 
 function normalizeAdministratorFilter(): null | string | undefined {
@@ -322,7 +330,8 @@ function normalizeAdministratorFilter(): null | string | undefined {
     return undefined;
   }
   if (!guidPattern.test(administratorId)) {
-    administratorFilterError.value = 'Administrator ID must be an exact GUID.';
+    administratorFilterError.value = () =>
+      tOperations('administratorIdMustBeAnExactGuid');
     return null;
   }
   administratorFilterError.value = '';
@@ -475,7 +484,7 @@ async function submitRevocation() {
       await loadSessionFamilies();
       return;
     }
-    revokeError.value = apiError.message;
+    revokeError.value = () => operationsErrorMessage(apiError);
   } finally {
     revoking.value = false;
   }
@@ -487,17 +496,17 @@ async function copyIdentifier(label: string, value: null | string | undefined) {
   }
 
   if (!navigator.clipboard?.writeText) {
-    copyMessage.value = `${label} could not be copied.`;
+    copyMessage.value = () => tOperations('copyFailed', { value0: label });
     copyMessageType.value = 'error';
     return;
   }
 
   try {
     await navigator.clipboard.writeText(value);
-    copyMessage.value = `${label} copied.`;
+    copyMessage.value = () => tOperations('copied', { value0: label });
     copyMessageType.value = 'success';
   } catch {
-    copyMessage.value = `${label} could not be copied.`;
+    copyMessage.value = () => tOperations('copyFailed', { value0: label });
     copyMessageType.value = 'error';
   }
 }
@@ -550,17 +559,20 @@ onBeforeUnmount(() => {
   <div class="session-workspace">
     <header class="workspace-header">
       <div>
-        <h1>Sessions</h1>
+        <h1>{{ tOperations('sessions') }}</h1>
         <p>
-          Inspect administrator refresh-session families and revoke active
-          access.
+          {{
+            tOperations(
+              'inspectAdministratorRefreshSessionFamiliesAndRevokeActiveAccess',
+            )
+          }}
         </p>
       </div>
-      <ElTooltip content="Refresh sessions" placement="bottom">
+      <ElTooltip :content="tOperations('refreshSessions')" placement="bottom">
         <ElButton
           :disabled="sessionWorkspaceForbidden"
           :loading="loading || reconcilingPermissions"
-          aria-label="Refresh sessions"
+          :aria-label="tOperations('refreshSessions')"
           circle
           data-testid="refresh-sessions"
           @click="loadSessionFamilies"
@@ -574,8 +586,10 @@ onBeforeUnmount(() => {
       <ElResult
         v-if="sessionWorkspaceForbidden"
         data-testid="sessions-forbidden"
-        sub-title="Your account does not have access to administrator sessions."
-        title="Forbidden"
+        :sub-title="
+          tOperations('yourAccountDoesNotHaveAccessToAdministratorSessions')
+        "
+        :title="tOperations('forbidden')"
       >
         <template #extra>
           <div class="forbidden-actions">
@@ -591,25 +605,28 @@ onBeforeUnmount(() => {
               data-testid="retry-session-permissions"
               @click="refreshPermissionsAfterForbidden"
             >
-              Retry
+              {{ tOperations('retry') }}
             </ElButton>
           </div>
         </template>
       </ElResult>
 
       <template v-else>
-        <section class="table-toolbar" aria-label="Session filters">
+        <section
+          class="table-toolbar"
+          :aria-label="tOperations('sessionFilters')"
+        >
           <div class="filter-row">
             <ElSelect
               v-if="canReadAdministrators"
               v-model="query.administratorId"
-              aria-label="Administrator"
+              :aria-label="tOperations('administrator')"
               clearable
               filterable
               remote
               reserve-keyword
               data-testid="session-administrator-filter"
-              placeholder="All administrators"
+              :placeholder="tOperations('allAdministrators')"
               :remote-method="loadAdministratorOptions"
               @change="applyFilters"
             >
@@ -629,27 +646,27 @@ onBeforeUnmount(() => {
                   : undefined
               "
               :aria-invalid="Boolean(administratorFilterError)"
-              aria-label="Administrator ID"
+              :aria-label="tOperations('administratorId')"
               clearable
               data-testid="session-administrator-id-filter"
-              placeholder="Exact administrator GUID"
+              :placeholder="tOperations('exactAdministratorGuid')"
               @clear="applyFilters"
               @keyup.enter="applyFilters"
             />
             <ElSelect
               v-model="query.state"
-              aria-label="Session state"
+              :aria-label="tOperations('sessionState')"
               clearable
               data-testid="session-state-filter"
-              placeholder="All session states"
+              :placeholder="tOperations('allSessionStates')"
               @change="applyFilters"
             >
-              <ElOption label="Active" :value="1" />
-              <ElOption label="Expired" :value="2" />
-              <ElOption label="Revoked" :value="3" />
+              <ElOption :label="tOperations('active')" :value="1" />
+              <ElOption :label="tOperations('expired')" :value="2" />
+              <ElOption :label="tOperations('revoked')" :value="3" />
             </ElSelect>
             <ElButton data-testid="search-sessions" @click="applyFilters">
-              Search
+              {{ tOperations('search') }}
             </ElButton>
           </div>
           <p
@@ -678,7 +695,9 @@ onBeforeUnmount(() => {
           type="error"
         >
           <template #default>
-            <ElButton size="small" @click="loadSessionFamilies">Retry</ElButton>
+            <ElButton size="small" @click="loadSessionFamilies">
+              {{ tOperations('retry') }}
+            </ElButton>
           </template>
         </ElAlert>
 
@@ -690,23 +709,35 @@ onBeforeUnmount(() => {
             row-key="familyId"
             stripe
           >
-            <ElTableColumn label="Administrator" min-width="220">
+            <ElTableColumn
+              :label="tOperations('administrator')"
+              min-width="220"
+            >
               <template #default="scope">
                 <div class="primary-cell">
                   <strong>{{
-                    scope.row.userName ?? 'Unknown administrator'
+                    scope.row.userName ?? tOperations('unknownAdministrator')
                   }}</strong>
-                  <span>{{ scope.row.displayName ?? 'No display name' }}</span>
+                  <span>{{
+                    scope.row.displayName ?? tOperations('noDisplayName')
+                  }}</span>
                   <div class="identifier-row">
                     <code>{{ scope.row.administratorId }}</code>
-                    <ElTooltip content="Copy administrator ID" placement="top">
+                    <ElTooltip
+                      :content="tOperations('copyAdministratorId')"
+                      placement="top"
+                    >
                       <ElButton
-                        :aria-label="`Copy administrator ID ${scope.row.administratorId}`"
+                        :aria-label="
+                          tOperations('copyAdministratorIdParameter', {
+                            value0: scope.row.administratorId,
+                          })
+                        "
                         circle
                         size="small"
                         @click="
                           copyIdentifier(
-                            'Administrator ID',
+                            tOperations('administratorId'),
                             scope.row.administratorId,
                           )
                         "
@@ -718,16 +749,28 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Family" min-width="220">
+            <ElTableColumn :label="tOperations('family')" min-width="220">
               <template #default="scope">
                 <div class="identifier-row">
                   <code>{{ scope.row.familyId }}</code>
-                  <ElTooltip content="Copy family ID" placement="top">
+                  <ElTooltip
+                    :content="tOperations('copyFamilyId')"
+                    placement="top"
+                  >
                     <ElButton
-                      :aria-label="`Copy family ID ${scope.row.familyId}`"
+                      :aria-label="
+                        tOperations('copyFamilyIdParameter', {
+                          value0: scope.row.familyId,
+                        })
+                      "
                       circle
                       size="small"
-                      @click="copyIdentifier('Family ID', scope.row.familyId)"
+                      @click="
+                        copyIdentifier(
+                          tOperations('familyId'),
+                          scope.row.familyId,
+                        )
+                      "
                     >
                       <Copy :size="14" />
                     </ElButton>
@@ -735,39 +778,45 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="State" width="112">
+            <ElTableColumn :label="tOperations('state')" width="112">
               <template #default="scope">
                 <ElTag :type="sessionStateType(scope.row.state)" size="small">
                   {{ sessionStateLabel(scope.row.state) }}
                 </ElTag>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="First created (UTC)" min-width="176">
+            <ElTableColumn
+              :label="tOperations('firstCreatedUtc')"
+              min-width="176"
+            >
               <template #default="scope">
                 {{ formatDate(scope.row.firstCreatedAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Last activity (UTC)" min-width="176">
+            <ElTableColumn
+              :label="tOperations('lastActivityUtc')"
+              min-width="176"
+            >
               <template #default="scope">
                 {{ formatDate(scope.row.lastActivityAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Expires (UTC)" min-width="176">
+            <ElTableColumn :label="tOperations('expiresUtc')" min-width="176">
               <template #default="scope">
                 {{ formatDate(scope.row.expiresAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Last IP" min-width="140">
+            <ElTableColumn :label="tOperations('lastIp')" min-width="140">
               <template #default="scope">
-                {{ scope.row.lastIpAddress ?? 'Unavailable' }}
+                {{ scope.row.lastIpAddress ?? tOperations('unavailable') }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Revoked (UTC)" min-width="176">
+            <ElTableColumn :label="tOperations('revokedUtc')" min-width="176">
               <template #default="scope">
                 {{ formatDate(scope.row.revokedAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Reason" min-width="156">
+            <ElTableColumn :label="tOperations('reason')" min-width="156">
               <template #default="scope">
                 {{ revocationReasonLabel(scope.row.revocationReason) }}
               </template>
@@ -775,7 +824,7 @@ onBeforeUnmount(() => {
             <ElTableColumn
               align="right"
               fixed="right"
-              label="Actions"
+              :label="tOperations('actions')"
               :width="isMobile ? 92 : 116"
             >
               <template #default="scope">
@@ -784,17 +833,21 @@ onBeforeUnmount(() => {
                   trigger="click"
                 >
                   <ElButton
-                    :aria-label="`Actions for session ${scope.row.familyId}`"
+                    :aria-label="
+                      tOperations('actionsForSessionParameter', {
+                        value0: scope.row.familyId,
+                      })
+                    "
                     circle
                     data-testid="session-mobile-actions"
-                    title="Session actions"
+                    :title="tOperations('sessionActions')"
                   >
                     <Ellipsis :size="17" />
                   </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem @click="openRevokeDialog(scope.row)">
-                        Revoke session
+                        {{ tOperations('revokeSession') }}
                       </ElDropdownItem>
                     </ElDropdownMenu>
                   </template>
@@ -806,15 +859,19 @@ onBeforeUnmount(() => {
                   type="danger"
                   @click="openRevokeDialog(scope.row)"
                 >
-                  Revoke
+                  {{ tOperations('revoke') }}
                 </ElButton>
-                <span v-else class="read-only-state">Read only</span>
+                <span v-else class="read-only-state">{{
+                  tOperations('readOnly')
+                }}</span>
               </template>
             </ElTableColumn>
           </ElTable>
           <ElEmpty
             v-if="!loading && sessionFamilies.length === 0 && !errorMessage"
-            description="No session families match the current filters."
+            :description="
+              tOperations('noSessionFamiliesMatchTheCurrentFilters')
+            "
           />
         </div>
 
@@ -840,14 +897,14 @@ onBeforeUnmount(() => {
       :model-value="revokeDialogOpen"
       :show-close="!revoking"
       destroy-on-close
-      title="Revoke session family"
+      :title="tOperations('revokeSessionFamily')"
       width="min(480px, calc(100vw - 32px))"
       @close="closeRevokeDialog"
     >
       <p>
-        Revoke the session family for
+        {{ tOperations('revokeTheSessionFamilyFor') }}
         <strong class="dialog-subject" data-testid="session-revoke-subject">
-          {{ selectedFamily?.userName ?? 'this administrator' }}
+          {{ selectedFamily?.userName ?? tOperations('thisAdministrator') }}
         </strong>
         ?
       </p>
@@ -866,14 +923,14 @@ onBeforeUnmount(() => {
             size="small"
             @click="submitRevocation"
           >
-            Retry
+            {{ tOperations('retry') }}
           </ElButton>
         </template>
       </ElAlert>
       <template #footer>
         <div class="dialog-footer">
           <ElButton :disabled="revoking" @click="closeRevokeDialog">
-            Cancel
+            {{ tOperations('cancel') }}
           </ElButton>
           <ElButton
             :disabled="!canRevokeSessionWorkspace || !selectedFamilyId"
@@ -882,7 +939,7 @@ onBeforeUnmount(() => {
             type="danger"
             @click="submitRevocation"
           >
-            Revoke session
+            {{ tOperations('revokeSession') }}
           </ElButton>
         </div>
       </template>

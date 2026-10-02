@@ -34,25 +34,25 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         component: () => import('#/views/admin-access/administrators.vue'),
-        meta: { title: 'Administrators' },
+        meta: { title: 'operations.administrators' },
         name: 'AdminAccessAdministrators',
         path: '/admin-access/administrators',
       },
       {
         component: () => import('#/views/admin-access/roles.vue'),
-        meta: { title: 'Roles and permissions' },
+        meta: { title: 'operations.rolesAndPermissions' },
         name: 'AdminAccessRoles',
         path: '/admin-access/roles',
       },
       {
         component: () => import('#/views/admin-access/sessions.vue'),
-        meta: { title: 'Sessions' },
+        meta: { title: 'operations.sessions' },
         name: 'AdminAccessSessions',
         path: '/admin-access/sessions',
       },
       {
         component: () => import('#/views/admin-access/audit.vue'),
-        meta: { title: 'Audit history' },
+        meta: { title: 'operations.auditHistory' },
         name: 'AdminAccessAudit',
         path: '/admin-access/audit',
       },
@@ -60,7 +60,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       icon: 'lucide:shield-check',
       order: -2,
-      title: 'Administrator Access',
+      title: 'operations.administratorAccess',
     },
     name: administratorAccessRouteName,
     path: '/admin-access',

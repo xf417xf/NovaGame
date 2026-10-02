@@ -1,7 +1,6 @@
 import type { RouteRecordRaw } from 'vue-router';
 
 import { GameConfigPermission } from '#/features/game-config/permissions';
-import { $t } from '#/locales';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -11,7 +10,7 @@ const routes: RouteRecordRaw[] = [
       authority: [GameConfigPermission.Access],
       icon: 'lucide:sliders-horizontal',
       order: -1,
-      title: $t('page.gameConfig.title'),
+      title: 'page.gameConfig.title',
     },
     name: 'GameConfig',
     path: '/game-config',

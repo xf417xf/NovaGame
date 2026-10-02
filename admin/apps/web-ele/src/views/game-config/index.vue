@@ -48,6 +48,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { GameConfigPermission } from '#/features/game-config/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import DraftEditorDrawer from './components/draft-editor-drawer.vue';
 import ReviewPublishDrawer from './components/review-publish-drawer.vue';
@@ -60,11 +65,11 @@ const isMobile = useMediaQuery('(max-width: 640px)');
 const activeTab = ref('drafts');
 const configurationSet = ref('default');
 const environmentName = ref('development');
-const scopeError = ref('');
+const scopeError = useOperationsMessage();
 const forbidden = ref(false);
 
 const draftLoading = ref(false);
-const draftError = ref('');
+const draftError = useOperationsMessage();
 const drafts = ref<GameConfigDraftSummary[]>([]);
 const draftTotal = ref(0);
 const draftQuery = reactive({
@@ -75,13 +80,13 @@ const draftQuery = reactive({
 });
 
 const versionLoading = ref(false);
-const versionError = ref('');
+const versionError = useOperationsMessage();
 const versions = ref<GameConfigVersionSummary[]>([]);
 const versionTotal = ref(0);
 const versionQuery = reactive({ page: 1, pageSize: 20, schemaVersion: '' });
 
 const environmentLoading = ref(false);
-const environmentError = ref('');
+const environmentError = useOperationsMessage();
 const environment = ref<GameConfigEnvironment | null>(null);
 
 const draftDrawerOpen = ref(false);
@@ -93,11 +98,11 @@ const selectedVersionId = ref<null | string>(null);
 
 const activationDialogOpen = ref(false);
 const activationLoading = ref(false);
-const activationConflict = ref('');
+const activationConflict = useOperationsMessage();
 const activationForm = reactive({ reason: '', versionId: '' });
 const rollbackDialogOpen = ref(false);
 const rollbackLoading = ref(false);
-const rollbackConflict = ref('');
+const rollbackConflict = useOperationsMessage();
 const rollbackForm = reactive({ reason: '', targetVersionId: '' });
 
 const lastCommand = ref<null | {
@@ -119,12 +124,15 @@ const paginationLayout = computed(() =>
 );
 const paginationPagerCount = computed(() => (isMobile.value ? 5 : 7));
 
-const draftStateOptions = [
-  { label: 'Editing', value: GameConfigDraftState.Editing },
-  { label: 'Validation failed', value: GameConfigDraftState.ValidationFailed },
-  { label: 'Validated', value: GameConfigDraftState.Validated },
-  { label: 'Published', value: GameConfigDraftState.Published },
-];
+const draftStateOptions = computed(() => [
+  { label: tOperations('editing'), value: GameConfigDraftState.Editing },
+  {
+    label: tOperations('validationFailed'),
+    value: GameConfigDraftState.ValidationFailed,
+  },
+  { label: tOperations('validated'), value: GameConfigDraftState.Validated },
+  { label: tOperations('published'), value: GameConfigDraftState.Published },
+]);
 
 function shortId(value: null | string) {
   return value ? value.slice(0, 8) : '—';
@@ -136,8 +144,8 @@ function formatDate(value: string) {
 
 function stateLabel(state: DraftState) {
   return (
-    draftStateOptions.find((option) => option.value === state)?.label ??
-    'Unknown'
+    draftStateOptions.value.find((option) => option.value === state)?.label ??
+    tOperations('unknown')
   );
 }
 
@@ -161,11 +169,11 @@ function stateTagType(state: DraftState) {
 function validateScope() {
   const scopePattern = /^[a-z][a-z0-9-]{0,63}$/;
   if (!scopePattern.test(configurationSet.value)) {
-    scopeError.value = 'Configuration set is not valid.';
+    scopeError.value = () => tOperations('configurationSetIsNotValid');
     return false;
   }
   if (!scopePattern.test(environmentName.value)) {
-    scopeError.value = 'Environment is not valid.';
+    scopeError.value = () => tOperations('environmentIsNotValid');
     return false;
   }
   scopeError.value = '';
@@ -178,7 +186,7 @@ function recordError(error: unknown, target: { value: string }) {
     forbidden.value = true;
     return;
   }
-  target.value = apiError.message;
+  target.value = operationsErrorMessage(apiError);
 }
 
 async function loadDrafts() {
@@ -271,7 +279,7 @@ async function openReview(draft: GameConfigDraft | GameConfigDraftSummary) {
       'content' in draft ? draft : await getGameConfigDraft(draft.id);
     reviewDrawerOpen.value = true;
   } catch (error) {
-    ElMessage.error(toNovaGameApiError(error).message);
+    ElMessage.error(operationsErrorMessage(error));
   }
 }
 
@@ -301,16 +309,19 @@ async function handleActivation() {
     environment.value = result.data;
     lastCommand.value = {
       correlationId: result.correlationId,
-      message: `Version ${shortId(result.data.activeVersionId)} activated in ${result.data.environment}.`,
+      message: tOperations('versionParameterActivatedInParameter', {
+        value0: shortId(result.data.activeVersionId),
+        value1: result.data.environment,
+      }),
     };
     activationDialogOpen.value = false;
-    ElMessage.success('Version activated.');
+    ElMessage.success(tOperations('versionActivated'));
   } catch (error) {
     const apiError = toNovaGameApiError(error);
     if (apiError.status === 409) {
-      activationConflict.value = apiError.message;
+      activationConflict.value = () => operationsErrorMessage(apiError);
     } else {
-      ElMessage.error(apiError.message);
+      ElMessage.error(operationsErrorMessage(apiError));
     }
   } finally {
     activationLoading.value = false;
@@ -328,7 +339,7 @@ function openRollback() {
 async function handleRollback() {
   if (!environment.value || !rollbackForm.targetVersionId) return;
   if (!rollbackForm.reason.trim()) {
-    ElMessage.warning('Rollback reason is required.');
+    ElMessage.warning(tOperations('rollbackReasonIsRequired'));
     return;
   }
 
@@ -344,16 +355,19 @@ async function handleRollback() {
     environment.value = result.data;
     lastCommand.value = {
       correlationId: result.correlationId,
-      message: `Environment ${result.data.environment} rolled back to ${shortId(result.data.activeVersionId)}.`,
+      message: tOperations('environmentParameterRolledBackToParameter', {
+        value0: result.data.environment,
+        value1: shortId(result.data.activeVersionId),
+      }),
     };
     rollbackDialogOpen.value = false;
-    ElMessage.success('Environment rolled back.');
+    ElMessage.success(tOperations('environmentRolledBack'));
   } catch (error) {
     const apiError = toNovaGameApiError(error);
     if (apiError.status === 409) {
-      rollbackConflict.value = apiError.message;
+      rollbackConflict.value = () => operationsErrorMessage(apiError);
     } else {
-      ElMessage.error(apiError.message);
+      ElMessage.error(operationsErrorMessage(apiError));
     }
   } finally {
     rollbackLoading.value = false;
@@ -386,37 +400,46 @@ onMounted(() => {
   <div class="workspace-page">
     <header class="workspace-header">
       <div class="title-block">
-        <h1>Game configuration</h1>
+        <h1>{{ tOperations('gameConfiguration') }}</h1>
         <div class="scope-summary">
           <span>{{ configurationSet }}</span>
           <span class="scope-divider">/</span>
           <span>{{ environmentName }}</span>
-          <ElTag v-if="environment" size="small" type="success">Active</ElTag>
-          <ElTag v-else size="small" type="info">Not activated</ElTag>
+          <ElTag v-if="environment" size="small" type="success">
+            {{ tOperations('active') }}
+          </ElTag>
+          <ElTag v-else size="small" type="info">
+            {{ tOperations('notActivated') }}
+          </ElTag>
         </div>
       </div>
 
       <div class="scope-controls">
         <ElInput
           v-model="configurationSet"
-          aria-label="Configuration set"
+          :aria-label="tOperations('configurationSet')"
           data-testid="configuration-set"
           maxlength="64"
-          placeholder="Configuration set"
+          :placeholder="tOperations('configurationSet')"
           @keyup.enter="applyScope"
         />
         <ElInput
           v-model="environmentName"
-          aria-label="Environment"
+          :aria-label="tOperations('environment')"
           data-testid="environment-name"
           maxlength="64"
-          placeholder="Environment"
+          :placeholder="tOperations('environment')"
           @keyup.enter="applyScope"
         />
-        <ElButton data-testid="apply-scope" @click="applyScope">Apply</ElButton>
-        <ElTooltip content="Refresh workspace" placement="bottom">
+        <ElButton data-testid="apply-scope" @click="applyScope">
+          {{ tOperations('apply') }}
+        </ElButton>
+        <ElTooltip
+          :content="tOperations('refreshWorkspace')"
+          placement="bottom"
+        >
           <ElButton
-            aria-label="Refresh workspace"
+            :aria-label="tOperations('refreshWorkspace')"
             circle
             data-testid="refresh-workspace"
             @click="refreshWorkspace"
@@ -445,29 +468,32 @@ onMounted(() => {
         @close="lastCommand = null"
       >
         <template #default>
-          Audit reference: <code>{{ lastCommand.correlationId }}</code>
+          {{ tOperations('auditReferencePrefix') }}
+          <code>{{ lastCommand.correlationId }}</code>
         </template>
       </ElAlert>
 
       <ElResult
         v-if="forbidden"
-        sub-title="Your account does not have access to this workspace."
-        title="Forbidden"
+        :sub-title="tOperations('yourAccountDoesNotHaveAccessToThisWorkspace')"
+        :title="tOperations('forbidden')"
       >
         <template #extra>
-          <ElButton @click="refreshWorkspace">Retry</ElButton>
+          <ElButton @click="refreshWorkspace">
+            {{ tOperations('retry') }}
+          </ElButton>
         </template>
       </ElResult>
 
       <ElTabs v-else v-model="activeTab" class="workspace-tabs">
-        <ElTabPane label="Drafts" name="drafts">
+        <ElTabPane :label="tOperations('drafts')" name="drafts">
           <div class="table-toolbar">
             <div class="filter-row">
               <ElInput
                 v-model="draftQuery.search"
                 clearable
                 data-testid="draft-search"
-                placeholder="Search drafts"
+                :placeholder="tOperations('searchDrafts')"
                 @clear="loadDrafts"
                 @keyup.enter="loadDrafts"
               />
@@ -475,7 +501,7 @@ onMounted(() => {
                 v-model="draftQuery.state"
                 clearable
                 data-testid="draft-state-filter"
-                placeholder="All states"
+                :placeholder="tOperations('allStates')"
                 @change="
                   draftQuery.page = 1;
                   loadDrafts();
@@ -494,7 +520,7 @@ onMounted(() => {
                   loadDrafts();
                 "
               >
-                Search
+                {{ tOperations('search') }}
               </ElButton>
             </div>
             <ElButton
@@ -504,7 +530,7 @@ onMounted(() => {
               @click="openCreateDraft"
             >
               <Plus :size="16" />
-              New draft
+              {{ tOperations('newDraft') }}
             </ElButton>
           </div>
 
@@ -516,7 +542,9 @@ onMounted(() => {
             type="error"
           >
             <template #default>
-              <ElButton size="small" @click="loadDrafts">Retry</ElButton>
+              <ElButton size="small" @click="loadDrafts">
+                {{ tOperations('retry') }}
+              </ElButton>
             </template>
           </ElAlert>
 
@@ -527,7 +555,7 @@ onMounted(() => {
             row-key="id"
             stripe
           >
-            <ElTableColumn label="Name" min-width="220">
+            <ElTableColumn :label="tOperations('name')" min-width="220">
               <template #default="scope">
                 <div class="primary-cell">
                   <strong>{{ scope.row.name }}</strong>
@@ -535,16 +563,24 @@ onMounted(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Schema" prop="schemaVersion" width="120" />
-            <ElTableColumn label="State" width="150">
+            <ElTableColumn
+              :label="tOperations('schema')"
+              prop="schemaVersion"
+              width="120"
+            />
+            <ElTableColumn :label="tOperations('state')" width="150">
               <template #default="scope">
                 <ElTag :type="stateTagType(scope.row.state)" size="small">
                   {{ stateLabel(scope.row.state) }}
                 </ElTag>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Revision" prop="revision" width="100" />
-            <ElTableColumn label="Updated" min-width="190">
+            <ElTableColumn
+              :label="tOperations('revision')"
+              prop="revision"
+              width="100"
+            />
+            <ElTableColumn :label="tOperations('updated')" min-width="190">
               <template #default="scope">
                 {{ formatDate(scope.row.updatedAtUtc) }}
               </template>
@@ -552,14 +588,19 @@ onMounted(() => {
             <ElTableColumn
               align="right"
               fixed="right"
-              label="Actions"
+              :label="tOperations('actions')"
               width="132"
             >
               <template #default="scope">
                 <div class="icon-actions">
-                  <ElTooltip content="Open draft" placement="top">
+                  <ElTooltip
+                    :content="tOperations('openDraft')"
+                    placement="top"
+                  >
                     <ElButton
-                      :aria-label="`Open ${scope.row.name}`"
+                      :aria-label="
+                        tOperations('openParameter', { value0: scope.row.name })
+                      "
                       circle
                       size="small"
                       @click="openDraft(scope.row.id)"
@@ -569,11 +610,15 @@ onMounted(() => {
                   </ElTooltip>
                   <ElTooltip
                     v-if="scope.row.state === GameConfigDraftState.Validated"
-                    content="Review"
+                    :content="tOperations('review')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Review ${scope.row.name}`"
+                      :aria-label="
+                        tOperations('reviewParameter', {
+                          value0: scope.row.name,
+                        })
+                      "
                       circle
                       data-testid="review-from-table"
                       size="small"
@@ -586,7 +631,7 @@ onMounted(() => {
               </template>
             </ElTableColumn>
             <template #empty>
-              <ElEmpty description="No drafts" />
+              <ElEmpty :description="tOperations('noDrafts')" />
             </template>
           </ElTable>
 
@@ -606,14 +651,14 @@ onMounted(() => {
           />
         </ElTabPane>
 
-        <ElTabPane label="Published versions" name="versions">
+        <ElTabPane :label="tOperations('publishedVersions')" name="versions">
           <div class="table-toolbar">
             <div class="filter-row compact-filter">
               <ElInput
                 v-model="versionQuery.schemaVersion"
                 clearable
                 data-testid="version-schema-filter"
-                placeholder="Schema version"
+                :placeholder="tOperations('schemaVersion')"
                 @clear="loadVersions"
                 @keyup.enter="loadVersions"
               />
@@ -623,7 +668,7 @@ onMounted(() => {
                   loadVersions();
                 "
               >
-                Filter
+                {{ tOperations('filter') }}
               </ElButton>
             </div>
           </div>
@@ -643,23 +688,27 @@ onMounted(() => {
             row-key="id"
             stripe
           >
-            <ElTableColumn label="Version" min-width="160">
+            <ElTableColumn :label="tOperations('version')" min-width="160">
               <template #default="scope">
                 <code>{{ shortId(scope.row.id) }}</code>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Schema" prop="schemaVersion" width="120" />
             <ElTableColumn
-              label="Release notes"
+              :label="tOperations('schema')"
+              prop="schemaVersion"
+              width="120"
+            />
+            <ElTableColumn
+              :label="tOperations('releaseNotes')"
               min-width="260"
               prop="releaseNotes"
             />
-            <ElTableColumn label="Snapshot" min-width="160">
+            <ElTableColumn :label="tOperations('snapshot')" min-width="160">
               <template #default="scope">
                 <code>{{ scope.row.snapshotHash.slice(0, 12) }}</code>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Published" min-width="190">
+            <ElTableColumn :label="tOperations('published')" min-width="190">
               <template #default="scope">
                 {{ formatDate(scope.row.publishedAtUtc) }}
               </template>
@@ -667,14 +716,21 @@ onMounted(() => {
             <ElTableColumn
               align="right"
               fixed="right"
-              label="Actions"
+              :label="tOperations('actions')"
               width="132"
             >
               <template #default="scope">
                 <div class="icon-actions">
-                  <ElTooltip content="Inspect version" placement="top">
+                  <ElTooltip
+                    :content="tOperations('inspectVersion')"
+                    placement="top"
+                  >
                     <ElButton
-                      :aria-label="`Inspect version ${shortId(scope.row.id)}`"
+                      :aria-label="
+                        tOperations('inspectVersionParameter', {
+                          value0: shortId(scope.row.id),
+                        })
+                      "
                       circle
                       size="small"
                       @click="openVersion(scope.row.id)"
@@ -684,11 +740,15 @@ onMounted(() => {
                   </ElTooltip>
                   <ElTooltip
                     v-if="canActivate"
-                    content="Activate"
+                    :content="tOperations('activate')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Activate version ${shortId(scope.row.id)}`"
+                      :aria-label="
+                        tOperations('activateVersionParameter', {
+                          value0: shortId(scope.row.id),
+                        })
+                      "
                       circle
                       data-testid="activate-version"
                       size="small"
@@ -701,7 +761,7 @@ onMounted(() => {
               </template>
             </ElTableColumn>
             <template #empty>
-              <ElEmpty description="No published versions" />
+              <ElEmpty :description="tOperations('noPublishedVersions')" />
             </template>
           </ElTable>
 
@@ -721,7 +781,7 @@ onMounted(() => {
           />
         </ElTabPane>
 
-        <ElTabPane label="Environment" name="environment">
+        <ElTabPane :label="tOperations('environment')" name="environment">
           <section v-loading="environmentLoading" class="environment-section">
             <ElAlert
               v-if="environmentError"
@@ -735,12 +795,14 @@ onMounted(() => {
               <div class="environment-heading">
                 <div>
                   <h2>{{ environment.environment }}</h2>
-                  <p>Revision {{ environment.revision }}</p>
+                  <p>
+                    {{ tOperations('revision') }} {{ environment.revision }}
+                  </p>
                 </div>
                 <div class="environment-actions">
                   <ElButton @click="openVersion(environment.activeVersionId)">
                     <Eye :size="16" />
-                    Inspect active
+                    {{ tOperations('inspectActive') }}
                   </ElButton>
                   <ElButton
                     v-if="canActivate && environment.previousVersionId"
@@ -749,28 +811,28 @@ onMounted(() => {
                     @click="openRollback"
                   >
                     <Undo2 :size="16" />
-                    Roll back
+                    {{ tOperations('rollBack') }}
                   </ElButton>
                 </div>
               </div>
 
               <ElDescriptions :column="2" border>
-                <ElDescriptionsItem label="Active version">
+                <ElDescriptionsItem :label="tOperations('activeVersion')">
                   <code>{{ environment.activeVersionId }}</code>
                 </ElDescriptionsItem>
-                <ElDescriptionsItem label="Previous version">
+                <ElDescriptionsItem :label="tOperations('previousVersion')">
                   <code>{{ environment.previousVersionId ?? '—' }}</code>
                 </ElDescriptionsItem>
-                <ElDescriptionsItem label="Schema">
+                <ElDescriptionsItem :label="tOperations('schema')">
                   {{ environment.schemaVersion }}
                 </ElDescriptionsItem>
-                <ElDescriptionsItem label="Content hash">
+                <ElDescriptionsItem :label="tOperations('contentHash')">
                   <code>{{ environment.contentHash }}</code>
                 </ElDescriptionsItem>
-                <ElDescriptionsItem label="Activated at">
+                <ElDescriptionsItem :label="tOperations('activatedAt')">
                   {{ formatDate(environment.activatedAtUtc) }}
                 </ElDescriptionsItem>
-                <ElDescriptionsItem label="Reason">
+                <ElDescriptionsItem :label="tOperations('reason')">
                   {{ environment.reason ?? '—' }}
                 </ElDescriptionsItem>
               </ElDescriptions>
@@ -778,10 +840,10 @@ onMounted(() => {
 
             <ElEmpty
               v-else-if="!environmentError"
-              description="No active version for this environment"
+              :description="tOperations('noActiveVersionForThisEnvironment')"
             >
               <ElButton @click="activeTab = 'versions'">
-                View published versions
+                {{ tOperations('viewPublishedVersions') }}
               </ElButton>
             </ElEmpty>
           </section>
@@ -818,7 +880,7 @@ onMounted(() => {
     <ElDialog
       v-model="activationDialogOpen"
       destroy-on-close
-      title="Activate version"
+      :title="tOperations('activateVersion')"
       width="min(520px, 94vw)"
     >
       <ElAlert
@@ -830,12 +892,12 @@ onMounted(() => {
       >
         <template #default>
           <ElButton size="small" @click="loadEnvironment">
-            Reload environment
+            {{ tOperations('reloadEnvironment') }}
           </ElButton>
         </template>
       </ElAlert>
       <ElForm label-position="top">
-        <ElFormItem label="Version">
+        <ElFormItem :label="tOperations('version')">
           <ElSelect
             v-model="activationForm.versionId"
             data-testid="activation-version"
@@ -848,7 +910,7 @@ onMounted(() => {
             />
           </ElSelect>
         </ElFormItem>
-        <ElFormItem label="Reason">
+        <ElFormItem :label="tOperations('reason')">
           <ElInput
             v-model="activationForm.reason"
             data-testid="activation-reason"
@@ -858,14 +920,16 @@ onMounted(() => {
         </ElFormItem>
       </ElForm>
       <template #footer>
-        <ElButton @click="activationDialogOpen = false">Cancel</ElButton>
+        <ElButton @click="activationDialogOpen = false">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :loading="activationLoading"
           data-testid="confirm-activation"
           type="primary"
           @click="handleActivation"
         >
-          Activate
+          {{ tOperations('activate') }}
         </ElButton>
       </template>
     </ElDialog>
@@ -873,7 +937,7 @@ onMounted(() => {
     <ElDialog
       v-model="rollbackDialogOpen"
       destroy-on-close
-      title="Roll back environment"
+      :title="tOperations('rollBackEnvironment')"
       width="min(520px, 94vw)"
     >
       <ElAlert
@@ -884,7 +948,7 @@ onMounted(() => {
         type="warning"
       />
       <ElForm label-position="top">
-        <ElFormItem label="Target version">
+        <ElFormItem :label="tOperations('targetVersion')">
           <ElSelect
             v-model="rollbackForm.targetVersionId"
             data-testid="rollback-version"
@@ -897,7 +961,7 @@ onMounted(() => {
             />
           </ElSelect>
         </ElFormItem>
-        <ElFormItem label="Reason">
+        <ElFormItem :label="tOperations('reason')">
           <ElInput
             v-model="rollbackForm.reason"
             data-testid="rollback-reason"
@@ -907,14 +971,16 @@ onMounted(() => {
         </ElFormItem>
       </ElForm>
       <template #footer>
-        <ElButton @click="rollbackDialogOpen = false">Cancel</ElButton>
+        <ElButton @click="rollbackDialogOpen = false">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :loading="rollbackLoading"
           data-testid="confirm-rollback"
           type="warning"
           @click="handleRollback"
         >
-          Roll back
+          {{ tOperations('rollBack') }}
         </ElButton>
       </template>
     </ElDialog>

@@ -1,7 +1,7 @@
 import { initPreferences } from '@vben/preferences';
 import { unmountGlobalLoading } from '@vben/utils';
 
-import { overridesPreferences } from './preferences';
+import { overridesPreferences, resolveInitialAdminLocale } from './preferences';
 
 /**
  * 应用初始化完成之后再进行页面加载渲染
@@ -16,7 +16,13 @@ async function initApplication() {
   // app偏好设置初始化
   await initPreferences({
     namespace,
-    overrides: overridesPreferences,
+    overrides: {
+      ...overridesPreferences,
+      app: {
+        ...overridesPreferences.app,
+        locale: await resolveInitialAdminLocale(namespace),
+      },
+    },
   });
 
   // 启动应用并挂载

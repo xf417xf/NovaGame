@@ -20,6 +20,7 @@ import {
   waitForRefreshAccessToken,
 } from '#/api';
 import { $t } from '#/locales';
+import { operationsErrorMessage } from '#/locales/operations';
 import {
   refreshAccessibleRoutes,
   resetAccessibleRoutes,
@@ -156,7 +157,7 @@ export const useAuthStore = defineStore('auth', () => {
           if (apiError.status === 401 || apiError.status === 403) {
             await expireSession();
           }
-          ElMessage.error(apiError.message);
+          ElMessage.error(operationsErrorMessage(apiError));
         }
         return { userInfo: null };
       }
@@ -184,7 +185,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (!isCurrentAuthenticationGeneration(loginGeneration)) {
         return { userInfo: null };
       }
-      ElMessage.error(toNovaGameApiError(error).message);
+      ElMessage.error(operationsErrorMessage(error));
     } finally {
       if (isCurrentAuthenticationGeneration(loginGeneration)) {
         loginLoading.value = false;

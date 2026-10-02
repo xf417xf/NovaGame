@@ -15,12 +15,13 @@ import {
   ElMessage,
 } from 'element-plus';
 
-import {
-  downloadGameConfigSnapshot,
-  getGameConfigVersion,
-  toNovaGameApiError,
-} from '#/api';
+import { downloadGameConfigSnapshot, getGameConfigVersion } from '#/api';
 import { formatJson } from '#/features/game-config/json';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 interface Props {
   canActivate: boolean;
@@ -37,7 +38,7 @@ const emit = defineEmits<{
 const loading = ref(false);
 const isMobile = useMediaQuery('(max-width: 760px)');
 const downloading = ref(false);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const version = ref<GameConfigVersion | null>(null);
 let loadSequence = 0;
 
@@ -71,7 +72,7 @@ async function loadVersion() {
     }
   } catch (error) {
     if (sequence === loadSequence) {
-      errorMessage.value = toNovaGameApiError(error).message;
+      errorMessage.value = () => operationsErrorMessage(error);
     }
   } finally {
     if (sequence === loadSequence) {
@@ -109,9 +110,9 @@ async function handleDownload() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-    ElMessage.success('Snapshot download started.');
+    ElMessage.success(tOperations('snapshotDownloadStarted'));
   } catch (error) {
-    ElMessage.error(toNovaGameApiError(error).message);
+    ElMessage.error(operationsErrorMessage(error));
   } finally {
     downloading.value = false;
   }
@@ -135,7 +136,7 @@ watch(
     :model-value="modelValue"
     destroy-on-close
     size="min(900px, 96vw)"
-    title="Published version"
+    :title="tOperations('publishedVersion')"
     @close="close"
   >
     <div
@@ -153,44 +154,48 @@ watch(
         <template #default>
           <ElButton size="small" @click="loadVersion">
             <RotateCw :size="15" />
-            Retry
+            {{ tOperations('retry') }}
           </ElButton>
         </template>
       </ElAlert>
 
       <template v-if="version">
         <ElDescriptions :column="isMobile ? 1 : 2" border size="small">
-          <ElDescriptionsItem label="Version ID">
+          <ElDescriptionsItem :label="tOperations('versionId')">
             <code data-testid="version-id">{{ version.id }}</code>
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="Schema">
+          <ElDescriptionsItem :label="tOperations('schema')">
             {{ version.schemaVersion }}
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="Source draft">
+          <ElDescriptionsItem :label="tOperations('sourceDraft')">
             <code>{{ version.sourceDraftId }}</code>
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="Source revision">
+          <ElDescriptionsItem :label="tOperations('sourceRevision')">
             {{ version.sourceDraftRevision }}
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="Content hash">
+          <ElDescriptionsItem :label="tOperations('contentHash')">
             <code>{{ version.contentHash }}</code>
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="Snapshot hash">
+          <ElDescriptionsItem :label="tOperations('snapshotHash')">
             <code>{{ version.snapshotHash }}</code>
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="Published at">
+          <ElDescriptionsItem :label="tOperations('publishedAt')">
             {{ new Date(version.publishedAtUtc).toLocaleString() }}
           </ElDescriptionsItem>
-          <ElDescriptionsItem label="Snapshot size">
-            {{ version.snapshotLength.toLocaleString() }} bytes
+          <ElDescriptionsItem :label="tOperations('snapshotSize')">
+            {{ version.snapshotLength.toLocaleString() }}
+            {{ tOperations('bytes') }}
           </ElDescriptionsItem>
-          <ElDescriptionsItem :span="isMobile ? 1 : 2" label="Release notes">
+          <ElDescriptionsItem
+            :span="isMobile ? 1 : 2"
+            :label="tOperations('releaseNotes')"
+          >
             {{ version.releaseNotes }}
           </ElDescriptionsItem>
         </ElDescriptions>
 
         <section>
-          <h3>Canonical content</h3>
+          <h3>{{ tOperations('canonicalContent') }}</h3>
           <pre>{{ displayContent(version.content) }}</pre>
         </section>
       </template>
@@ -198,7 +203,7 @@ watch(
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton @click="close">Close</ElButton>
+        <ElButton @click="close">{{ tOperations('close') }}</ElButton>
         <ElButton
           v-if="version"
           :loading="downloading"
@@ -206,7 +211,7 @@ watch(
           @click="handleDownload"
         >
           <Download :size="16" />
-          Download snapshot
+          {{ tOperations('downloadSnapshot') }}
         </ElButton>
         <ElButton
           v-if="version && version.id === versionId && canActivate && !loading"
@@ -214,7 +219,7 @@ watch(
           type="primary"
           @click="emit('activate', version)"
         >
-          Activate
+          {{ tOperations('activate') }}
         </ElButton>
       </div>
     </template>

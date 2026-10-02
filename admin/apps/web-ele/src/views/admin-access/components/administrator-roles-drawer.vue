@@ -27,6 +27,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import {
   fieldErrorsFrom,
@@ -54,8 +59,8 @@ const emit = defineEmits<{
 }>();
 
 const detail = ref<Awaited<ReturnType<typeof getAdministrator>> | null>(null);
-const conflictMessage = ref('');
-const errorMessage = ref('');
+const conflictMessage = useOperationsMessage();
+const errorMessage = useOperationsMessage();
 const fieldErrors = ref<Record<string, string>>({});
 const loadingDetail = ref(false);
 const loadingRoles = ref(false);
@@ -132,7 +137,7 @@ async function loadRoleOptions(search = '') {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === roleLoadSequence) {
       loadingRoles.value = false;
@@ -198,7 +203,7 @@ async function loadDetail(preserveSelection = false) {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === detailLoadSequence) {
       loadingDetail.value = false;
@@ -250,7 +255,7 @@ async function submit() {
       apiError.status === 404 &&
       apiError.code === AdminAccessErrorCode.RoleNotFound
     ) {
-      errorMessage.value = apiError.message;
+      errorMessage.value = () => operationsErrorMessage(apiError);
       void loadRoleOptions();
       return;
     }
@@ -260,10 +265,10 @@ async function submit() {
     }
     fieldErrors.value = fieldErrorsFrom(apiError);
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     saving.value = false;
   }
@@ -320,7 +325,7 @@ onBeforeUnmount(() => {
     :show-close="!saving"
     destroy-on-close
     size="min(620px, 100vw)"
-    title="Edit administrator roles"
+    :title="tOperations('editAdministratorRoles')"
     @close="close"
   >
     <div
@@ -342,7 +347,7 @@ onBeforeUnmount(() => {
             @click="loadDetail(true)"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -355,7 +360,9 @@ onBeforeUnmount(() => {
         type="error"
       >
         <template #default>
-          <ElButton size="small" @click="loadDetail(true)">Retry</ElButton>
+          <ElButton size="small" @click="loadDetail(true)">
+            {{ tOperations('retry') }}
+          </ElButton>
         </template>
       </ElAlert>
 
@@ -363,13 +370,16 @@ onBeforeUnmount(() => {
         v-if="inactiveAssignedRoles.length > 0"
         :closable="false"
         show-icon
-        title="Inactive assigned roles require review"
+        :title="tOperations('inactiveAssignedRolesRequireReview')"
         type="warning"
       >
         <template #default>
           <span>
-            Inactive roles cannot be selected again. Saving reviewed memberships
-            removes them.
+            {{
+              tOperations(
+                'inactiveRolesCannotBeSelectedAgainSavingReviewedMembershipsRemovesThem',
+              )
+            }}
           </span>
           <div class="inactive-role-list">
             <ElTag
@@ -378,17 +388,20 @@ onBeforeUnmount(() => {
               class="long-value-tag"
               type="warning"
             >
-              {{ role.name ?? role.id }} (inactive)
+              {{ role.name ?? role.id }} {{ tOperations('inactiveSuffix') }}
             </ElTag>
           </div>
         </template>
       </ElAlert>
 
       <ElForm v-if="detail && canReadRoles" label-position="top">
-        <ElFormItem label="User name">
+        <ElFormItem :label="tOperations('userName')">
           <span class="read-only-value">{{ detail.data.userName }}</span>
         </ElFormItem>
-        <ElFormItem :error="fieldErrors.roleIds" label="Active roles">
+        <ElFormItem
+          :error="fieldErrors.roleIds"
+          :label="tOperations('activeRoles')"
+        >
           <ElSelect
             v-model="form.roleIds"
             :disabled="saving || !canManage"
@@ -398,7 +411,7 @@ onBeforeUnmount(() => {
             remote
             reserve-keyword
             data-testid="administrator-role-ids"
-            placeholder="Search active roles"
+            :placeholder="tOperations('searchActiveRoles')"
             :remote-method="loadRoleOptions"
             @update:model-value="markLocalSelection"
           >
@@ -414,14 +427,16 @@ onBeforeUnmount(() => {
       <ElAlert
         v-else-if="modelValue"
         :closable="false"
-        title="Role selection is unavailable without role read access."
+        :title="tOperations('roleSelectionIsUnavailableWithoutRoleReadAccess')"
         type="info"
       />
     </div>
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton :disabled="saving" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="saving" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :disabled="!detail || !canManage || !canReadRoles"
           :loading="saving"
@@ -429,7 +444,7 @@ onBeforeUnmount(() => {
           type="primary"
           @click="submit"
         >
-          Save roles
+          {{ tOperations('saveRoles') }}
         </ElButton>
       </div>
     </template>

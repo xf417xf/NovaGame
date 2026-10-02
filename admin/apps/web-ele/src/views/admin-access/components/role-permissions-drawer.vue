@@ -21,6 +21,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import { fieldErrorsFrom } from './administrator-form-utils';
 import {
@@ -53,9 +58,9 @@ const emit = defineEmits<{
   updated: [role: AdminRoleDto];
 }>();
 
-const conflictMessage = ref('');
+const conflictMessage = useOperationsMessage();
 const detail = ref<Awaited<ReturnType<typeof getAdminRole>> | null>(null);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const fieldErrors = ref<Record<string, string>>({});
 const loading = ref(false);
 const catalogAvailable = ref(false);
@@ -154,7 +159,7 @@ async function loadDetail(preserveSelection = false) {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === loadSequence) {
       loading.value = false;
@@ -237,16 +242,18 @@ async function submit() {
     }
     fieldErrors.value = fieldErrorsFrom(apiError);
     if (apiError.code === unknownRolePermissionErrorCode) {
-      errorMessage.value =
-        'The registered permission catalog changed. Review the refreshed selection before retrying.';
+      errorMessage.value = () =>
+        tOperations(
+          'theRegisteredPermissionCatalogChangedReviewTheRefreshedSelectionBeforeRetrying',
+        );
       await reloadPermissionCatalog();
       return;
     }
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     saving.value = false;
   }
@@ -301,7 +308,7 @@ onBeforeUnmount(() => {
     :show-close="!saving"
     destroy-on-close
     size="min(680px, 100vw)"
-    title="Edit role permissions"
+    :title="tOperations('editRolePermissions')"
     @close="close()"
   >
     <div
@@ -323,7 +330,7 @@ onBeforeUnmount(() => {
             @click="loadDetail(true)"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -336,14 +343,16 @@ onBeforeUnmount(() => {
         type="error"
       >
         <template #default>
-          <ElButton size="small" @click="loadDetail(true)">Retry</ElButton>
+          <ElButton size="small" @click="loadDetail(true)">
+            {{ tOperations('retry') }}
+          </ElButton>
         </template>
       </ElAlert>
 
       <template v-if="detail?.data.isBuiltIn">
         <ElAlert
           :closable="false"
-          title="Built-in role permissions are read-only."
+          :title="tOperations('builtInRolePermissionsAreReadOnly')"
           type="info"
         />
         <div class="permission-tag-list">
@@ -362,7 +371,7 @@ onBeforeUnmount(() => {
       <ElForm v-else-if="detail && canReadRoles" label-position="top">
         <ElFormItem
           :error="fieldErrors.permissionNames"
-          label="Registered permissions"
+          :label="tOperations('registeredPermissions')"
         >
           <RolePermissionSelector
             ref="permissionSelector"
@@ -379,14 +388,18 @@ onBeforeUnmount(() => {
       <ElAlert
         v-else-if="modelValue"
         :closable="false"
-        title="Permission selection is unavailable without role read access."
+        :title="
+          tOperations('permissionSelectionIsUnavailableWithoutRoleReadAccess')
+        "
         type="info"
       />
     </div>
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton :disabled="saving" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="saving" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           v-if="!detail?.data.isBuiltIn"
           :disabled="
@@ -397,7 +410,7 @@ onBeforeUnmount(() => {
           type="primary"
           @click="submit"
         >
-          Save permissions
+          {{ tOperations('savePermissions') }}
         </ElButton>
       </div>
     </template>

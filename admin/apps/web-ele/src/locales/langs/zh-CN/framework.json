@@ -1,0 +1,139 @@
+{
+  "jsonSyntax": {
+    "InvalidSymbol": "包含无效符号",
+    "InvalidNumberFormat": "数字格式无效",
+    "PropertyNameExpected": "缺少属性名称",
+    "ValueExpected": "缺少值",
+    "ColonExpected": "缺少冒号",
+    "CommaExpected": "缺少逗号",
+    "CloseBraceExpected": "缺少右花括号",
+    "CloseBracketExpected": "缺少右方括号",
+    "EndOfFileExpected": "JSON 结束后存在多余内容",
+    "InvalidCommentToken": "不允许使用注释",
+    "UnexpectedEndOfComment": "注释未结束",
+    "UnexpectedEndOfString": "字符串未结束",
+    "UnexpectedEndOfNumber": "数字未结束",
+    "InvalidUnicode": "Unicode 转义无效",
+    "InvalidEscapeCharacter": "转义字符无效",
+    "InvalidCharacter": "包含无效字符"
+  },
+  "errors": {
+    "NovaGame_AdminAccess_InvalidCredentials": "用户名或密码不正确。",
+    "NovaGame_AdminAccess_AccountInactive": "此账号已停用。",
+    "NovaGame_AdminAccess_RefreshTokenRequired": "登录会话缺失，请重新登录。",
+    "NovaGame_AdminAccess_RefreshTokenInvalid": "登录会话无效，请重新登录。",
+    "NovaGame_AdminAccess_RefreshTokenExpired": "登录会话已过期，请重新登录。",
+    "NovaGame_AdminAccess_RefreshTokenReused": "登录会话已失效，请重新登录。",
+    "NovaGame_AdminAccess_Unauthorized": "请先登录。",
+    "NovaGame_AdminAccess_Forbidden": "你没有执行此操作的权限。",
+    "NovaGame_AdminAccess_LoginRateLimited": "登录尝试过于频繁，请稍后重试。",
+    "NovaGame_AdminAccess_InvalidRequest": "请求参数无效，请检查输入。",
+    "NovaGame_AdminAccess_AdministratorNotFound": "管理员不存在，请刷新列表。",
+    "NovaGame_AdminAccess_RoleNotFound": "角色不存在，请刷新列表。",
+    "NovaGame_AdminAccess_SessionFamilyNotFound": "会话不存在，请刷新列表。",
+    "NovaGame_AdminAccess_UserNameAlreadyExists": "用户名已存在。",
+    "NovaGame_AdminAccess_RoleNameAlreadyExists": "角色名称已存在。",
+    "NovaGame_AdminAccess_RevisionConflict": "数据已被其他操作更新，请重新加载后重试。",
+    "NovaGame_AdminAccess_IdempotencyConflict": "操作标识已被其他请求使用，请重新开始此操作。",
+    "NovaGame_AdminAccess_SelfDeactivationForbidden": "不能停用自己的账号。",
+    "NovaGame_AdminAccess_SelfRoleMutationForbidden": "不能修改自己的角色。",
+    "NovaGame_AdminAccess_SelfPasswordResetForbidden": "不能在此重置自己的密码。",
+    "NovaGame_AdminAccess_LastActiveBuiltInAdministratorRequired": "必须保留至少一个启用且具有内置管理员角色的账号。",
+    "NovaGame_AdminAccess_BuiltInRoleImmutable": "不能修改内置角色。",
+    "NovaGame_AdminAccess_RoleInactive": "此角色已停用。",
+    "NovaGame_AdminAccess_UnknownPermission": "存在未注册的权限，请重新加载权限目录。",
+    "NovaGame_AdminAccess_InvariantViolation": "操作未完成，请联系管理员并提供请求关联标识。",
+    "NovaGame_GameConfig_InvalidRequest": "请求参数无效，请检查输入。",
+    "NovaGame_GameConfig_Unauthorized": "请先登录。",
+    "NovaGame_GameConfig_Forbidden": "你没有执行此操作的权限。",
+    "NovaGame_GameConfig_DraftNotFound": "草稿不存在，请刷新列表。",
+    "NovaGame_GameConfig_PublishedVersionNotFound": "已发布版本不存在。",
+    "NovaGame_GameConfig_ActiveVersionNotFound": "环境尚未激活配置版本。",
+    "NovaGame_GameConfig_DraftRevisionConflict": "草稿已被更新，请重新加载后重试。",
+    "NovaGame_GameConfig_DraftNotValidated": "请先校验当前草稿版本。",
+    "NovaGame_GameConfig_DraftRevisionAlreadyPublished": "此草稿修订已发布。",
+    "NovaGame_GameConfig_ActivationConflict": "环境已被更新，请重新加载后重试。",
+    "NovaGame_GameConfig_ConfigurationSetMismatch": "配置集不匹配。",
+    "NovaGame_GameConfig_SchemaIncompatible": "配置架构版本不兼容。",
+    "NovaGame_GameConfig_InvalidRollbackTarget": "回滚目标无效。",
+    "NovaGame_GameConfig_SnapshotIntegrityInvalid": "配置快照完整性校验失败。",
+    "NovaGame_NetworkError": "无法连接服务，请检查连接后重试。",
+    "NovaGame_HttpError": "服务请求失败，请稍后重试。",
+    "NovaGame_GameConfig_Validation_InvalidJson": "JSON 格式无效。",
+    "NovaGame_GameConfig_Validation_ContentTooLarge": "配置内容过大。",
+    "NovaGame_GameConfig_Validation_UnsupportedSchemaVersion": "不支持此架构版本。",
+    "NovaGame_GameConfig_Validation_RootObjectRequired": "配置根节点必须是对象。",
+    "NovaGame_GameConfig_Validation_CollectionsRequired": "缺少 collections。",
+    "NovaGame_GameConfig_Validation_CollectionsMustBeObject": "collections 必须是对象。",
+    "NovaGame_GameConfig_Validation_UnexpectedProperty": "存在不允许的属性。",
+    "NovaGame_GameConfig_Validation_InvalidCollectionName": "集合名称无效。",
+    "NovaGame_GameConfig_Validation_CollectionMustBeArray": "集合必须是数组。",
+    "NovaGame_GameConfig_Validation_RecordMustBeObject": "记录必须是对象。",
+    "NovaGame_GameConfig_Validation_RecordIdRequired": "记录缺少 ID。",
+    "NovaGame_GameConfig_Validation_InvalidRecordId": "记录 ID 无效。",
+    "NovaGame_GameConfig_Validation_DuplicateRecordId": "记录 ID 重复。",
+    "NovaGame_GameConfig_Validation_DuplicateProperty": "属性重复。",
+    "NovaGame_GameConfig_Validation_InvalidReference": "引用无效。",
+    "NovaGame_GameConfig_Validation_ReferenceNotFound": "未找到引用目标。"
+  },
+  "permissions": {
+    "Operations_AdminAccess": {
+      "title": "管理员访问"
+    },
+    "Operations_AdminAccess_Access": {
+      "title": "访问运维管理",
+      "description": "允许管理员使用需要登录的运维 API。"
+    },
+    "Operations_AdminAccess_Administrators_Read": {
+      "title": "查看管理员",
+      "description": "允许列出和查看管理员账号。"
+    },
+    "Operations_AdminAccess_Administrators_Manage": {
+      "title": "管理管理员",
+      "description": "允许创建和管理管理员账号。"
+    },
+    "Operations_AdminAccess_Administrators_ResetPassword": {
+      "title": "重置管理员密码",
+      "description": "允许重置其他管理员的密码。"
+    },
+    "Operations_AdminAccess_Roles_Read": {
+      "title": "查看管理员角色",
+      "description": "允许列出和查看角色及注册权限。"
+    },
+    "Operations_AdminAccess_Roles_Manage": {
+      "title": "管理管理员角色",
+      "description": "允许创建和管理自定义管理员角色。"
+    },
+    "Operations_AdminAccess_Sessions_Read": {
+      "title": "查看管理员会话",
+      "description": "允许列出脱敏后的管理员刷新令牌会话族。"
+    },
+    "Operations_AdminAccess_Sessions_Revoke": {
+      "title": "撤销管理员会话",
+      "description": "允许撤销管理员刷新令牌会话族。"
+    },
+    "Operations_AdminAccess_AuditLogs_Read": {
+      "title": "查看管理员访问审计",
+      "description": "允许查询管理员访问审计历史。"
+    },
+    "Content_GameConfig": {
+      "title": "游戏配置"
+    },
+    "Content_GameConfig_Access": {
+      "title": "查看游戏配置",
+      "description": "允许查看游戏配置草稿、版本和环境。"
+    },
+    "Content_GameConfig_ManageDrafts": {
+      "title": "管理配置草稿",
+      "description": "允许创建、编辑和校验游戏配置草稿。"
+    },
+    "Content_GameConfig_Publish": {
+      "title": "发布游戏配置",
+      "description": "允许发布不可变的游戏配置版本。"
+    },
+    "Content_GameConfig_Activate": {
+      "title": "激活游戏配置",
+      "description": "允许激活或回滚环境的配置版本。"
+    }
+  }
+}

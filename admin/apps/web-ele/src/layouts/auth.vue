@@ -4,6 +4,8 @@ import { computed } from 'vue';
 import { AuthPageLayout } from '@vben/layouts';
 import { preferences } from '@vben/preferences';
 
+import { tOperations } from '#/locales/operations';
+
 const appName = computed(() => preferences.app.name);
 const logo = computed(() => preferences.logo.source);
 const logoDark = computed(() => preferences.logo.sourceDark);
@@ -14,7 +16,7 @@ const logoDark = computed(() => preferences.logo.sourceDark);
     :app-name="appName"
     :logo="logo"
     :logo-dark="logoDark"
-    page-description="Administrator access"
-    page-title="NovaGame Operations"
+    :page-description="tOperations('administratorAccess')"
+    :page-title="tOperations('novagameOperations')"
   />
 </template>

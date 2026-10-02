@@ -52,6 +52,11 @@ import {
   AdminAccessPermission,
   hasAdminAccessPermission,
 } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 import { useAuthStore } from '#/store';
 
 defineOptions({ name: 'AdministratorAccessAudit' });
@@ -69,13 +74,13 @@ const isMobile = useMediaQuery('(max-width: 640px)');
 
 const administratorOptions = ref<AdministratorDto[]>([]);
 const auditRecords = ref<AdminAccessAuditRecordDto[]>([]);
-const copyMessage = ref('');
+const copyMessage = useOperationsMessage();
 const copyMessageType = ref<'error' | 'success'>('success');
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const filterErrors = reactive<Record<string, string>>({});
 const forbidden = ref(false);
 const loading = ref(false);
-const reconciliationError = ref('');
+const reconciliationError = useOperationsMessage();
 const reconciliationRequired = ref(false);
 const reconcilingPermissions = ref(false);
 const roleOptions = ref<AdminRoleSummaryDto[]>([]);
@@ -104,30 +109,32 @@ let permissionRefreshPromise: null | Promise<void> = null;
 let roleOptionsController: AbortController | null = null;
 let roleOptionsSequence = 0;
 
-const auditActions: ReadonlyArray<{
-  label: string;
-  value: AdminAccessAuditActionDto;
-}> = [
-  { label: 'Login', value: 1 },
-  { label: 'Refresh', value: 2 },
-  { label: 'Logout', value: 3 },
-  { label: 'Refresh token reuse detected', value: 4 },
-  { label: 'Administrator created', value: 5 },
-  { label: 'Role created', value: 6 },
-  { label: 'Role assigned', value: 7 },
-  { label: 'Permission granted', value: 8 },
-  { label: 'Permission revoked', value: 9 },
-  { label: 'Password rehashed', value: 10 },
-  { label: 'Administrator display name changed', value: 11 },
-  { label: 'Administrator activated', value: 12 },
-  { label: 'Administrator deactivated', value: 13 },
-  { label: 'Administrator password reset', value: 14 },
-  { label: 'Role removed', value: 15 },
-  { label: 'Role renamed', value: 16 },
-  { label: 'Role activated', value: 17 },
-  { label: 'Role deactivated', value: 18 },
-  { label: 'Session family revoked', value: 19 },
-];
+const auditActions = computed<
+  ReadonlyArray<{
+    label: string;
+    value: AdminAccessAuditActionDto;
+  }>
+>(() => [
+  { label: tOperations('login'), value: 1 },
+  { label: tOperations('refresh'), value: 2 },
+  { label: tOperations('logout'), value: 3 },
+  { label: tOperations('refreshTokenReuseDetected'), value: 4 },
+  { label: tOperations('administratorCreated'), value: 5 },
+  { label: tOperations('roleCreated'), value: 6 },
+  { label: tOperations('roleAssigned'), value: 7 },
+  { label: tOperations('permissionGranted'), value: 8 },
+  { label: tOperations('permissionRevoked'), value: 9 },
+  { label: tOperations('passwordRehashed'), value: 10 },
+  { label: tOperations('administratorDisplayNameChanged'), value: 11 },
+  { label: tOperations('administratorActivated'), value: 12 },
+  { label: tOperations('administratorDeactivated'), value: 13 },
+  { label: tOperations('administratorPasswordReset'), value: 14 },
+  { label: tOperations('roleRemoved'), value: 15 },
+  { label: tOperations('roleRenamed'), value: 16 },
+  { label: tOperations('roleActivated'), value: 17 },
+  { label: tOperations('roleDeactivated'), value: 18 },
+  { label: tOperations('sessionFamilyRevoked'), value: 19 },
+]);
 
 const canReadAdministrators = computed(() =>
   hasAdminAccessPermission(
@@ -160,12 +167,12 @@ const paginationPagerCount = computed(() => (isMobile.value ? 5 : 7));
 
 function formatDate(value: null | string | undefined): string {
   if (!value) {
-    return 'Unavailable';
+    return tOperations('unavailable');
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return 'Unavailable';
+    return tOperations('unavailable');
   }
 
   return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
@@ -173,19 +180,23 @@ function formatDate(value: null | string | undefined): string {
 
 function actionLabel(action: AdminAccessAuditActionDto | undefined): string {
   return (
-    auditActions.find((entry) => entry.value === action)?.label ?? 'Unknown'
+    auditActions.value.find((entry) => entry.value === action)?.label ??
+    tOperations('unknown')
   );
 }
 
 function administratorLabel(administrator: AdministratorDto): string {
-  const userName = administrator.userName ?? administrator.id ?? 'Unknown';
+  const userName =
+    administrator.userName ?? administrator.id ?? tOperations('unknown');
   const displayName = administrator.displayName?.trim();
   return displayName ? `${userName} (${displayName})` : userName;
 }
 
 function roleLabel(role: AdminRoleSummaryDto): string {
-  const name = role.name ?? role.id ?? 'Unknown role';
-  return role.isActive === false ? `${name} (inactive)` : name;
+  const name = role.name ?? role.id ?? tOperations('unknownRole');
+  return role.isActive === false
+    ? tOperations('inactiveName', { value0: name })
+    : name;
 }
 
 function clearAuditResults() {
@@ -289,7 +300,7 @@ async function refreshPermissionsAfterForbidden() {
       await loadAuditRecords();
     } catch (error) {
       if (!isNovaGameRequestCancelled(error)) {
-        reconciliationError.value = toNovaGameApiError(error).message;
+        reconciliationError.value = () => operationsErrorMessage(error);
       }
     } finally {
       reconcilingPermissions.value = false;
@@ -317,7 +328,7 @@ function recordError(error: unknown) {
     void refreshPermissionsAfterForbidden();
     return;
   }
-  errorMessage.value = apiError.message;
+  errorMessage.value = () => operationsErrorMessage(apiError);
 }
 
 function normalizedGuid(
@@ -330,7 +341,14 @@ function normalizedGuid(
     return undefined;
   }
   if (!guidPattern.test(normalized)) {
-    filterErrors[label] = `${label} must be an exact GUID.`;
+    const labels = {
+      'Actor administrator ID': tOperations('actorAdministratorId'),
+      'Subject administrator ID': tOperations('subjectAdministratorId'),
+      'Role ID': tOperations('roleId'),
+    };
+    filterErrors[label] = tOperations('exactGuidRequired', {
+      value0: labels[label as keyof typeof labels] ?? label,
+    });
     return null;
   }
   delete filterErrors[label];
@@ -352,11 +370,13 @@ function validateAuditRange(): null | { from: Date; to: Date } {
   const from = parseCanonicalUtc(query.fromUtc);
   const to = parseCanonicalUtc(query.toUtc);
   if (!from || !to || from.getTime() >= to.getTime()) {
-    filterErrors.range = 'Use canonical UTC ISO values with From before To.';
+    filterErrors.range = tOperations(
+      'useCanonicalUtcIsoValuesWithFromBeforeTo',
+    );
     return null;
   }
   if (to.getTime() - from.getTime() > maximumAuditRangeMilliseconds) {
-    filterErrors.range = 'The audit range cannot exceed 31 days.';
+    filterErrors.range = tOperations('theAuditRangeCannotExceed31Days');
     return null;
   }
   delete filterErrors.range;
@@ -555,17 +575,17 @@ async function copyIdentifier(label: string, value: null | string | undefined) {
   }
 
   if (!navigator.clipboard?.writeText) {
-    copyMessage.value = `${label} could not be copied.`;
+    copyMessage.value = () => tOperations('copyFailed', { value0: label });
     copyMessageType.value = 'error';
     return;
   }
 
   try {
     await navigator.clipboard.writeText(value);
-    copyMessage.value = `${label} copied.`;
+    copyMessage.value = () => tOperations('copied', { value0: label });
     copyMessageType.value = 'success';
   } catch {
-    copyMessage.value = `${label} could not be copied.`;
+    copyMessage.value = () => tOperations('copyFailed', { value0: label });
     copyMessageType.value = 'error';
   }
 }
@@ -626,14 +646,21 @@ onBeforeUnmount(() => {
   <div class="audit-workspace">
     <header class="workspace-header">
       <div>
-        <h1>Audit history</h1>
-        <p>Review redacted administrator-access events in server order.</p>
+        <h1>{{ tOperations('auditHistory') }}</h1>
+        <p>
+          {{
+            tOperations('reviewRedactedAdministratorAccessEventsInServerOrder')
+          }}
+        </p>
       </div>
-      <ElTooltip content="Refresh audit history" placement="bottom">
+      <ElTooltip
+        :content="tOperations('refreshAuditHistory')"
+        placement="bottom"
+      >
         <ElButton
           :disabled="auditWorkspaceForbidden"
           :loading="loading || reconcilingPermissions"
-          aria-label="Refresh audit history"
+          :aria-label="tOperations('refreshAuditHistory')"
           circle
           data-testid="refresh-audit"
           @click="loadAuditRecords"
@@ -647,8 +674,10 @@ onBeforeUnmount(() => {
       <ElResult
         v-if="auditWorkspaceForbidden"
         data-testid="audit-forbidden"
-        sub-title="Your account does not have access to administrator audit history."
-        title="Forbidden"
+        :sub-title="
+          tOperations('yourAccountDoesNotHaveAccessToAdministratorAuditHistory')
+        "
+        :title="tOperations('forbidden')"
       >
         <template #extra>
           <div class="forbidden-actions">
@@ -664,14 +693,17 @@ onBeforeUnmount(() => {
               data-testid="retry-audit-permissions"
               @click="refreshPermissionsAfterForbidden"
             >
-              Retry
+              {{ tOperations('retry') }}
             </ElButton>
           </div>
         </template>
       </ElResult>
 
       <template v-else>
-        <section class="table-toolbar" aria-label="Audit history filters">
+        <section
+          class="table-toolbar"
+          :aria-label="tOperations('auditHistoryFilters')"
+        >
           <div class="filter-row">
             <ElInput
               v-model="query.fromUtc"
@@ -679,10 +711,10 @@ onBeforeUnmount(() => {
                 filterErrors.range ? 'audit-range-filter-error' : undefined
               "
               :aria-invalid="Boolean(filterErrors.range)"
-              aria-label="From UTC"
+              :aria-label="tOperations('fromUtc')"
               clearable
               data-testid="audit-from-utc"
-              placeholder="From UTC (YYYY-MM-DDTHH:mm:ss.sssZ)"
+              :placeholder="tOperations('fromUtcYyyyMmDdthhMmSsSssz')"
               @clear="applyFilters"
               @input="validateAuditRange"
               @keyup.enter="applyFilters"
@@ -693,20 +725,20 @@ onBeforeUnmount(() => {
                 filterErrors.range ? 'audit-range-filter-error' : undefined
               "
               :aria-invalid="Boolean(filterErrors.range)"
-              aria-label="To UTC"
+              :aria-label="tOperations('toUtc')"
               clearable
               data-testid="audit-to-utc"
-              placeholder="To UTC (YYYY-MM-DDTHH:mm:ss.sssZ)"
+              :placeholder="tOperations('toUtcYyyyMmDdthhMmSsSssz')"
               @clear="applyFilters"
               @input="validateAuditRange"
               @keyup.enter="applyFilters"
             />
             <ElSelect
               v-model="query.action"
-              aria-label="Audit action"
+              :aria-label="tOperations('auditAction')"
               clearable
               data-testid="audit-action-filter"
-              placeholder="All actions"
+              :placeholder="tOperations('allActions')"
               @change="applyFilters"
             >
               <ElOption
@@ -718,25 +750,25 @@ onBeforeUnmount(() => {
             </ElSelect>
             <ElSelect
               v-model="query.succeeded"
-              aria-label="Audit outcome"
+              :aria-label="tOperations('auditOutcome')"
               clearable
               data-testid="audit-success-filter"
-              placeholder="All outcomes"
+              :placeholder="tOperations('allOutcomes')"
               @change="applyFilters"
             >
-              <ElOption label="Succeeded" :value="true" />
-              <ElOption label="Failed" :value="false" />
+              <ElOption :label="tOperations('succeeded')" :value="true" />
+              <ElOption :label="tOperations('failed')" :value="false" />
             </ElSelect>
             <ElSelect
               v-if="canReadAdministrators"
               v-model="query.actorAdministratorId"
-              aria-label="Actor administrator"
+              :aria-label="tOperations('actorAdministrator')"
               clearable
               filterable
               remote
               reserve-keyword
               data-testid="audit-actor-filter"
-              placeholder="All actors"
+              :placeholder="tOperations('allActors')"
               :remote-method="loadAdministratorOptions"
               @change="applyFilters"
             >
@@ -756,23 +788,23 @@ onBeforeUnmount(() => {
                   : undefined
               "
               :aria-invalid="Boolean(filterErrors['Actor administrator ID'])"
-              aria-label="Actor administrator ID"
+              :aria-label="tOperations('actorAdministratorId')"
               clearable
               data-testid="audit-actor-id-filter"
-              placeholder="Exact actor administrator GUID"
+              :placeholder="tOperations('exactActorAdministratorGuid')"
               @clear="applyFilters"
               @keyup.enter="applyFilters"
             />
             <ElSelect
               v-if="canReadAdministrators"
               v-model="query.subjectAdministratorId"
-              aria-label="Subject administrator"
+              :aria-label="tOperations('subjectAdministrator')"
               clearable
               filterable
               remote
               reserve-keyword
               data-testid="audit-subject-filter"
-              placeholder="All subjects"
+              :placeholder="tOperations('allSubjects')"
               :remote-method="loadAdministratorOptions"
               @change="applyFilters"
             >
@@ -792,23 +824,23 @@ onBeforeUnmount(() => {
                   : undefined
               "
               :aria-invalid="Boolean(filterErrors['Subject administrator ID'])"
-              aria-label="Subject administrator ID"
+              :aria-label="tOperations('subjectAdministratorId')"
               clearable
               data-testid="audit-subject-id-filter"
-              placeholder="Exact subject administrator GUID"
+              :placeholder="tOperations('exactSubjectAdministratorGuid')"
               @clear="applyFilters"
               @keyup.enter="applyFilters"
             />
             <ElSelect
               v-if="canReadRoles"
               v-model="query.roleId"
-              aria-label="Role"
+              :aria-label="tOperations('role')"
               clearable
               filterable
               remote
               reserve-keyword
               data-testid="audit-role-filter"
-              placeholder="All roles"
+              :placeholder="tOperations('allRoles')"
               :remote-method="loadRoleOptions"
               @change="applyFilters"
             >
@@ -826,24 +858,24 @@ onBeforeUnmount(() => {
                 filterErrors['Role ID'] ? 'audit-role-filter-error' : undefined
               "
               :aria-invalid="Boolean(filterErrors['Role ID'])"
-              aria-label="Role ID"
+              :aria-label="tOperations('roleId')"
               clearable
               data-testid="audit-role-id-filter"
-              placeholder="Exact role GUID"
+              :placeholder="tOperations('exactRoleGuid')"
               @clear="applyFilters"
               @keyup.enter="applyFilters"
             />
             <ElInput
               v-model="query.correlationId"
-              aria-label="Correlation ID"
+              :aria-label="tOperations('correlationId')"
               clearable
               data-testid="audit-correlation-filter"
-              placeholder="Exact correlation ID"
+              :placeholder="tOperations('exactCorrelationId')"
               @clear="applyFilters"
               @keyup.enter="applyFilters"
             />
             <ElButton data-testid="search-audit" @click="applyFilters">
-              Search
+              {{ tOperations('search') }}
             </ElButton>
           </div>
           <div
@@ -885,7 +917,9 @@ onBeforeUnmount(() => {
           type="error"
         >
           <template #default>
-            <ElButton size="small" @click="loadAuditRecords">Retry</ElButton>
+            <ElButton size="small" @click="loadAuditRecords">
+              {{ tOperations('retry') }}
+            </ElButton>
           </template>
         </ElAlert>
 
@@ -897,48 +931,58 @@ onBeforeUnmount(() => {
             row-key="id"
             stripe
           >
-            <ElTableColumn label="Occurred (UTC)" min-width="176">
+            <ElTableColumn :label="tOperations('occurredUtc')" min-width="176">
               <template #default="scope">
                 {{ formatDate(scope.row.occurredAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Action" min-width="200">
+            <ElTableColumn :label="tOperations('action')" min-width="200">
               <template #default="scope">
                 {{ actionLabel(scope.row.action) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Outcome" width="112">
+            <ElTableColumn :label="tOperations('outcome')" width="112">
               <template #default="scope">
                 <ElTag
                   :type="scope.row.succeeded === false ? 'danger' : 'success'"
                   size="small"
                 >
-                  {{ scope.row.succeeded === false ? 'Failed' : 'Succeeded' }}
+                  {{
+                    scope.row.succeeded === false
+                      ? tOperations('failed')
+                      : tOperations('succeeded')
+                  }}
                 </ElTag>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Subject" min-width="210">
+            <ElTableColumn :label="tOperations('subject')" min-width="210">
               <template #default="scope">
                 <div class="primary-cell">
                   <strong>{{
-                    scope.row.subjectUserName ?? 'No subject user name'
+                    scope.row.subjectUserName ??
+                    tOperations('noSubjectUserName')
                   }}</strong>
                   <div class="identifier-row">
                     <code>{{
-                      scope.row.subjectAdministratorId ?? 'No administrator ID'
+                      scope.row.subjectAdministratorId ??
+                      tOperations('noAdministratorId')
                     }}</code>
                     <ElTooltip
                       v-if="scope.row.subjectAdministratorId"
-                      content="Copy subject administrator ID"
+                      :content="tOperations('copySubjectAdministratorId')"
                       placement="top"
                     >
                       <ElButton
-                        :aria-label="`Copy subject administrator ID ${scope.row.subjectAdministratorId}`"
+                        :aria-label="
+                          tOperations('copySubjectAdministratorIdParameter', {
+                            value0: scope.row.subjectAdministratorId,
+                          })
+                        "
                         circle
                         size="small"
                         @click="
                           copyIdentifier(
-                            'Subject administrator ID',
+                            tOperations('subjectAdministratorId'),
                             scope.row.subjectAdministratorId,
                           )
                         "
@@ -950,24 +994,28 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Actor" min-width="190">
+            <ElTableColumn :label="tOperations('actor')" min-width="190">
               <template #default="scope">
                 <div class="identifier-row">
                   <code>{{
-                    scope.row.actorAdministratorId ?? 'No actor ID'
+                    scope.row.actorAdministratorId ?? tOperations('noActorId')
                   }}</code>
                   <ElTooltip
                     v-if="scope.row.actorAdministratorId"
-                    content="Copy actor administrator ID"
+                    :content="tOperations('copyActorAdministratorId')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Copy actor administrator ID ${scope.row.actorAdministratorId}`"
+                      :aria-label="
+                        tOperations('copyActorAdministratorIdParameter', {
+                          value0: scope.row.actorAdministratorId,
+                        })
+                      "
                       circle
                       size="small"
                       @click="
                         copyIdentifier(
-                          'Actor administrator ID',
+                          tOperations('actorAdministratorId'),
                           scope.row.actorAdministratorId,
                         )
                       "
@@ -978,20 +1026,26 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Role" min-width="180">
+            <ElTableColumn :label="tOperations('role')" min-width="180">
               <template #default="scope">
                 <div class="identifier-row">
-                  <code>{{ scope.row.roleId ?? 'No role ID' }}</code>
+                  <code>{{ scope.row.roleId ?? tOperations('noRoleId') }}</code>
                   <ElTooltip
                     v-if="scope.row.roleId"
-                    content="Copy role ID"
+                    :content="tOperations('copyRoleId')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Copy role ID ${scope.row.roleId}`"
+                      :aria-label="
+                        tOperations('copyRoleIdParameter', {
+                          value0: scope.row.roleId,
+                        })
+                      "
                       circle
                       size="small"
-                      @click="copyIdentifier('Role ID', scope.row.roleId)"
+                      @click="
+                        copyIdentifier(tOperations('roleId'), scope.row.roleId)
+                      "
                     >
                       <Copy :size="14" />
                     </ElButton>
@@ -999,22 +1053,31 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Session family" min-width="190">
+            <ElTableColumn
+              :label="tOperations('sessionFamily')"
+              min-width="190"
+            >
               <template #default="scope">
                 <div class="identifier-row">
-                  <code>{{ scope.row.sessionFamilyId ?? 'No family ID' }}</code>
+                  <code>{{
+                    scope.row.sessionFamilyId ?? tOperations('noFamilyId')
+                  }}</code>
                   <ElTooltip
                     v-if="scope.row.sessionFamilyId"
-                    content="Copy session family ID"
+                    :content="tOperations('copySessionFamilyId')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Copy session family ID ${scope.row.sessionFamilyId}`"
+                      :aria-label="
+                        tOperations('copySessionFamilyIdParameter', {
+                          value0: scope.row.sessionFamilyId,
+                        })
+                      "
                       circle
                       size="small"
                       @click="
                         copyIdentifier(
-                          'Session family ID',
+                          tOperations('sessionFamilyId'),
                           scope.row.sessionFamilyId,
                         )
                       "
@@ -1025,32 +1088,38 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Permission" min-width="180">
+            <ElTableColumn :label="tOperations('permission')" min-width="180">
               <template #default="scope">
-                {{ scope.row.permissionName ?? 'None' }}
+                {{ scope.row.permissionName ?? tOperations('none') }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Error" min-width="180">
+            <ElTableColumn :label="tOperations('error')" min-width="180">
               <template #default="scope">
-                {{ scope.row.errorCode ?? 'None' }}
+                {{ scope.row.errorCode ?? tOperations('none') }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Correlation" min-width="190">
+            <ElTableColumn :label="tOperations('correlation')" min-width="190">
               <template #default="scope">
                 <div class="identifier-row">
-                  <code>{{ scope.row.correlationId ?? 'Unavailable' }}</code>
+                  <code>{{
+                    scope.row.correlationId ?? tOperations('unavailable')
+                  }}</code>
                   <ElTooltip
                     v-if="scope.row.correlationId"
-                    content="Copy correlation ID"
+                    :content="tOperations('copyCorrelationId')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Copy correlation ID ${scope.row.correlationId}`"
+                      :aria-label="
+                        tOperations('copyCorrelationIdParameter', {
+                          value0: scope.row.correlationId,
+                        })
+                      "
                       circle
                       size="small"
                       @click="
                         copyIdentifier(
-                          'Correlation ID',
+                          tOperations('correlationId'),
                           scope.row.correlationId,
                         )
                       "
@@ -1061,31 +1130,35 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Target revision" width="132">
+            <ElTableColumn :label="tOperations('targetRevision')" width="132">
               <template #default="scope">
-                {{ scope.row.targetRevision ?? 'None' }}
+                {{ scope.row.targetRevision ?? tOperations('none') }}
               </template>
             </ElTableColumn>
             <ElTableColumn
               align="right"
               fixed="right"
-              label="Details"
+              :label="tOperations('details')"
               :width="isMobile ? 68 : 92"
             >
               <template #default="scope">
                 <ElDropdown v-if="isMobile" trigger="click">
                   <ElButton
-                    :aria-label="`Actions for audit record ${scope.row.id}`"
+                    :aria-label="
+                      tOperations('actionsForAuditRecordParameter', {
+                        value0: scope.row.id,
+                      })
+                    "
                     circle
                     data-testid="audit-mobile-actions"
-                    title="Audit record actions"
+                    :title="tOperations('auditRecordActions')"
                   >
                     <Ellipsis :size="17" />
                   </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem @click="openRecordDetail(scope.row)">
-                        View details
+                        {{ tOperations('viewDetails') }}
                       </ElDropdownItem>
                     </ElDropdownMenu>
                   </template>
@@ -1096,14 +1169,14 @@ onBeforeUnmount(() => {
                   size="small"
                   @click="openRecordDetail(scope.row)"
                 >
-                  View
+                  {{ tOperations('view') }}
                 </ElButton>
               </template>
             </ElTableColumn>
           </ElTable>
           <ElEmpty
             v-if="!loading && auditRecords.length === 0 && !errorMessage"
-            description="No audit records match the current filters."
+            :description="tOperations('noAuditRecordsMatchTheCurrentFilters')"
           />
         </div>
 
@@ -1127,7 +1200,7 @@ onBeforeUnmount(() => {
       :model-value="detailDrawerOpen"
       destroy-on-close
       size="min(620px, 100vw)"
-      title="Audit record details"
+      :title="tOperations('auditRecordDetails')"
       @close="closeRecordDetail"
     >
       <div
@@ -1137,15 +1210,27 @@ onBeforeUnmount(() => {
       >
         <dl>
           <div>
-            <dt>Record ID</dt>
+            <dt>{{ tOperations('recordId') }}</dt>
             <dd class="identifier-row">
               <code>{{ selectedRecord.id }}</code>
-              <ElTooltip content="Copy audit record ID" placement="top">
+              <ElTooltip
+                :content="tOperations('copyAuditRecordId')"
+                placement="top"
+              >
                 <ElButton
-                  :aria-label="`Copy audit record ID ${selectedRecord.id}`"
+                  :aria-label="
+                    tOperations('copyAuditRecordIdParameter', {
+                      value0: selectedRecord.id,
+                    })
+                  "
                   circle
                   size="small"
-                  @click="copyIdentifier('Audit record ID', selectedRecord.id)"
+                  @click="
+                    copyIdentifier(
+                      tOperations('auditRecordId'),
+                      selectedRecord.id,
+                    )
+                  "
                 >
                   <Copy :size="14" />
                 </ElButton>
@@ -1153,64 +1238,88 @@ onBeforeUnmount(() => {
             </dd>
           </div>
           <div>
-            <dt>Occurred (UTC)</dt>
+            <dt>{{ tOperations('occurredUtc') }}</dt>
             <dd>{{ formatDate(selectedRecord.occurredAtUtc) }}</dd>
           </div>
           <div>
-            <dt>Action</dt>
+            <dt>{{ tOperations('action') }}</dt>
             <dd>{{ actionLabel(selectedRecord.action) }}</dd>
           </div>
           <div>
-            <dt>Outcome</dt>
+            <dt>{{ tOperations('outcome') }}</dt>
             <dd>
-              {{ selectedRecord.succeeded === false ? 'Failed' : 'Succeeded' }}
+              {{
+                selectedRecord.succeeded === false
+                  ? tOperations('failed')
+                  : tOperations('succeeded')
+              }}
             </dd>
           </div>
           <div>
-            <dt>Subject user name</dt>
-            <dd>{{ selectedRecord.subjectUserName ?? 'Unavailable' }}</dd>
-          </div>
-          <div>
-            <dt>Subject administrator ID</dt>
+            <dt>{{ tOperations('subjectUserName') }}</dt>
             <dd>
-              {{ selectedRecord.subjectAdministratorId ?? 'Unavailable' }}
+              {{ selectedRecord.subjectUserName ?? tOperations('unavailable') }}
             </dd>
           </div>
           <div>
-            <dt>Actor administrator ID</dt>
-            <dd>{{ selectedRecord.actorAdministratorId ?? 'Unavailable' }}</dd>
+            <dt>{{ tOperations('subjectAdministratorId') }}</dt>
+            <dd>
+              {{
+                selectedRecord.subjectAdministratorId ??
+                tOperations('unavailable')
+              }}
+            </dd>
           </div>
           <div>
-            <dt>Role ID</dt>
-            <dd>{{ selectedRecord.roleId ?? 'Unavailable' }}</dd>
+            <dt>{{ tOperations('actorAdministratorId') }}</dt>
+            <dd>
+              {{
+                selectedRecord.actorAdministratorId ??
+                tOperations('unavailable')
+              }}
+            </dd>
           </div>
           <div>
-            <dt>Session family ID</dt>
-            <dd>{{ selectedRecord.sessionFamilyId ?? 'Unavailable' }}</dd>
+            <dt>{{ tOperations('roleId') }}</dt>
+            <dd>{{ selectedRecord.roleId ?? tOperations('unavailable') }}</dd>
           </div>
           <div>
-            <dt>Permission</dt>
-            <dd>{{ selectedRecord.permissionName ?? 'Unavailable' }}</dd>
+            <dt>{{ tOperations('sessionFamilyId') }}</dt>
+            <dd>
+              {{ selectedRecord.sessionFamilyId ?? tOperations('unavailable') }}
+            </dd>
           </div>
           <div>
-            <dt>Error code</dt>
-            <dd>{{ selectedRecord.errorCode ?? 'None' }}</dd>
+            <dt>{{ tOperations('permission') }}</dt>
+            <dd>
+              {{ selectedRecord.permissionName ?? tOperations('unavailable') }}
+            </dd>
           </div>
           <div>
-            <dt>IP address</dt>
-            <dd>{{ selectedRecord.ipAddress ?? 'Unavailable' }}</dd>
+            <dt>{{ tOperations('errorCode') }}</dt>
+            <dd>{{ selectedRecord.errorCode ?? tOperations('none') }}</dd>
           </div>
           <div>
-            <dt>User agent</dt>
-            <dd>{{ selectedRecord.userAgent ?? 'Unavailable' }}</dd>
+            <dt>{{ tOperations('ipAddress') }}</dt>
+            <dd>
+              {{ selectedRecord.ipAddress ?? tOperations('unavailable') }}
+            </dd>
           </div>
           <div>
-            <dt>Correlation ID</dt>
-            <dd>{{ selectedRecord.correlationId ?? 'Unavailable' }}</dd>
+            <dt>{{ tOperations('userAgent') }}</dt>
+            <dd>
+              {{ selectedRecord.userAgent ?? tOperations('unavailable') }}
+            </dd>
           </div>
           <div>
-            <dt>Target revision</dt>
-            <dd>{{ selectedRecord.targetRevision ?? 'None' }}</dd>
+            <dt>{{ tOperations('correlationId') }}</dt>
+            <dd>
+              {{ selectedRecord.correlationId ?? tOperations('unavailable') }}
+            </dd>
+          </div>
+          <div>
+            <dt>{{ tOperations('targetRevision') }}</dt>
+            <dd>{{ selectedRecord.targetRevision ?? tOperations('none') }}</dd>
           </div>
         </dl>
       </div>

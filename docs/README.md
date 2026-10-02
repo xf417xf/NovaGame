@@ -50,6 +50,7 @@ When sources appear to conflict, stop and resolve the conflict before implementa
 ## Core Documents
 
 - [Specific game startup and coding-agent handoff](workflows/game-project-start.md)
+- [Admin language selection](admin-localization.md)
 - [Architecture](architecture.md)
 - [Development workflow](workflows/development.md)
 - [Extraction workflow](workflows/extraction.md)

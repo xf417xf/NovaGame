@@ -58,6 +58,11 @@ import {
   AdminAccessPermission,
   hasAdminAccessPermission,
 } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 import { useAuthStore } from '#/store';
 
 import AdministratorCreateDrawer from './components/administrator-create-drawer.vue';
@@ -87,11 +92,11 @@ const isMobile = useMediaQuery('(max-width: 640px)');
 const administrators = ref<AdministratorDto[]>([]);
 const createDrawerOpen = ref(false);
 const displayNameDrawerOpen = ref(false);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const forbidden = ref(false);
 const loading = ref(false);
 const passwordResetDialogOpen = ref(false);
-const reconciliationError = ref('');
+const reconciliationError = useOperationsMessage();
 const reconciliationRequired = ref(false);
 const reconcilingPermissions = ref(false);
 const retainedAdministratorDraft = ref<null | RetainedAdministratorDraft>(null);
@@ -164,12 +169,12 @@ const administratorWorkspaceForbidden = computed(
 
 function formatDate(value: null | string | undefined): string {
   if (!value) {
-    return 'Never';
+    return tOperations('never');
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return 'Unavailable';
+    return tOperations('unavailable');
   }
 
   return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
@@ -189,13 +194,17 @@ function hasAdministratorRowCommand(administrator: AdministratorDto): boolean {
 }
 
 function roleLabel(role: AdminRoleReferenceDto): string {
-  const name = role.name ?? role.id ?? 'Unnamed role';
-  return role.isActive === false ? `${name} (inactive)` : name;
+  const name = role.name ?? role.id ?? tOperations('unnamedRole');
+  return role.isActive === false
+    ? tOperations('inactiveName', { value0: name })
+    : name;
 }
 
 function roleFilterLabel(role: AdminRoleSummaryDto): string {
-  const name = role.name ?? role.id ?? 'Unnamed role';
-  return role.isActive === false ? `${name} (inactive)` : name;
+  const name = role.name ?? role.id ?? tOperations('unnamedRole');
+  return role.isActive === false
+    ? tOperations('inactiveName', { value0: name })
+    : name;
 }
 
 function clearAdministratorResults() {
@@ -292,7 +301,7 @@ async function refreshPermissionsAfterForbidden() {
       await loadAdministrators();
     } catch (error) {
       if (!isNovaGameRequestCancelled(error)) {
-        reconciliationError.value = toNovaGameApiError(error).message;
+        reconciliationError.value = () => operationsErrorMessage(error);
       }
     } finally {
       reconcilingPermissions.value = false;
@@ -328,7 +337,7 @@ function recordError(error: unknown) {
     void refreshPermissionsAfterForbidden();
     return;
   }
-  errorMessage.value = apiError.message;
+  errorMessage.value = () => operationsErrorMessage(apiError);
 }
 
 async function loadAdministrators() {
@@ -572,8 +581,12 @@ onBeforeUnmount(() => {
   <div class="administrator-workspace">
     <header class="workspace-header">
       <div>
-        <h1>Administrators</h1>
-        <p>Manage framework administrator accounts and assigned roles.</p>
+        <h1>{{ tOperations('administrators') }}</h1>
+        <p>
+          {{
+            tOperations('manageFrameworkAdministratorAccountsAndAssignedRoles')
+          }}
+        </p>
       </div>
       <div class="header-actions">
         <ElButton
@@ -583,13 +596,16 @@ onBeforeUnmount(() => {
           @click="openCreateDrawer"
         >
           <Plus :size="16" />
-          New administrator
+          {{ tOperations('newAdministrator') }}
         </ElButton>
-        <ElTooltip content="Refresh administrators" placement="bottom">
+        <ElTooltip
+          :content="tOperations('refreshAdministrators')"
+          placement="bottom"
+        >
           <ElButton
             :disabled="administratorWorkspaceForbidden"
             :loading="loading || reconcilingPermissions"
-            aria-label="Refresh administrators"
+            :aria-label="tOperations('refreshAdministrators')"
             circle
             data-testid="refresh-administrators"
             @click="refreshAdministrators"
@@ -604,8 +620,10 @@ onBeforeUnmount(() => {
       <ElResult
         v-if="administratorWorkspaceForbidden"
         data-testid="administrators-forbidden"
-        sub-title="Your account does not have access to administrator accounts."
-        title="Forbidden"
+        :sub-title="
+          tOperations('yourAccountDoesNotHaveAccessToAdministratorAccounts')
+        "
+        :title="tOperations('forbidden')"
       >
         <template #extra>
           <div class="forbidden-actions">
@@ -623,45 +641,48 @@ onBeforeUnmount(() => {
               data-testid="retry-administrators"
               @click="refreshPermissionsAfterForbidden"
             >
-              Retry access check
+              {{ tOperations('retryAccessCheck') }}
             </ElButton>
           </div>
         </template>
       </ElResult>
 
       <template v-else>
-        <section class="table-toolbar" aria-label="Administrator filters">
+        <section
+          class="table-toolbar"
+          :aria-label="tOperations('administratorFilters')"
+        >
           <div class="filter-row">
             <ElInput
               v-model="query.search"
-              aria-label="Search administrators"
+              :aria-label="tOperations('searchAdministrators')"
               clearable
               data-testid="administrator-search"
-              placeholder="Search user names"
+              :placeholder="tOperations('searchUserNames')"
               @clear="applyFilters"
               @keyup.enter="applyFilters"
             />
             <ElSelect
               v-model="query.isActive"
-              aria-label="Administrator account state"
+              :aria-label="tOperations('administratorAccountState')"
               clearable
               data-testid="administrator-active-filter"
-              placeholder="All account states"
+              :placeholder="tOperations('allAccountStates')"
               @change="applyFilters"
             >
-              <ElOption label="Active" :value="true" />
-              <ElOption label="Inactive" :value="false" />
+              <ElOption :label="tOperations('active')" :value="true" />
+              <ElOption :label="tOperations('inactive')" :value="false" />
             </ElSelect>
             <ElSelect
               v-if="canReadRoleFilterWorkspace"
               v-model="query.roleId"
-              aria-label="Administrator role"
+              :aria-label="tOperations('administratorRole')"
               clearable
               filterable
               remote
               reserve-keyword
               data-testid="administrator-role-filter"
-              placeholder="All roles"
+              :placeholder="tOperations('allRoles')"
               :remote-method="loadRoleFilterOptions"
               @change="applyFilters"
             >
@@ -672,7 +693,9 @@ onBeforeUnmount(() => {
                 :value="role.id ?? ''"
               />
             </ElSelect>
-            <ElButton @click="applyFilters">Search</ElButton>
+            <ElButton @click="applyFilters">
+              {{ tOperations('search') }}
+            </ElButton>
           </div>
         </section>
 
@@ -684,7 +707,9 @@ onBeforeUnmount(() => {
           type="error"
         >
           <template #default>
-            <ElButton size="small" @click="loadAdministrators">Retry</ElButton>
+            <ElButton size="small" @click="loadAdministrators">
+              {{ tOperations('retry') }}
+            </ElButton>
           </template>
         </ElAlert>
 
@@ -693,7 +718,11 @@ onBeforeUnmount(() => {
           :closable="false"
           data-testid="retained-administrator-draft"
           show-icon
-          title="Unsaved changes from an unavailable detail are available for review."
+          :title="
+            tOperations(
+              'unsavedChangesFromAnUnavailableDetailAreAvailableForReview',
+            )
+          "
           type="warning"
         >
           <template #default>
@@ -703,7 +732,7 @@ onBeforeUnmount(() => {
                 size="small"
                 @click="retainedAdministratorDraftReviewOpen = true"
               >
-                Review retained draft
+                {{ tOperations('reviewRetainedDraft') }}
               </ElButton>
               <ElButton
                 data-testid="discard-retained-administrator-draft"
@@ -711,7 +740,7 @@ onBeforeUnmount(() => {
                 text
                 @click="clearRetainedAdministratorDraft"
               >
-                Discard
+                {{ tOperations('discard') }}
               </ElButton>
             </div>
           </template>
@@ -725,20 +754,22 @@ onBeforeUnmount(() => {
             row-key="id"
             stripe
           >
-            <ElTableColumn label="User name" min-width="180">
+            <ElTableColumn :label="tOperations('userName')" min-width="180">
               <template #default="scope">
                 <div class="primary-cell">
-                  <strong>{{ scope.row.userName ?? 'Unknown' }}</strong>
+                  <strong>{{
+                    scope.row.userName ?? tOperations('unknown')
+                  }}</strong>
                   <code>{{ scope.row.id }}</code>
                 </div>
               </template>
             </ElTableColumn>
             <ElTableColumn
-              label="Display name"
+              :label="tOperations('displayName')"
               min-width="180"
               prop="displayName"
             />
-            <ElTableColumn label="Roles" min-width="220">
+            <ElTableColumn :label="tOperations('roles')" min-width="220">
               <template #default="scope">
                 <div v-if="scope.row.roles?.length" class="role-list">
                   <ElTag
@@ -750,34 +781,44 @@ onBeforeUnmount(() => {
                     {{ roleLabel(role) }}
                   </ElTag>
                 </div>
-                <span v-else class="muted-value">No roles</span>
+                <span v-else class="muted-value">{{
+                  tOperations('noRoles')
+                }}</span>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="State" width="108">
+            <ElTableColumn :label="tOperations('state')" width="108">
               <template #default="scope">
                 <ElTag
                   :type="scope.row.isActive ? 'success' : 'danger'"
                   size="small"
                 >
-                  {{ scope.row.isActive ? 'Active' : 'Inactive' }}
+                  {{
+                    scope.row.isActive
+                      ? tOperations('active')
+                      : tOperations('inactive')
+                  }}
                 </ElTag>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Last login (UTC)" min-width="180">
+            <ElTableColumn :label="tOperations('lastLoginUtc')" min-width="180">
               <template #default="scope">
                 {{ formatDate(scope.row.lastLoginAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Updated (UTC)" min-width="180">
+            <ElTableColumn :label="tOperations('updatedUtc')" min-width="180">
               <template #default="scope">
                 {{ formatDate(scope.row.updatedAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Revision" prop="revision" width="100" />
+            <ElTableColumn
+              :label="tOperations('revision')"
+              prop="revision"
+              width="100"
+            />
             <ElTableColumn
               align="right"
               fixed="right"
-              label="Actions"
+              :label="tOperations('actions')"
               :width="isMobile ? 92 : 204"
             >
               <template #default="scope">
@@ -789,10 +830,14 @@ onBeforeUnmount(() => {
                   "
                 >
                   <ElButton
-                    :aria-label="`Actions for ${scope.row.userName}`"
+                    :aria-label="
+                      tOperations('actionsForParameter', {
+                        value0: scope.row.userName,
+                      })
+                    "
                     circle
                     data-testid="administrator-mobile-actions"
-                    title="Administrator actions"
+                    :title="tOperations('administratorActions')"
                   >
                     <Ellipsis :size="17" />
                   </ElButton>
@@ -802,7 +847,7 @@ onBeforeUnmount(() => {
                         v-if="canManageAdministratorWorkspace"
                         command="display-name"
                       >
-                        Edit display name
+                        {{ tOperations('editDisplayName') }}
                       </ElDropdownItem>
                       <ElDropdownItem
                         v-if="
@@ -812,7 +857,7 @@ onBeforeUnmount(() => {
                         "
                         command="roles"
                       >
-                        Edit roles
+                        {{ tOperations('editRoles') }}
                       </ElDropdownItem>
                       <ElDropdownItem
                         v-if="
@@ -823,8 +868,8 @@ onBeforeUnmount(() => {
                       >
                         {{
                           scope.row.isActive
-                            ? 'Deactivate account'
-                            : 'Activate account'
+                            ? tOperations('deactivateAccount')
+                            : tOperations('activateAccount')
                         }}
                       </ElDropdownItem>
                       <ElDropdownItem
@@ -834,22 +879,26 @@ onBeforeUnmount(() => {
                         "
                         command="password-reset"
                       >
-                        Reset password
+                        {{ tOperations('resetPassword') }}
                       </ElDropdownItem>
                     </ElDropdownMenu>
                   </template>
                 </ElDropdown>
                 <span v-else-if="isMobile" class="read-only-state">
-                  Read only
+                  {{ tOperations('readOnly') }}
                 </span>
                 <div v-else class="icon-actions">
                   <ElTooltip
                     v-if="canManageAdministratorWorkspace"
-                    content="Edit display name"
+                    :content="tOperations('editDisplayName')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Edit display name for ${scope.row.userName}`"
+                      :aria-label="
+                        tOperations('editDisplayNameForParameter', {
+                          value0: scope.row.userName,
+                        })
+                      "
                       circle
                       size="small"
                       @click="openDisplayNameDrawer(scope.row)"
@@ -863,11 +912,15 @@ onBeforeUnmount(() => {
                       !isCurrentAdministrator(scope.row) &&
                       canReadRoleFilterWorkspace
                     "
-                    content="Edit roles"
+                    :content="tOperations('editRoles')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Edit roles for ${scope.row.userName}`"
+                      :aria-label="
+                        tOperations('editRolesForParameter', {
+                          value0: scope.row.userName,
+                        })
+                      "
                       circle
                       size="small"
                       @click="openRolesDrawer(scope.row)"
@@ -882,13 +935,13 @@ onBeforeUnmount(() => {
                     "
                     :content="
                       scope.row.isActive
-                        ? 'Deactivate account'
-                        : 'Activate account'
+                        ? tOperations('deactivateAccount')
+                        : tOperations('activateAccount')
                     "
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`${scope.row.isActive ? 'Deactivate' : 'Activate'} ${scope.row.userName}`"
+                      :aria-label="`${scope.row.isActive ? tOperations('deactivate') : tOperations('activate')} ${scope.row.userName}`"
                       circle
                       size="small"
                       @click="openStateDialog(scope.row)"
@@ -902,11 +955,15 @@ onBeforeUnmount(() => {
                       canResetPasswordWorkspace &&
                       !isCurrentAdministrator(scope.row)
                     "
-                    content="Reset password"
+                    :content="tOperations('resetPassword')"
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`Reset password for ${scope.row.userName}`"
+                      :aria-label="
+                        tOperations('resetPasswordForParameter', {
+                          value0: scope.row.userName,
+                        })
+                      "
                       circle
                       size="small"
                       @click="openPasswordResetDialog(scope.row)"
@@ -919,7 +976,9 @@ onBeforeUnmount(() => {
             </ElTableColumn>
             <template #empty>
               <ElEmpty
-                description="No administrators match the current filters"
+                :description="
+                  tOperations('noAdministratorsMatchTheCurrentFilters')
+                "
               />
             </template>
           </ElTable>
@@ -944,7 +1003,7 @@ onBeforeUnmount(() => {
 
     <ElDialog
       :model-value="retainedAdministratorDraftReviewOpen"
-      title="Review retained draft"
+      :title="tOperations('reviewRetainedDraft')"
       width="min(520px, 94vw)"
       @close="retainedAdministratorDraftReviewOpen = false"
     >
@@ -954,17 +1013,27 @@ onBeforeUnmount(() => {
         data-testid="retained-administrator-draft-review"
       >
         <p>
-          The original administrator detail is no longer available. This draft
-          is read-only and cannot be submitted.
+          {{
+            tOperations(
+              'theOriginalAdministratorDetailIsNoLongerAvailableThisDraftIsReadOnlyAndCannotBeSubmitted',
+            )
+          }}
         </p>
         <template v-if="retainedAdministratorDraft.kind === 'display-name'">
-          <span class="retained-draft-label">Display name</span>
+          <span class="retained-draft-label">{{
+            tOperations('displayName')
+          }}</span>
           <strong class="retained-draft-value">
-            {{ retainedAdministratorDraft.displayName || 'No value entered' }}
+            {{
+              retainedAdministratorDraft.displayName ||
+              tOperations('noValueEntered')
+            }}
           </strong>
         </template>
         <template v-else>
-          <span class="retained-draft-label">Selected role identifiers</span>
+          <span class="retained-draft-label">{{
+            tOperations('selectedRoleIdentifiers')
+          }}</span>
           <div class="retained-draft-tag-list">
             <ElTag
               v-for="roleId in retainedAdministratorDraft.roleIds"
@@ -975,7 +1044,7 @@ onBeforeUnmount(() => {
               {{ roleId }}
             </ElTag>
             <span v-if="retainedAdministratorDraft.roleIds.length === 0">
-              No active roles selected
+              {{ tOperations('noActiveRolesSelected') }}
             </span>
           </div>
         </template>
@@ -983,14 +1052,14 @@ onBeforeUnmount(() => {
       <template #footer>
         <div class="dialog-footer">
           <ElButton @click="retainedAdministratorDraftReviewOpen = false">
-            Close
+            {{ tOperations('close') }}
           </ElButton>
           <ElButton
             data-testid="discard-retained-administrator-draft-from-review"
             type="warning"
             @click="clearRetainedAdministratorDraft"
           >
-            Discard draft
+            {{ tOperations('discardDraft') }}
           </ElButton>
         </div>
       </template>

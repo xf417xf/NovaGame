@@ -1,4 +1,19 @@
 import { defineOverridesPreferences } from '@vben/preferences';
+import { StorageManager } from '@vben/utils';
+
+/** Restore only a supported locale; shell/security overrides retain priority. */
+export async function resolveInitialAdminLocale(
+  namespace: string,
+): Promise<'en-US' | 'zh-CN'> {
+  try {
+    const locale = await new StorageManager({
+      prefix: namespace,
+    }).getItem<string>('preferences-locale');
+    return locale === 'zh-CN' ? 'zh-CN' : 'en-US';
+  } catch {
+    return 'en-US';
+  }
+}
 
 /**
  * @description 项目配置文件

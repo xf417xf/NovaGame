@@ -34,7 +34,8 @@ vi.mock('@vben/icons', async () => {
   };
 });
 
-vi.mock('@vueuse/core', () => ({
+vi.mock('@vueuse/core', async () => ({
+  ...(await vi.importActual<typeof import('@vueuse/core')>('@vueuse/core')),
   useMediaQuery: () => ref(false),
 }));
 

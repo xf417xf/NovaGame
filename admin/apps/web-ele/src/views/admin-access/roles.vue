@@ -56,6 +56,11 @@ import {
   AdminAccessPermission,
   hasAdminAccessPermission,
 } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 import { useAuthStore } from '#/store';
 
 import RoleCreateDrawer from './components/role-create-drawer.vue';
@@ -77,10 +82,10 @@ const router = useRouter();
 const isMobile = useMediaQuery('(max-width: 640px)');
 
 const createDrawerOpen = ref(false);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const forbidden = ref(false);
 const loading = ref(false);
-const reconciliationError = ref('');
+const reconciliationError = useOperationsMessage();
 const reconciliationRequired = ref(false);
 const renameDrawerOpen = ref(false);
 const reconcilingPermissions = ref(false);
@@ -131,12 +136,12 @@ const roleWorkspaceForbidden = computed(
 
 function formatDate(value: null | string | undefined): string {
   if (!value) {
-    return 'Never';
+    return tOperations('never');
   }
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return 'Unavailable';
+    return tOperations('unavailable');
   }
 
   return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
@@ -222,7 +227,7 @@ async function refreshPermissionsAfterAccessChange() {
       await loadRoles();
     } catch (error) {
       if (!isNovaGameRequestCancelled(error)) {
-        reconciliationError.value = toNovaGameApiError(error).message;
+        reconciliationError.value = () => operationsErrorMessage(error);
       }
     } finally {
       reconcilingPermissions.value = false;
@@ -258,7 +263,7 @@ function recordError(error: unknown) {
     void refreshPermissionsAfterAccessChange();
     return;
   }
-  errorMessage.value = apiError.message;
+  errorMessage.value = () => operationsErrorMessage(apiError);
 }
 
 async function loadRoles() {
@@ -434,7 +439,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="role-workspace">
     <header class="workspace-header">
-      <h1>Roles and permissions</h1>
+      <h1>{{ tOperations('rolesAndPermissions') }}</h1>
       <div class="header-actions">
         <ElButton
           v-if="canManageRoleWorkspace"
@@ -443,12 +448,12 @@ onBeforeUnmount(() => {
           @click="openCreateDrawer"
         >
           <Plus :size="16" />
-          New role
+          {{ tOperations('newRole') }}
         </ElButton>
-        <ElTooltip content="Refresh roles" placement="bottom">
+        <ElTooltip :content="tOperations('refreshRoles')" placement="bottom">
           <ElButton
             :loading="loading || reconcilingPermissions"
-            aria-label="Refresh roles"
+            :aria-label="tOperations('refreshRoles')"
             circle
             data-testid="refresh-roles"
             @click="refreshRoles"
@@ -463,8 +468,10 @@ onBeforeUnmount(() => {
       <ElResult
         v-if="roleWorkspaceForbidden"
         data-testid="roles-forbidden"
-        sub-title="Your account does not have access to roles and permissions."
-        title="Forbidden"
+        :sub-title="
+          tOperations('yourAccountDoesNotHaveAccessToRolesAndPermissions')
+        "
+        :title="tOperations('forbidden')"
       >
         <template #extra>
           <div class="forbidden-actions">
@@ -481,47 +488,49 @@ onBeforeUnmount(() => {
               data-testid="retry-role-access-reconciliation"
               @click="refreshPermissionsAfterAccessChange"
             >
-              Retry access check
+              {{ tOperations('retryAccessCheck') }}
             </ElButton>
           </div>
         </template>
       </ElResult>
 
       <template v-else>
-        <section class="table-toolbar" aria-label="Role filters">
+        <section class="table-toolbar" :aria-label="tOperations('roleFilters')">
           <div class="filter-row">
             <ElInput
               v-model="query.search"
-              aria-label="Search roles"
+              :aria-label="tOperations('searchRoles')"
               clearable
               data-testid="role-search"
-              placeholder="Search role names"
+              :placeholder="tOperations('searchRoleNames')"
               @clear="applyFilters"
               @keyup.enter="applyFilters"
             />
             <ElSelect
               v-model="query.isActive"
-              aria-label="Role state"
+              :aria-label="tOperations('roleState')"
               clearable
               data-testid="role-active-filter"
-              placeholder="All role states"
+              :placeholder="tOperations('allRoleStates')"
               @change="applyFilters"
             >
-              <ElOption label="Active" :value="true" />
-              <ElOption label="Inactive" :value="false" />
+              <ElOption :label="tOperations('active')" :value="true" />
+              <ElOption :label="tOperations('inactive')" :value="false" />
             </ElSelect>
             <ElSelect
               v-model="query.isBuiltIn"
-              aria-label="Role kind"
+              :aria-label="tOperations('roleKind')"
               clearable
               data-testid="role-built-in-filter"
-              placeholder="All role kinds"
+              :placeholder="tOperations('allRoleKinds')"
               @change="applyFilters"
             >
-              <ElOption label="Built-in" :value="true" />
-              <ElOption label="Custom" :value="false" />
+              <ElOption :label="tOperations('builtIn')" :value="true" />
+              <ElOption :label="tOperations('custom')" :value="false" />
             </ElSelect>
-            <ElButton @click="applyFilters">Search</ElButton>
+            <ElButton @click="applyFilters">
+              {{ tOperations('search') }}
+            </ElButton>
           </div>
         </section>
 
@@ -533,7 +542,9 @@ onBeforeUnmount(() => {
           type="error"
         >
           <template #default>
-            <ElButton size="small" @click="loadRoles">Retry</ElButton>
+            <ElButton size="small" @click="loadRoles">
+              {{ tOperations('retry') }}
+            </ElButton>
           </template>
         </ElAlert>
 
@@ -542,7 +553,11 @@ onBeforeUnmount(() => {
           :closable="false"
           data-testid="retained-role-draft"
           show-icon
-          title="Unsaved changes from an unavailable detail are available for review."
+          :title="
+            tOperations(
+              'unsavedChangesFromAnUnavailableDetailAreAvailableForReview',
+            )
+          "
           type="warning"
         >
           <template #default>
@@ -552,7 +567,7 @@ onBeforeUnmount(() => {
                 size="small"
                 @click="retainedRoleDraftReviewOpen = true"
               >
-                Review retained draft
+                {{ tOperations('reviewRetainedDraft') }}
               </ElButton>
               <ElButton
                 data-testid="discard-retained-role-draft"
@@ -560,7 +575,7 @@ onBeforeUnmount(() => {
                 text
                 @click="clearRetainedRoleDraft"
               >
-                Discard
+                {{ tOperations('discard') }}
               </ElButton>
             </div>
           </template>
@@ -574,36 +589,46 @@ onBeforeUnmount(() => {
             row-key="id"
             stripe
           >
-            <ElTableColumn label="Role" min-width="190">
+            <ElTableColumn :label="tOperations('role')" min-width="190">
               <template #default="scope">
                 <div class="primary-cell">
-                  <strong>{{ scope.row.name ?? 'Unnamed role' }}</strong>
+                  <strong>{{
+                    scope.row.name ?? tOperations('unnamedRole')
+                  }}</strong>
                   <code>{{ scope.row.id }}</code>
                 </div>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Kind" width="106">
+            <ElTableColumn :label="tOperations('kind')" width="106">
               <template #default="scope">
                 <ElTag
                   :type="scope.row.isBuiltIn ? 'info' : 'primary'"
                   size="small"
                 >
-                  {{ scope.row.isBuiltIn ? 'Built-in' : 'Custom' }}
+                  {{
+                    scope.row.isBuiltIn
+                      ? tOperations('builtIn')
+                      : tOperations('custom')
+                  }}
                 </ElTag>
               </template>
             </ElTableColumn>
-            <ElTableColumn label="State" width="104">
+            <ElTableColumn :label="tOperations('state')" width="104">
               <template #default="scope">
                 <ElTag
                   :type="scope.row.isActive ? 'success' : 'danger'"
                   size="small"
                 >
-                  {{ scope.row.isActive ? 'Active' : 'Inactive' }}
+                  {{
+                    scope.row.isActive
+                      ? tOperations('active')
+                      : tOperations('inactive')
+                  }}
                 </ElTag>
               </template>
             </ElTableColumn>
             <ElTableColumn
-              label="Permissions"
+              :label="tOperations('permissions')"
               prop="permissionCount"
               width="122"
             >
@@ -612,7 +637,7 @@ onBeforeUnmount(() => {
               </template>
             </ElTableColumn>
             <ElTableColumn
-              label="Administrators"
+              :label="tOperations('administrators')"
               prop="administratorCount"
               width="132"
             >
@@ -620,16 +645,20 @@ onBeforeUnmount(() => {
                 {{ scope.row.administratorCount ?? 0 }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Updated (UTC)" min-width="180">
+            <ElTableColumn :label="tOperations('updatedUtc')" min-width="180">
               <template #default="scope">
                 {{ formatDate(scope.row.updatedAtUtc) }}
               </template>
             </ElTableColumn>
-            <ElTableColumn label="Revision" prop="revision" width="100" />
+            <ElTableColumn
+              :label="tOperations('revision')"
+              prop="revision"
+              width="100"
+            />
             <ElTableColumn
               align="right"
               fixed="right"
-              label="Actions"
+              :label="tOperations('actions')"
               :width="isMobile ? 92 : 168"
             >
               <template #default="scope">
@@ -638,7 +667,7 @@ onBeforeUnmount(() => {
                   class="read-only-state"
                   data-testid="built-in-role-read-only"
                 >
-                  Read-only
+                  {{ tOperations('readOnlyHyphenated') }}
                 </span>
                 <ElDropdown
                   v-else-if="isMobile && canManage"
@@ -646,35 +675,46 @@ onBeforeUnmount(() => {
                   @command="handleRowCommand($event as RoleCommand, scope.row)"
                 >
                   <ElButton
-                    :aria-label="`Actions for ${scope.row.name}`"
+                    :aria-label="
+                      tOperations('actionsForParameter', {
+                        value0: scope.row.name,
+                      })
+                    "
                     circle
                     data-testid="role-mobile-actions"
-                    title="Role actions"
+                    :title="tOperations('roleActions')"
                   >
                     <Ellipsis :size="17" />
                   </ElButton>
                   <template #dropdown>
                     <ElDropdownMenu>
                       <ElDropdownItem command="name">
-                        Rename role
+                        {{ tOperations('renameRole') }}
                       </ElDropdownItem>
                       <ElDropdownItem command="permissions">
-                        Edit permissions
+                        {{ tOperations('editPermissions') }}
                       </ElDropdownItem>
                       <ElDropdownItem command="state">
                         {{
                           scope.row.isActive
-                            ? 'Deactivate role'
-                            : 'Activate role'
+                            ? tOperations('deactivateRole')
+                            : tOperations('activateRole')
                         }}
                       </ElDropdownItem>
                     </ElDropdownMenu>
                   </template>
                 </ElDropdown>
                 <div v-else-if="canManage" class="icon-actions">
-                  <ElTooltip content="Rename role" placement="top">
+                  <ElTooltip
+                    :content="tOperations('renameRole')"
+                    placement="top"
+                  >
                     <ElButton
-                      :aria-label="`Rename ${scope.row.name}`"
+                      :aria-label="
+                        tOperations('renameParameter', {
+                          value0: scope.row.name,
+                        })
+                      "
                       circle
                       size="small"
                       @click="openRenameDrawer(scope.row)"
@@ -682,9 +722,16 @@ onBeforeUnmount(() => {
                       <UserRoundPen :size="15" />
                     </ElButton>
                   </ElTooltip>
-                  <ElTooltip content="Edit permissions" placement="top">
+                  <ElTooltip
+                    :content="tOperations('editPermissions')"
+                    placement="top"
+                  >
                     <ElButton
-                      :aria-label="`Edit permissions for ${scope.row.name}`"
+                      :aria-label="
+                        tOperations('editPermissionsForParameter', {
+                          value0: scope.row.name,
+                        })
+                      "
                       circle
                       size="small"
                       @click="openPermissionsDrawer(scope.row)"
@@ -694,12 +741,14 @@ onBeforeUnmount(() => {
                   </ElTooltip>
                   <ElTooltip
                     :content="
-                      scope.row.isActive ? 'Deactivate role' : 'Activate role'
+                      scope.row.isActive
+                        ? tOperations('deactivateRole')
+                        : tOperations('activateRole')
                     "
                     placement="top"
                   >
                     <ElButton
-                      :aria-label="`${scope.row.isActive ? 'Deactivate' : 'Activate'} ${scope.row.name}`"
+                      :aria-label="`${scope.row.isActive ? tOperations('deactivate') : tOperations('activate')} ${scope.row.name}`"
                       circle
                       size="small"
                       @click="openStateDialog(scope.row)"
@@ -709,11 +758,15 @@ onBeforeUnmount(() => {
                     </ElButton>
                   </ElTooltip>
                 </div>
-                <span v-else class="read-only-state">Read only</span>
+                <span v-else class="read-only-state">{{
+                  tOperations('readOnly')
+                }}</span>
               </template>
             </ElTableColumn>
             <template #empty>
-              <ElEmpty description="No roles match the current filters" />
+              <ElEmpty
+                :description="tOperations('noRolesMatchTheCurrentFilters')"
+              />
             </template>
           </ElTable>
         </div>
@@ -737,7 +790,7 @@ onBeforeUnmount(() => {
 
     <ElDialog
       :model-value="retainedRoleDraftReviewOpen"
-      title="Review retained draft"
+      :title="tOperations('reviewRetainedDraft')"
       width="min(520px, 94vw)"
       @close="retainedRoleDraftReviewOpen = false"
     >
@@ -747,17 +800,24 @@ onBeforeUnmount(() => {
         data-testid="retained-role-draft-review"
       >
         <p>
-          The original role detail is no longer available. This draft is
-          read-only and cannot be submitted.
+          {{
+            tOperations(
+              'theOriginalRoleDetailIsNoLongerAvailableThisDraftIsReadOnlyAndCannotBeSubmitted',
+            )
+          }}
         </p>
         <template v-if="retainedRoleDraft.kind === 'rename'">
-          <span class="retained-draft-label">Role name</span>
+          <span class="retained-draft-label">{{
+            tOperations('roleName')
+          }}</span>
           <strong class="retained-draft-value">
-            {{ retainedRoleDraft.name || 'No value entered' }}
+            {{ retainedRoleDraft.name || tOperations('noValueEntered') }}
           </strong>
         </template>
         <template v-else>
-          <span class="retained-draft-label">Selected permissions</span>
+          <span class="retained-draft-label">{{
+            tOperations('selectedPermissions')
+          }}</span>
           <div class="retained-draft-tag-list">
             <ElTag
               v-for="permissionName in retainedRoleDraft.permissionNames"
@@ -768,7 +828,7 @@ onBeforeUnmount(() => {
               {{ permissionName }}
             </ElTag>
             <span v-if="retainedRoleDraft.permissionNames.length === 0">
-              No permissions selected
+              {{ tOperations('noPermissionsSelected') }}
             </span>
           </div>
         </template>
@@ -776,14 +836,14 @@ onBeforeUnmount(() => {
       <template #footer>
         <div class="dialog-footer">
           <ElButton @click="retainedRoleDraftReviewOpen = false">
-            Close
+            {{ tOperations('close') }}
           </ElButton>
           <ElButton
             data-testid="discard-retained-role-draft-from-review"
             type="warning"
             @click="clearRetainedRoleDraft"
           >
-            Discard draft
+            {{ tOperations('discardDraft') }}
           </ElButton>
         </div>
       </template>

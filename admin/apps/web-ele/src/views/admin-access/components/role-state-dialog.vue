@@ -14,6 +14,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 interface Props {
   canManage: boolean;
@@ -30,24 +35,30 @@ const emit = defineEmits<{
   updated: [role: AdminRoleDto];
 }>();
 
-const conflictMessage = ref('');
+const conflictMessage = useOperationsMessage();
 const detail = ref<Awaited<ReturnType<typeof getAdminRole>> | null>(null);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const loading = ref(false);
 const pending = ref(false);
 let loadController: AbortController | null = null;
 let loadSequence = 0;
 
 const actionLabel = computed(() =>
-  props.targetActive ? 'Activate role' : 'Deactivate role',
+  props.targetActive
+    ? tOperations('activateRole')
+    : tOperations('deactivateRole'),
 );
 const confirmationLabel = computed(() =>
-  props.targetActive ? 'Activate role' : 'Deactivate role',
+  props.targetActive
+    ? tOperations('activateRole')
+    : tOperations('deactivateRole'),
 );
 const confirmationText = computed(() =>
   props.targetActive
-    ? 'This custom role can become effective for assigned administrators.'
-    : 'This custom role no longer contributes permissions to assigned administrators.',
+    ? tOperations('thisCustomRoleCanBecomeEffectiveForAssignedAdministrators')
+    : tOperations(
+        'thisCustomRoleNoLongerContributesPermissionsToAssignedAdministrators',
+      ),
 );
 
 function clearState() {
@@ -112,7 +123,7 @@ async function loadDetail() {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === loadSequence) {
       loading.value = false;
@@ -161,10 +172,10 @@ async function submit() {
       return;
     }
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     pending.value = false;
   }
@@ -229,7 +240,7 @@ onBeforeUnmount(() => {
             @click="loadDetail"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -245,7 +256,7 @@ onBeforeUnmount(() => {
       <template v-if="detail?.data.isBuiltIn">
         <ElAlert
           :closable="false"
-          title="Built-in roles are read-only."
+          :title="tOperations('builtInRolesAreReadOnly')"
           type="info"
         />
       </template>
@@ -257,7 +268,9 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="dialog-footer">
-        <ElButton :disabled="pending" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="pending" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           v-if="!detail?.data.isBuiltIn"
           :disabled="!detail || !canManage"

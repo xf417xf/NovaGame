@@ -22,6 +22,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import { fieldErrorsFrom } from './administrator-form-utils';
 import { normalizeRoleName, validateRoleName } from './role-form-utils';
@@ -45,9 +50,9 @@ const emit = defineEmits<{
   updated: [role: AdminRoleDto];
 }>();
 
-const conflictMessage = ref('');
+const conflictMessage = useOperationsMessage();
 const detail = ref<Awaited<ReturnType<typeof getAdminRole>> | null>(null);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const fieldErrors = ref<Record<string, string>>({});
 const loading = ref(false);
 const saving = ref(false);
@@ -137,7 +142,7 @@ async function loadDetail(preserveInput = false) {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === loadSequence) {
       loading.value = false;
@@ -197,10 +202,10 @@ async function submit() {
     }
     fieldErrors.value = fieldErrorsFrom(apiError);
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     saving.value = false;
   }
@@ -239,7 +244,7 @@ onBeforeUnmount(() => {
     :show-close="!saving"
     destroy-on-close
     size="min(520px, 100vw)"
-    title="Rename role"
+    :title="tOperations('renameRole')"
     @close="close()"
   >
     <div
@@ -261,7 +266,7 @@ onBeforeUnmount(() => {
             @click="loadDetail(true)"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -274,14 +279,16 @@ onBeforeUnmount(() => {
         type="error"
       >
         <template #default>
-          <ElButton size="small" @click="loadDetail(true)">Retry</ElButton>
+          <ElButton size="small" @click="loadDetail(true)">
+            {{ tOperations('retry') }}
+          </ElButton>
         </template>
       </ElAlert>
 
       <template v-if="detail?.data.isBuiltIn">
         <ElAlert
           :closable="false"
-          title="Built-in roles are read-only."
+          :title="tOperations('builtInRolesAreReadOnly')"
           type="info"
         />
         <ElTag class="long-value-tag" type="info">
@@ -290,7 +297,7 @@ onBeforeUnmount(() => {
       </template>
 
       <ElForm v-else-if="detail" label-position="top">
-        <ElFormItem :error="fieldErrors.name" label="Role name">
+        <ElFormItem :error="fieldErrors.name" :label="tOperations('roleName')">
           <ElInput
             v-model="form.name"
             :disabled="saving || !canManage"
@@ -304,7 +311,9 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton :disabled="saving" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="saving" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           v-if="!detail?.data.isBuiltIn"
           :disabled="!detail || !canManage"
@@ -313,7 +322,7 @@ onBeforeUnmount(() => {
           type="primary"
           @click="submit"
         >
-          Save role name
+          {{ tOperations('saveRoleName') }}
         </ElButton>
       </div>
     </template>

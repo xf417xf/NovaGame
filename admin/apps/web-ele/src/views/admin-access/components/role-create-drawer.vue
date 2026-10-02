@@ -19,6 +19,11 @@ import {
   isNovaGameRequestCancelled,
   toNovaGameApiError,
 } from '#/api';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import {
   fieldErrorsFrom,
@@ -51,10 +56,10 @@ const emit = defineEmits<{
   'update:modelValue': [value: boolean];
 }>();
 
-const conflictMessage = ref('');
+const conflictMessage = useOperationsMessage();
 const catalogAvailable = ref(false);
 const fieldErrors = ref<Record<string, string>>({});
-const formError = ref('');
+const formError = useOperationsMessage();
 const idempotencyKey = ref<null | string>(null);
 const retryLocked = ref(false);
 const permissionSelector = ref<null | RolePermissionSelectorHandle>(null);
@@ -105,8 +110,10 @@ function startNewIntent() {
 }
 
 function lockRetryAfterUncertainOutcome() {
-  formError.value =
-    'The create request may have completed. Retry only with the unchanged role and permissions.';
+  formError.value = () =>
+    tOperations(
+      'theCreateRequestMayHaveCompletedRetryOnlyWithTheUnchangedRoleAndPermissions',
+    );
   retryLocked.value = true;
 }
 
@@ -150,7 +157,9 @@ function ensureIdempotencyKey(): boolean {
     return true;
   } catch (error) {
     formError.value =
-      error instanceof Error ? error.message : 'Unable to create this command.';
+      error instanceof Error
+        ? error.message
+        : tOperations('unableToCreateThisCommand');
     return false;
   }
 }
@@ -192,12 +201,14 @@ async function submit() {
       return;
     }
     fieldErrors.value = fieldErrorsFrom(apiError);
-    formError.value = apiError.message;
+    formError.value = () => operationsErrorMessage(apiError);
     if (apiError.code === unknownRolePermissionErrorCode) {
       idempotencyKey.value = null;
       retryLocked.value = false;
-      formError.value =
-        'The registered permission catalog changed. Review the refreshed selection before retrying.';
+      formError.value = () =>
+        tOperations(
+          'theRegisteredPermissionCatalogChangedReviewTheRefreshedSelectionBeforeRetrying',
+        );
       await reloadPermissionCatalog();
       return;
     }
@@ -209,7 +220,7 @@ async function submit() {
     idempotencyKey.value = null;
     retryLocked.value = false;
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       emit('conflict');
     }
   } finally {
@@ -250,7 +261,7 @@ onBeforeUnmount(clearState);
     :show-close="!saving"
     destroy-on-close
     size="min(680px, 100vw)"
-    title="Create custom role"
+    :title="tOperations('createCustomRole')"
     @close="close()"
   >
     <div class="role-create-content" data-testid="role-create-drawer">
@@ -268,7 +279,7 @@ onBeforeUnmount(clearState);
             @click="reloadConflict"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -282,20 +293,22 @@ onBeforeUnmount(clearState);
       >
         <template #default>
           <div v-if="retryLocked" class="retry-actions">
-            <span>Retry only with the unchanged role and permissions.</span>
+            <span>{{
+              tOperations('retryOnlyWithTheUnchangedRoleAndPermissions')
+            }}</span>
             <ElButton
               data-testid="restart-role-create"
               size="small"
               @click="startNewIntent"
             >
-              Start new intent
+              {{ tOperations('startNewIntent') }}
             </ElButton>
           </div>
         </template>
       </ElAlert>
 
       <ElForm label-position="top">
-        <ElFormItem :error="fieldErrors.name" label="Role name">
+        <ElFormItem :error="fieldErrors.name" :label="tOperations('roleName')">
           <ElInput
             v-model="form.name"
             :disabled="formDisabled || !canManage"
@@ -305,7 +318,7 @@ onBeforeUnmount(clearState);
         </ElFormItem>
         <ElFormItem
           :error="fieldErrors.permissionNames"
-          label="Registered permissions"
+          :label="tOperations('registeredPermissions')"
         >
           <RolePermissionSelector
             ref="permissionSelector"
@@ -322,7 +335,9 @@ onBeforeUnmount(clearState);
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton :disabled="saving" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="saving" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :disabled="submitDisabled"
           :loading="saving"
@@ -330,7 +345,7 @@ onBeforeUnmount(clearState);
           type="primary"
           @click="submit"
         >
-          Create role
+          {{ tOperations('createRole') }}
         </ElButton>
       </div>
     </template>

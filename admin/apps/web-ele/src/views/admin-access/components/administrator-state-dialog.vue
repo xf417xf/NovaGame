@@ -14,6 +14,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 interface Props {
   administratorId: null | string;
@@ -31,22 +36,28 @@ const emit = defineEmits<{
 }>();
 
 const detail = ref<Awaited<ReturnType<typeof getAdministrator>> | null>(null);
-const conflictMessage = ref('');
-const errorMessage = ref('');
+const conflictMessage = useOperationsMessage();
+const errorMessage = useOperationsMessage();
 const loading = ref(false);
 const pending = ref(false);
 let loadSequence = 0;
 
 const actionLabel = computed(() =>
-  props.targetActive ? 'Activate administrator' : 'Deactivate administrator',
+  props.targetActive
+    ? tOperations('activateAdministrator')
+    : tOperations('deactivateAdministrator'),
 );
 const confirmationLabel = computed(() =>
-  props.targetActive ? 'Activate account' : 'Deactivate account',
+  props.targetActive
+    ? tOperations('activateAccount')
+    : tOperations('deactivateAccount'),
 );
 const confirmationText = computed(() =>
   props.targetActive
-    ? 'This administrator will be able to sign in again.'
-    : 'This revokes the administrator access state and active refresh sessions.',
+    ? tOperations('thisAdministratorWillBeAbleToSignInAgain')
+    : tOperations(
+        'thisRevokesTheAdministratorAccessStateAndActiveRefreshSessions',
+      ),
 );
 
 function close(force = false) {
@@ -108,7 +119,7 @@ async function loadDetail() {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === loadSequence) {
       loading.value = false;
@@ -152,10 +163,10 @@ async function submit() {
       return;
     }
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     pending.value = false;
   }
@@ -217,7 +228,7 @@ onBeforeUnmount(() => {
             @click="loadDetail"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -243,7 +254,9 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="dialog-footer">
-        <ElButton :disabled="pending" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="pending" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :disabled="!detail || !canManage"
           :loading="pending"

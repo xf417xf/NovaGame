@@ -21,6 +21,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import {
   createAdministratorIdempotencyKey,
@@ -44,8 +49,8 @@ const emit = defineEmits<{
 }>();
 
 const detail = ref<Awaited<ReturnType<typeof getAdministrator>> | null>(null);
-const conflictMessage = ref('');
-const errorMessage = ref('');
+const conflictMessage = useOperationsMessage();
+const errorMessage = useOperationsMessage();
 const fieldErrors = ref<Record<string, string>>({});
 const loading = ref(false);
 const pending = ref(false);
@@ -77,8 +82,10 @@ function closeForForbidden() {
 }
 
 function lockRetryAfterUncertainOutcome() {
-  errorMessage.value =
-    'The password reset may have completed. Retry only with the unchanged password.';
+  errorMessage.value = () =>
+    tOperations(
+      'thePasswordResetMayHaveCompletedRetryOnlyWithTheUnchangedPassword',
+    );
   retryLocked.value = true;
 }
 
@@ -104,7 +111,9 @@ function ensureIdempotencyKey(): boolean {
     return true;
   } catch (error) {
     errorMessage.value =
-      error instanceof Error ? error.message : 'Unable to reset the password.';
+      error instanceof Error
+        ? error.message
+        : tOperations('unableToResetThePassword');
     return false;
   }
 }
@@ -150,7 +159,7 @@ async function loadDetail() {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === loadSequence) {
       loading.value = false;
@@ -229,10 +238,10 @@ async function submit() {
     idempotencyKey.value = null;
     retryLocked.value = false;
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     pending.value = false;
   }
@@ -270,7 +279,7 @@ onBeforeUnmount(() => {
     :model-value="modelValue"
     :show-close="!pending"
     destroy-on-close
-    title="Reset administrator password"
+    :title="tOperations('resetAdministratorPassword')"
     width="min(540px, 94vw)"
     @close="close()"
   >
@@ -281,7 +290,11 @@ onBeforeUnmount(() => {
     >
       <ElAlert
         :closable="false"
-        title="Resetting a password revokes the administrator's active refresh sessions."
+        :title="
+          tOperations(
+            'resettingAPasswordRevokesTheAdministratorSActiveRefreshSessions',
+          )
+        "
         type="warning"
       />
 
@@ -299,7 +312,7 @@ onBeforeUnmount(() => {
             @click="reloadAfterConflict"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -313,20 +326,20 @@ onBeforeUnmount(() => {
       >
         <template #default>
           <div v-if="retryLocked" class="retry-actions">
-            <span>Retry only with the unchanged password.</span>
+            <span>{{ tOperations('retryOnlyWithTheUnchangedPassword') }}</span>
             <ElButton
               data-testid="restart-password-reset"
               size="small"
               @click="startNewIntent"
             >
-              Start new intent
+              {{ tOperations('startNewIntent') }}
             </ElButton>
           </div>
         </template>
       </ElAlert>
 
       <ElForm v-if="detail" label-position="top">
-        <ElFormItem label="Administrator">
+        <ElFormItem :label="tOperations('administrator')">
           <span
             class="password-reset-administrator-subject"
             data-testid="password-reset-administrator-subject"
@@ -334,7 +347,10 @@ onBeforeUnmount(() => {
             {{ detail.data.displayName || detail.data.userName }}
           </span>
         </ElFormItem>
-        <ElFormItem :error="fieldErrors.newPassword" label="New password">
+        <ElFormItem
+          :error="fieldErrors.newPassword"
+          :label="tOperations('newPassword')"
+        >
           <ElInput
             v-model="form.newPassword"
             :disabled="pending || retryLocked || !canResetPassword"
@@ -349,7 +365,9 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="dialog-footer">
-        <ElButton :disabled="pending" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="pending" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :disabled="!detail || !canResetPassword"
           :loading="pending"
@@ -357,7 +375,7 @@ onBeforeUnmount(() => {
           type="danger"
           @click="submit"
         >
-          Reset password
+          {{ tOperations('resetPassword') }}
         </ElButton>
       </div>
     </template>

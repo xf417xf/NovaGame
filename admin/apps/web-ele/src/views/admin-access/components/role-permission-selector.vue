@@ -16,6 +16,12 @@ import {
   isNovaGameRequestCancelled,
   toNovaGameApiError,
 } from '#/api';
+import {
+  operationsErrorMessage,
+  operationsPermissionText,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 interface Props {
   canReadRoles: boolean;
@@ -32,7 +38,7 @@ const emit = defineEmits<{
 
 const catalogAvailable = ref(false);
 const catalog = ref<PermissionGroupDto[]>([]);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const loading = ref(false);
 const search = ref('');
 let catalogController: AbortController | null = null;
@@ -63,16 +69,38 @@ const filteredGroups = computed(() => {
   const needle = search.value.trim().toLocaleLowerCase();
   return catalog.value
     .map((group) => ({
-      displayName: group.displayName ?? group.name ?? 'Unnamed group',
+      displayName: operationsPermissionText(
+        group.name,
+        'title',
+        group.displayName ?? group.name ?? tOperations('unnamedGroup'),
+      ),
       key: group.name ?? group.displayName ?? 'unnamed-group',
-      permissions: (group.permissions ?? []).filter((permission) => {
-        if (!needle) {
-          return true;
-        }
-        return [permission.displayName, permission.description, permission.name]
-          .filter((value): value is string => typeof value === 'string')
-          .some((value) => value.toLocaleLowerCase().includes(needle));
-      }),
+      permissions: (group.permissions ?? [])
+        .map((permission) => ({
+          ...permission,
+          displayName: operationsPermissionText(
+            permission.name,
+            'title',
+            permission.displayName ?? permission.name ?? '',
+          ),
+          description: operationsPermissionText(
+            permission.name,
+            'description',
+            permission.description ?? '',
+          ),
+        }))
+        .filter((permission) => {
+          if (!needle) {
+            return true;
+          }
+          return [
+            permission.displayName,
+            permission.description,
+            permission.name,
+          ]
+            .filter((value): value is string => typeof value === 'string')
+            .some((value) => value.toLocaleLowerCase().includes(needle));
+        }),
     }))
     .filter((group) => group.permissions.length > 0);
 });
@@ -134,7 +162,7 @@ async function loadCatalog() {
       return;
     }
     setCatalogAvailable(false);
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === catalogSequence) {
       loading.value = false;
@@ -173,17 +201,19 @@ defineExpose({ reloadCatalog });
     <ElAlert
       v-if="!canReadRoles"
       :closable="false"
-      title="Permission selection is unavailable without role read access."
+      :title="
+        tOperations('permissionSelectionIsUnavailableWithoutRoleReadAccess')
+      "
       type="info"
     />
 
     <template v-else>
       <ElInput
         v-model="search"
-        aria-label="Search registered permissions"
+        :aria-label="tOperations('searchRegisteredPermissions')"
         :disabled="disabled"
         data-testid="role-permission-search"
-        placeholder="Search registered permissions"
+        :placeholder="tOperations('searchRegisteredPermissions')"
       />
 
       <ElAlert
@@ -194,7 +224,9 @@ defineExpose({ reloadCatalog });
         type="error"
       >
         <template #default>
-          <ElButton size="small" @click="loadCatalog">Retry</ElButton>
+          <ElButton size="small" @click="loadCatalog">
+            {{ tOperations('retry') }}
+          </ElButton>
         </template>
       </ElAlert>
 
@@ -225,7 +257,7 @@ defineExpose({ reloadCatalog });
           </section>
         </ElCheckboxGroup>
         <p v-if="!loading && filteredGroups.length === 0" class="empty-catalog">
-          No registered permissions match the current search.
+          {{ tOperations('noRegisteredPermissionsMatchTheCurrentSearch') }}
         </p>
       </div>
     </template>

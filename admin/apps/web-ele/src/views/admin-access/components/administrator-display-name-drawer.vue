@@ -21,6 +21,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { AdminAccessErrorCode } from '#/features/admin-access/permissions';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 import {
   fieldErrorsFrom,
@@ -48,11 +53,11 @@ const emit = defineEmits<{
 }>();
 
 const detail = ref<Awaited<ReturnType<typeof getAdministrator>> | null>(null);
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const fieldErrors = ref<Record<string, string>>({});
 const loading = ref(false);
 const saving = ref(false);
-const conflictMessage = ref('');
+const conflictMessage = useOperationsMessage();
 const form = reactive({ displayName: '' });
 let loadSequence = 0;
 let hasLocalInput: boolean = false;
@@ -137,7 +142,7 @@ async function loadDetail(preserveInput = false) {
       closeForForbidden();
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     if (sequence === loadSequence) {
       loading.value = false;
@@ -194,10 +199,10 @@ async function submit() {
     }
     fieldErrors.value = fieldErrorsFrom(apiError);
     if (apiError.status === 409) {
-      conflictMessage.value = apiError.message;
+      conflictMessage.value = () => operationsErrorMessage(apiError);
       return;
     }
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
   } finally {
     saving.value = false;
   }
@@ -232,7 +237,7 @@ onBeforeUnmount(() => {
     :show-close="!saving"
     destroy-on-close
     size="min(520px, 100vw)"
-    title="Edit display name"
+    :title="tOperations('editDisplayName')"
     @close="close"
   >
     <div
@@ -254,7 +259,7 @@ onBeforeUnmount(() => {
             @click="loadDetail(true)"
           >
             <RotateCw :size="15" />
-            Reload and review
+            {{ tOperations('reloadAndReview') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -267,15 +272,20 @@ onBeforeUnmount(() => {
         type="error"
       >
         <template #default>
-          <ElButton size="small" @click="loadDetail(true)">Retry</ElButton>
+          <ElButton size="small" @click="loadDetail(true)">
+            {{ tOperations('retry') }}
+          </ElButton>
         </template>
       </ElAlert>
 
       <ElForm v-if="detail" label-position="top">
-        <ElFormItem label="User name">
+        <ElFormItem :label="tOperations('userName')">
           <ElInput :model-value="detail.data.userName ?? ''" disabled />
         </ElFormItem>
-        <ElFormItem :error="fieldErrors.displayName" label="Display name">
+        <ElFormItem
+          :error="fieldErrors.displayName"
+          :label="tOperations('displayName')"
+        >
           <ElInput
             v-model="form.displayName"
             :disabled="saving || !canManage"
@@ -289,7 +299,9 @@ onBeforeUnmount(() => {
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton :disabled="saving" @click="close()">Cancel</ElButton>
+        <ElButton :disabled="saving" @click="close()">
+          {{ tOperations('cancel') }}
+        </ElButton>
         <ElButton
           :disabled="!detail || !canManage"
           :loading="saving"
@@ -297,7 +309,7 @@ onBeforeUnmount(() => {
           type="primary"
           @click="submit"
         >
-          Save display name
+          {{ tOperations('saveDisplayName') }}
         </ElButton>
       </div>
     </template>

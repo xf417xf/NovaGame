@@ -32,6 +32,13 @@ import {
   validateGameConfigDraft,
 } from '#/api';
 import { formatJson, validateJsonSyntax } from '#/features/game-config/json';
+import {
+  operationsCodeMessage,
+  operationsErrorMessage,
+  operationsSyntaxMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 interface Props {
   canManage: boolean;
@@ -52,7 +59,7 @@ const loading = ref(false);
 const saving = ref(false);
 const validating = ref(false);
 const draft = ref<GameConfigDraft | null>(null);
-const conflictMessage = ref('');
+const conflictMessage = useOperationsMessage();
 const auditReference = ref('');
 const form = reactive({
   baseVersionId: null as null | string,
@@ -73,7 +80,9 @@ const isValidatedRevision = computed(
     draft.value.latestValidation.revision === draft.value.revision,
 );
 const title = computed(() =>
-  isCreate.value ? 'Create configuration draft' : 'Configuration draft',
+  isCreate.value
+    ? tOperations('createConfigurationDraft')
+    : tOperations('configurationDraft'),
 );
 
 function resetForm() {
@@ -105,7 +114,7 @@ async function loadDraft(draftId: null | string = props.draftId) {
   try {
     applyDraft(await getGameConfigDraft(draftId));
   } catch (error) {
-    ElMessage.error(toNovaGameApiError(error).message);
+    ElMessage.error(operationsErrorMessage(error));
   } finally {
     loading.value = false;
   }
@@ -117,11 +126,11 @@ async function reloadConflictedDraft() {
 
 function validateForm() {
   if (!form.name.trim()) {
-    ElMessage.warning('Draft name is required.');
+    ElMessage.warning(tOperations('draftNameIsRequired'));
     return false;
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._+-]{0,31}$/.test(form.schemaVersion)) {
-    ElMessage.warning('Schema version is not valid.');
+    ElMessage.warning(tOperations('schemaVersionIsNotValid'));
     return false;
   }
   return true;
@@ -130,10 +139,10 @@ function validateForm() {
 function handleFailure(error: unknown) {
   const apiError = toNovaGameApiError(error);
   if (apiError.status === 409) {
-    conflictMessage.value = apiError.message;
+    conflictMessage.value = () => operationsErrorMessage(apiError);
     return;
   }
-  ElMessage.error(apiError.message);
+  ElMessage.error(operationsErrorMessage(apiError));
 }
 
 async function saveDraft(): Promise<GameConfigDraft | null> {
@@ -162,7 +171,7 @@ async function saveDraft(): Promise<GameConfigDraft | null> {
     applyDraft(result.data);
     auditReference.value = result.correlationId;
     emit('saved', result.data);
-    ElMessage.success('Draft saved.');
+    ElMessage.success(tOperations('draftSaved'));
     return result.data;
   } catch (error) {
     handleFailure(error);
@@ -189,9 +198,9 @@ async function handleValidate() {
     applyDraft(refreshed);
     emit('saved', refreshed);
     if (result.data.isValid) {
-      ElMessage.success('Server validation passed.');
+      ElMessage.success(tOperations('serverValidationPassed'));
     } else {
-      ElMessage.warning('Server validation found issues.');
+      ElMessage.warning(tOperations('serverValidationFoundIssues'));
     }
   } catch (error) {
     handleFailure(error);
@@ -203,9 +212,8 @@ async function handleValidate() {
 function handleFormat() {
   try {
     form.content = formatJson(form.content);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid JSON.';
-    ElMessage.warning(message);
+  } catch {
+    ElMessage.warning(tOperations('invalidJson'));
   }
 }
 
@@ -245,7 +253,7 @@ watch(
         v-if="conflictMessage"
         :closable="false"
         show-icon
-        title="The draft changed on the server"
+        :title="tOperations('theDraftChangedOnTheServer')"
         type="warning"
       >
         <template #default>
@@ -257,7 +265,7 @@ watch(
               @click="reloadConflictedDraft"
             >
               <RotateCw :size="15" />
-              Reload latest
+              {{ tOperations('reloadLatest') }}
             </ElButton>
           </div>
         </template>
@@ -265,7 +273,7 @@ watch(
 
       <ElForm label-position="top">
         <div class="form-grid">
-          <ElFormItem label="Draft name">
+          <ElFormItem :label="tOperations('draftName')">
             <ElInput
               v-model="form.name"
               :disabled="readOnly"
@@ -273,7 +281,7 @@ watch(
               maxlength="128"
             />
           </ElFormItem>
-          <ElFormItem label="Schema version">
+          <ElFormItem :label="tOperations('schemaVersion')">
             <ElInput
               v-model="form.schemaVersion"
               :disabled="readOnly"
@@ -281,12 +289,12 @@ watch(
               maxlength="32"
             />
           </ElFormItem>
-          <ElFormItem v-if="isCreate" label="Base version">
+          <ElFormItem v-if="isCreate" :label="tOperations('baseVersion')">
             <ElSelect
               v-model="form.baseVersionId"
               clearable
               data-testid="base-version"
-              placeholder="No base version"
+              :placeholder="tOperations('noBaseVersion')"
             >
               <ElOption
                 v-for="version in versionOptions"
@@ -298,14 +306,14 @@ watch(
           </ElFormItem>
         </div>
 
-        <ElFormItem label="JSON content">
+        <ElFormItem :label="tOperations('jsonContent')">
           <template #label>
             <div class="editor-label-row">
-              <span>JSON content</span>
-              <ElTooltip content="Format JSON" placement="top">
+              <span>{{ tOperations('jsonContent') }}</span>
+              <ElTooltip :content="tOperations('formatJson')" placement="top">
                 <ElButton
                   :disabled="readOnly || !syntax.valid"
-                  aria-label="Format JSON"
+                  :aria-label="tOperations('formatJson')"
                   circle
                   size="small"
                   @click="handleFormat"
@@ -330,28 +338,37 @@ watch(
       <ElAlert
         v-if="!syntax.valid"
         :closable="false"
-        :title="`JSON syntax: ${syntax.message}`"
+        :title="
+          tOperations('jsonSyntaxParameter', {
+            value0: operationsSyntaxMessage(syntax.message),
+          })
+        "
         show-icon
         type="warning"
       >
         <template v-if="syntax.line" #default>
-          Line {{ syntax.line }}, column {{ syntax.column }}
+          {{ tOperations('line') }} {{ syntax.line
+          }}{{ tOperations('columnPrefix') }} {{ syntax.column }}
         </template>
       </ElAlert>
 
       <section v-if="draft" class="validation-section">
         <div class="section-heading">
           <div>
-            <h3>Validation</h3>
-            <p>Revision {{ draft.revision }}</p>
+            <h3>{{ tOperations('validation') }}</h3>
+            <p>{{ tOperations('revision') }} {{ draft.revision }}</p>
           </div>
           <ElTag
             v-if="draft.latestValidation"
             :type="draft.latestValidation.isValid ? 'success' : 'danger'"
           >
-            {{ draft.latestValidation.isValid ? 'Passed' : 'Issues found' }}
+            {{
+              draft.latestValidation.isValid
+                ? tOperations('passed')
+                : tOperations('issuesFound')
+            }}
           </ElTag>
-          <ElTag v-else type="info">Not validated</ElTag>
+          <ElTag v-else type="info">{{ tOperations('notValidated') }}</ElTag>
         </div>
 
         <ElTable
@@ -361,10 +378,22 @@ watch(
           max-height="260"
           stripe
         >
-          <ElTableColumn label="Location" min-width="160" prop="location" />
-          <ElTableColumn label="Code" min-width="180" prop="code" />
-          <ElTableColumn label="Message" min-width="300" prop="message" />
-          <ElTableColumn label="Position" width="110">
+          <ElTableColumn
+            :label="tOperations('location')"
+            min-width="160"
+            prop="location"
+          />
+          <ElTableColumn
+            :label="tOperations('code')"
+            min-width="180"
+            prop="code"
+          />
+          <ElTableColumn :label="tOperations('message')" min-width="300">
+            <template #default="scope">
+              {{ operationsCodeMessage(scope.row.code, scope.row.message) }}
+            </template>
+          </ElTableColumn>
+          <ElTableColumn :label="tOperations('position')" width="110">
             <template #default="scope">
               <span v-if="scope.row.line !== null">
                 {{ scope.row.line + 1 }}:{{ (scope.row.column ?? 0) + 1 }}
@@ -376,7 +405,7 @@ watch(
       </section>
 
       <ElDescriptions v-if="auditReference" :column="1" size="small">
-        <ElDescriptionsItem label="Audit reference">
+        <ElDescriptionsItem :label="tOperations('auditReference')">
           <code>{{ auditReference }}</code>
         </ElDescriptionsItem>
       </ElDescriptions>
@@ -384,7 +413,7 @@ watch(
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton @click="close">Close</ElButton>
+        <ElButton @click="close">{{ tOperations('close') }}</ElButton>
         <template v-if="!readOnly">
           <ElButton
             :loading="saving"
@@ -392,7 +421,7 @@ watch(
             @click="saveDraft"
           >
             <Check :size="16" />
-            Save
+            {{ tOperations('save') }}
           </ElButton>
           <ElButton
             :loading="validating"
@@ -401,7 +430,7 @@ watch(
             @click="handleValidate"
           >
             <CircleCheckBig :size="16" />
-            Save and validate
+            {{ tOperations('saveAndValidate') }}
           </ElButton>
         </template>
         <ElButton
@@ -411,7 +440,7 @@ watch(
           @click="emit('review', draft)"
         >
           <Eye :size="16" />
-          Review
+          {{ tOperations('review') }}
         </ElButton>
       </div>
     </template>

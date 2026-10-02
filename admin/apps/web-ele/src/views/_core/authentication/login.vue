@@ -6,6 +6,7 @@ import { computed } from 'vue';
 import { AuthenticationLogin, z } from '@vben/common-ui';
 import { $t } from '@vben/locales';
 
+import { tOperations } from '#/locales/operations';
 import { useAuthStore } from '#/store';
 
 defineOptions({ name: 'Login' });
@@ -46,8 +47,8 @@ const formSchema = computed((): VbenFormSchema[] => [
     :show-qrcode-login="false"
     :show-register="false"
     :show-third-party-login="false"
-    sub-title="Administrator sign-in"
-    title="NovaGame Operations"
+    :sub-title="tOperations('administratorSignIn')"
+    :title="tOperations('novagameOperations')"
     @submit="authStore.authLogin"
   />
 </template>

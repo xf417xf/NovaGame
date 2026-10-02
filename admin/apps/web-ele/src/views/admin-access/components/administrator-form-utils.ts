@@ -1,6 +1,7 @@
 import type { NovaGameApiError } from '#/api';
 
 import { toNovaGameApiError } from '#/api';
+import { operationsErrorMessage, tOperations } from '#/locales/operations';
 
 export const administratorPasswordMaximumLength = 256;
 export const administratorPasswordMinimumLength = 12;
@@ -33,7 +34,9 @@ export function createAdministratorIdempotencyKey(): string {
   const key = globalThis.crypto?.randomUUID?.();
   if (!key || !canonicalGuidPattern.test(key)) {
     throw new Error(
-      'This browser cannot create the required command identifier. Retry in a supported browser.',
+      tOperations(
+        'thisBrowserCannotCreateTheRequiredCommandIdentifierRetryInASupportedBrowser',
+      ),
     );
   }
   return key;
@@ -44,7 +47,7 @@ export function fieldErrorsFrom(error: unknown): AdministratorFieldErrors {
   return Object.fromEntries(
     Object.entries(apiError.details ?? {}).map(([field, messages]) => [
       field.charAt(0).toLowerCase() + field.slice(1),
-      messages[0] ?? apiError.message,
+      messages[0] ?? operationsErrorMessage(apiError),
     ]),
   );
 }
@@ -64,7 +67,10 @@ export function validateAdministratorDisplayName(value: string): null | string {
     candidate.length > administratorDisplayNameMaximumLength ||
     hasControlCharacter(candidate)
   ) {
-    return `Display name must contain 1 to ${administratorDisplayNameMaximumLength} non-control characters.`;
+    return tOperations(
+      'displayNameMustContain1ToParameterNonControlCharacters',
+      { value0: administratorDisplayNameMaximumLength },
+    );
   }
   return null;
 }
@@ -74,7 +80,10 @@ export function validateAdministratorPassword(value: string): null | string {
     value.length < administratorPasswordMinimumLength ||
     value.length > administratorPasswordMaximumLength
   ) {
-    return `Password must contain ${administratorPasswordMinimumLength} to ${administratorPasswordMaximumLength} characters.`;
+    return tOperations('passwordMustContainParameterToParameterCharacters', {
+      value0: administratorPasswordMinimumLength,
+      value1: administratorPasswordMaximumLength,
+    });
   }
   return null;
 }
@@ -87,7 +96,9 @@ export function validateAdministratorRoleIds(
     roleIds.some((roleId) => !roleId) ||
     new Set(roleIds).size !== roleIds.length
   ) {
-    return `Select up to ${administratorRoleLimit} unique roles.`;
+    return tOperations('selectUpToParameterUniqueRoles', {
+      value0: administratorRoleLimit,
+    });
   }
   return null;
 }
@@ -101,7 +112,13 @@ export function validateAdministratorUserName(value: string): null | string {
     /\s/.test(candidate) ||
     hasControlCharacter(candidate)
   ) {
-    return `User name must contain ${administratorUserNameMinimumLength} to ${administratorUserNameMaximumLength} non-control characters without whitespace.`;
+    return tOperations(
+      'userNameMustContainParameterToParameterNonControlCharactersWithoutWhitespace',
+      {
+        value0: administratorUserNameMinimumLength,
+        value1: administratorUserNameMaximumLength,
+      },
+    );
   }
   return null;
 }

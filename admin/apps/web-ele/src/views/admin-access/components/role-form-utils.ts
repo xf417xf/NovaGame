@@ -1,3 +1,5 @@
+import { tOperations } from '#/locales/operations';
+
 import { createAdministratorIdempotencyKey } from './administrator-form-utils';
 
 export const roleNameMaximumLength = 64;
@@ -32,7 +34,9 @@ export function validateRoleName(value: string): null | string {
     candidate.length > roleNameMaximumLength ||
     hasControlCharacter(candidate)
   ) {
-    return `Role name must contain 1 to ${roleNameMaximumLength} non-control characters.`;
+    return tOperations('roleNameMustContain1ToParameterNonControlCharacters', {
+      value0: roleNameMaximumLength,
+    });
   }
   return null;
 }
@@ -50,7 +54,9 @@ export function validateRolePermissionNames(
     ) ||
     new Set(permissionNames).size !== permissionNames.length
   ) {
-    return `Select up to ${rolePermissionLimit} unique registered permissions.`;
+    return tOperations('selectUpToParameterUniqueRegisteredPermissions', {
+      value0: rolePermissionLimit,
+    });
   }
   return null;
 }

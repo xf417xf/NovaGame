@@ -25,6 +25,11 @@ import {
   toNovaGameApiError,
 } from '#/api';
 import { buildJsonReview, isLineChanged } from '#/features/game-config/json';
+import {
+  operationsErrorMessage,
+  tOperations,
+  useOperationsMessage,
+} from '#/locales/operations';
 
 interface Props {
   canPublish: boolean;
@@ -43,10 +48,19 @@ const emit = defineEmits<{
 const loading = ref(false);
 const isMobile = useMediaQuery('(max-width: 760px)');
 const publishing = ref(false);
-const baselineLabel = ref('No baseline');
+const baseline = ref<null | { environment?: string; id: string }>(null);
+const baselineLabel = computed(() => {
+  if (!baseline.value) return tOperations('noBaseline');
+  return baseline.value.environment
+    ? tOperations('activeParameterParameter', {
+        value0: baseline.value.environment,
+        value1: baseline.value.id,
+      })
+    : tOperations('baseParameter', { value0: baseline.value.id });
+});
 const baselineContent = ref<null | string>(null);
 const releaseNotes = ref('');
-const errorMessage = ref('');
+const errorMessage = useOperationsMessage();
 const auditReference = ref('');
 const review = computed(() =>
   buildJsonReview(baselineContent.value, props.draft?.content ?? ''),
@@ -60,12 +74,12 @@ async function loadBaseline() {
   loading.value = true;
   errorMessage.value = '';
   baselineContent.value = null;
-  baselineLabel.value = 'No baseline';
+  baseline.value = null;
   try {
     if (props.draft.baseVersionId) {
       const version = await getGameConfigVersion(props.draft.baseVersionId);
       baselineContent.value = version.content;
-      baselineLabel.value = `Base ${version.id.slice(0, 8)}`;
+      baseline.value = { id: version.id.slice(0, 8) };
       return;
     }
 
@@ -76,14 +90,17 @@ async function loadBaseline() {
       );
       const version = await getGameConfigVersion(environment.activeVersionId);
       baselineContent.value = version.content;
-      baselineLabel.value = `Active ${props.environment} · ${version.id.slice(0, 8)}`;
+      baseline.value = {
+        environment: props.environment,
+        id: version.id.slice(0, 8),
+      };
     } catch (error) {
       if (toNovaGameApiError(error).status !== 404) {
         throw error;
       }
     }
   } catch (error) {
-    errorMessage.value = toNovaGameApiError(error).message;
+    errorMessage.value = () => operationsErrorMessage(error);
   } finally {
     loading.value = false;
   }
@@ -94,7 +111,7 @@ async function handlePublish() {
     return;
   }
   if (!releaseNotes.value.trim()) {
-    ElMessage.warning('Release notes are required.');
+    ElMessage.warning(tOperations('releaseNotesAreRequired'));
     return;
   }
 
@@ -107,11 +124,11 @@ async function handlePublish() {
     });
     auditReference.value = result.correlationId;
     emit('published', result.data);
-    ElMessage.success('Configuration version published.');
+    ElMessage.success(tOperations('configurationVersionPublished'));
     emit('update:modelValue', false);
   } catch (error) {
     const apiError = toNovaGameApiError(error);
-    errorMessage.value = apiError.message;
+    errorMessage.value = () => operationsErrorMessage(apiError);
     if (apiError.status === 409) {
       emit('conflict', props.draft.id);
     }
@@ -142,7 +159,7 @@ watch(
     :model-value="modelValue"
     destroy-on-close
     size="min(1100px, 98vw)"
-    title="Review and publish"
+    :title="tOperations('reviewAndPublish')"
     @close="close"
   >
     <div v-loading="loading" class="review-content" data-testid="review-drawer">
@@ -156,7 +173,7 @@ watch(
         <template #default>
           <ElButton size="small" @click="loadBaseline">
             <RotateCw :size="15" />
-            Reload
+            {{ tOperations('reload') }}
           </ElButton>
         </template>
       </ElAlert>
@@ -167,43 +184,45 @@ watch(
         border
         size="small"
       >
-        <ElDescriptionsItem label="Draft">{{ draft.name }}</ElDescriptionsItem>
-        <ElDescriptionsItem label="Revision">
+        <ElDescriptionsItem :label="tOperations('draft')">
+          {{ draft.name }}
+        </ElDescriptionsItem>
+        <ElDescriptionsItem :label="tOperations('revision')">
           {{ draft.revision }}
         </ElDescriptionsItem>
-        <ElDescriptionsItem label="Schema">
+        <ElDescriptionsItem :label="tOperations('schema')">
           {{ draft.schemaVersion }}
         </ElDescriptionsItem>
-        <ElDescriptionsItem label="Configuration set">
+        <ElDescriptionsItem :label="tOperations('configurationSet')">
           {{ draft.configurationSet }}
         </ElDescriptionsItem>
-        <ElDescriptionsItem label="Baseline">
+        <ElDescriptionsItem :label="tOperations('baseline')">
           {{ baselineLabel }}
         </ElDescriptionsItem>
-        <ElDescriptionsItem label="Validation">
-          <ElTag type="success">Passed</ElTag>
+        <ElDescriptionsItem :label="tOperations('validation')">
+          <ElTag type="success">{{ tOperations('passed') }}</ElTag>
         </ElDescriptionsItem>
       </ElDescriptions>
 
       <section class="diff-section">
         <div class="section-heading">
           <div>
-            <h3>Content comparison</h3>
+            <h3>{{ tOperations('contentComparison') }}</h3>
             <p>{{ baselineLabel }}</p>
           </div>
           <div class="diff-legend">
-            <span class="legend-mark before"></span>Removed
-            <span class="legend-mark after"></span>Added
+            <span class="legend-mark before"></span>{{ tOperations('removed') }}
+            <span class="legend-mark after"></span>{{ tOperations('added') }}
           </div>
         </div>
 
         <div class="diff-grid">
           <div class="diff-pane">
-            <div class="pane-title">Before</div>
+            <div class="pane-title">{{ tOperations('before') }}</div>
             <ElEmpty
               v-if="review.beforeLines.length === 0"
               :image-size="50"
-              description="No baseline version"
+              :description="tOperations('noBaselineVersion')"
             />
             <ol v-else>
               <li
@@ -216,7 +235,7 @@ watch(
             </ol>
           </div>
           <div class="diff-pane after-pane">
-            <div class="pane-title">Candidate</div>
+            <div class="pane-title">{{ tOperations('candidate') }}</div>
             <ol>
               <li
                 v-for="(line, index) in review.afterLines"
@@ -231,7 +250,7 @@ watch(
       </section>
 
       <section class="release-section">
-        <label for="release-notes">Release notes</label>
+        <label for="release-notes">{{ tOperations('releaseNotes') }}</label>
         <ElInput
           id="release-notes"
           v-model="releaseNotes"
@@ -245,7 +264,7 @@ watch(
       </section>
 
       <ElDescriptions v-if="auditReference" :column="1" size="small">
-        <ElDescriptionsItem label="Audit reference">
+        <ElDescriptionsItem :label="tOperations('auditReference')">
           <code>{{ auditReference }}</code>
         </ElDescriptionsItem>
       </ElDescriptions>
@@ -253,7 +272,7 @@ watch(
 
     <template #footer>
       <div class="drawer-footer">
-        <ElButton @click="close">Close</ElButton>
+        <ElButton @click="close">{{ tOperations('close') }}</ElButton>
         <ElButton
           v-if="canPublish"
           :loading="publishing"
@@ -262,7 +281,7 @@ watch(
           @click="handlePublish"
         >
           <Check :size="16" />
-          Publish immutable version
+          {{ tOperations('publishImmutableVersion') }}
         </ElButton>
       </div>
     </template>
